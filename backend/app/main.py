@@ -1,6 +1,8 @@
+import os
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
 from sqlalchemy import text
+from starlette.middleware.sessions import SessionMiddleware
 from app.database import rds_ok, get_engine
 from app.auth import (
     oauth, is_allowed_email, is_admin_email,
@@ -8,6 +10,11 @@ from app.auth import (
 )
 
 app = FastAPI(title="Delivery Dashboard API", version="0.2.0")
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.environ.get("APP_SECRET", "dev-secret-change-me"),
+    max_age=60 * 60 * 24 * 7,  # 7일
+)
 
 
 @app.get("/health")
@@ -60,7 +67,9 @@ async def list_allowlist(request: Request):
         raise HTTPException(status_code=403, detail="관리자만 접근 가능합니다")
     engine = get_engine()
     with engine.connect() as conn:
-        rows = conn.execute(text("SELECT id, kind, value FROM auth_allowlist ORDER BY id")).fetchall()
+        rows = conn.execute(
+            text("SELECT id, kind, value FROM auth_allowlist ORDER BY id")
+        ).fetchall()
     return [{"id": r[0], "kind": r[1], "value": r[2]} for r in rows]
 
 
@@ -76,8 +85,13 @@ async def add_allowlist(request: Request):
         raise HTTPException(status_code=400, detail="kind(email/domain)와 value 필요")
     engine = get_engine()
     with engine.connect() as conn:
-        conn.execute(text("INSERT INTO auth_allowlist (kind, value, added_by) VALUES (:k, :v, :a) ON CONFLICT DO NOTHING"),
-                     {"k": kind, "v": value, "a": email})
+        conn.execute(
+            text(
+                "INSERT INTO auth_allowlist (kind, value, added_by) "
+                "VALUES (:k, :v, :a) ON CONFLICT DO NOTHING"
+            ),
+            {"k": kind, "v": value, "a": email},
+        )
         conn.commit()
     return {"ok": True}
 
@@ -93,6 +107,8 @@ async def delete_allowlist(item_id: int, request: Request):
         conn.commit()
     return {"ok": True}
 
+
+# --- 관리자용 접근 관리 페이지 (간단 HTML) ---
 HTML_ADMIN = """<!DOCTYPE html><html lang="ko"><body style="font-family:sans-serif;max-width:640px;margin:40px auto">
 <h2>접근 관리 (관리자)</h2>
 <p id="me"></p>
@@ -107,7 +123,7 @@ async function load(){ const r=await fetch('/api/allowlist'); const rows=await r
   document.getElementById('me').textContent='로그인: ' + (await (await fetch('/api/me')).json()).email;
   const ul=document.getElementById('list'); ul.innerHTML='';
   for(const it of rows){ const li=document.createElement('li');
-    li.textContent=`${it.kind}: ${it.value}  `;
+    li.textContent=it.kind+': '+it.value+'  ';
     const b=document.createElement('button'); b.textContent='삭제';
     b.onclick=async()=>{ await fetch('/api/allowlist/'+it.id,{method:'DELETE'}); load(); };
     li.appendChild(b); ul.appendChild(li); } }
@@ -116,6 +132,7 @@ async function addItem(){ const kind=document.getElementById('kind').value; cons
   document.getElementById('value').value=''; load(); }
 load();
 </script></body></html>"""
+
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page(request: Request):
