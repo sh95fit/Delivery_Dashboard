@@ -3,5 +3,6 @@ uvicorn[standard]
 pymysql
 cryptography
 sshtunnel
+paramiko==3.4.0
 sqlalchemy
 python-dotenv
