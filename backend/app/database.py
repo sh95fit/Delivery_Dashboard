@@ -4,6 +4,7 @@ import tempfile
 import logging
 from sshtunnel import SSHTunnelForwarder
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 
 logger = logging.getLogger("rds")
 
@@ -64,9 +65,13 @@ def get_dash_engine():
     global _dash_engine
     if _dash_engine is not None:
         return _dash_engine
-    url = (
-        f"postgresql+psycopg2://dash_user:{os.environ['POSTGRES_PASSWORD']}"
-        f"@db:5432/delivery_dashboard"
+    url = URL.create(
+        "postgresql+psycopg2",
+        username="dash_user",
+        password=os.environ.get("POSTGRES_PASSWORD", ""),
+        host="db",
+        port=5432,
+        database="delivery_dashboard",
     )
     _dash_engine = create_engine(url, pool_size=3, max_overflow=5, pool_pre_ping=True)
     return _dash_engine
