@@ -56,3 +56,17 @@ def rds_ok() -> bool:
     except Exception as e:  # noqa
         logger.exception("RDS check failed")
         return False
+
+
+_dash_engine = None
+
+def get_dash_engine():
+    global _dash_engine
+    if _dash_engine is not None:
+        return _dash_engine
+    url = (
+        f"postgresql+psycopg2://dash_user:{os.environ['POSTGRES_PASSWORD']}"
+        f"@127.0.0.1:5433/delivery_dashboard"
+    )
+    _dash_engine = create_engine(url, pool_size=3, max_overflow=5, pool_pre_ping=True)
+    return _dash_engine

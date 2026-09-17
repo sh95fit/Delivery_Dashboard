@@ -6,6 +6,7 @@ from starlette.responses import RedirectResponse, Response
 from sqlalchemy import text
 from app.database import get_engine
 from app.security import make_session_token, serialize_session, deserialize_session
+from app.database import get_dash_engine
 
 # --- 구글 OAuth 클라이언트 ---
 starlette_config = StarletteConfig(environ={
@@ -21,7 +22,7 @@ oauth.register(
 
 
 def _ensure_allowlist_table():
-    engine = get_engine()
+    engine = get_dash_engine()
     with engine.connect() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS auth_allowlist (
@@ -42,7 +43,7 @@ def is_allowed_email(email: str) -> bool:
     email = email.strip().lower()
     domain = email.split("@")[-1]
     _ensure_allowlist_table()
-    engine = get_engine()
+    engine = get_dash_engine()
     with engine.connect() as conn:
         rows = conn.execute(
             text("SELECT kind, value FROM auth_allowlist")

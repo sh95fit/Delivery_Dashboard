@@ -10,3 +10,4 @@ authlib
 httpx
 redis
 itsdangerous
+psycopg2-binary
