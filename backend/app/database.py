@@ -66,7 +66,7 @@ def get_dash_engine():
         return _dash_engine
     url = (
         f"postgresql+psycopg2://dash_user:{os.environ['POSTGRES_PASSWORD']}"
-        f"@127.0.0.1:5433/delivery_dashboard"
+        f"@db:5432/delivery_dashboard"
     )
     _dash_engine = create_engine(url, pool_size=3, max_overflow=5, pool_pre_ping=True)
     return _dash_engine
