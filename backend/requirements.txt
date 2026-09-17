@@ -7,5 +7,6 @@ paramiko==3.4.0
 sqlalchemy
 python-dotenv
 authlib
+httpx
 redis
 itsdangerous
