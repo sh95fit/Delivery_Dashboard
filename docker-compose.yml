@@ -1,0 +1,33 @@
+services:
+  backend:
+    build: ./backend
+    container_name: dash_backend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8100:8000"     # 외부 노출 X, 서버 내부에서만 (1-B에서 Nginx가 연결)
+    environment:
+      - ENV=prod
+
+  db:
+    image: postgres:16-alpine
+    container_name: dash_db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-delivery_dashboard}
+      - POSTGRES_USER=${POSTGRES_USER:-dash_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-dash_pass_change_me}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - dash_db_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: dash_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6380:6379"
+
+volumes:
+  dash_db_data:
