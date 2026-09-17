@@ -18,5 +18,8 @@ jobs:
           script: |
             cd /opt/lunchlab/Delivery_Dashboard
             git pull origin main
+            docker compose down --remove-orphans || true
             docker compose up -d --build
-            docker image prune -f
+            docker image prune -f || true
+
+
