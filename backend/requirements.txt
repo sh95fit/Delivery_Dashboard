@@ -1,2 +1,7 @@
 fastapi
 uvicorn[standard]
+pymysql
+cryptography
+sshtunnel
+sqlalchemy
+python-dotenv
