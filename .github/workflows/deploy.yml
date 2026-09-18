@@ -31,6 +31,7 @@ jobs:
             sudo chown -R deploy:deploy /opt/lunchlab 2>/dev/null || true
 
             echo "== 1) 최신 코드 반영 =="
+            git checkout -- . 2>/dev/null || true
             git pull origin main
 
             echo "== 2) 이미지 빌드 + 컨테이너 교체 (볼륨 유지) =="
