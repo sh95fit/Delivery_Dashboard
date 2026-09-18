@@ -21,3 +21,5 @@ dist/
 *.log
 *.dump
 .backup/
+rclone.conf
+**/.config/rclone/
