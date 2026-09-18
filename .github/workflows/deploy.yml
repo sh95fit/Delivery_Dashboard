@@ -1,25 +1,51 @@
 name: Deploy
+
 on:
   push:
     branches: [main]
+  workflow_dispatch:    # 수동 실행 버튼 (GitHub Actions 탭)
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false   # 배포 중복 실행 방지 (대기)
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.0
+      - name: Deploy via SSH (서버 자동 갱신 + 컨테이너 교체)
+        uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
+            set -e
             cd /opt/lunchlab/Delivery_Dashboard
+
+            echo "== 1) 최신 코드 반영 =="
             git pull origin main
-            docker compose down --remove-orphans || true
-            docker compose up -d --build
+
+            echo "== 2) 컨테이너 상태 점검 (이미지 재빌드) =="
+            docker compose build
+            docker compose up -d --remove-orphans
+
+            echo "== 3) DB 볼륨 확인 (절대 삭제 금지) =="
+            docker volume ls | grep dash_db_data || echo "WARN: dash_db_data 볼륨 없음"
+
+            echo "== 4) 헬스체크 (최대 5회, 3초 간격) =="
+            for i in $(seq 1 5); do
+              if curl -sf http://127.0.0.1:8100/health >/dev/null; then
+                echo "health OK"; break
+              fi
+              echo "waiting... ($i)"; sleep 3
+            done
+
+            echo "== 5) 오래된 이미지 정리 (사용 중 아닌 것만) =="
             docker image prune -f || true
+
 
 
