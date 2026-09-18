@@ -3,11 +3,11 @@ name: Deploy
 on:
   push:
     branches: [main]
-  workflow_dispatch:    # 수동 실행 버튼 (GitHub Actions 탭)
+  workflow_dispatch:
 
 concurrency:
   group: deploy
-  cancel-in-progress: false   # 배포 중복 실행 방지 (대기)
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy via SSH (서버 자동 갱신 + 컨테이너 교체)
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -26,17 +26,21 @@ jobs:
             set -e
             cd /opt/lunchlab/Delivery_Dashboard
 
+            echo "== 0) 권한 보정 (deploy가 읽을 수 있도록) =="
+            sudo chown deploy:deploy /opt/lunchlab/Delivery_Dashboard/.env 2>/dev/null || true
+            sudo chown -R deploy:deploy /opt/lunchlab 2>/dev/null || true
+
             echo "== 1) 최신 코드 반영 =="
             git pull origin main
 
-            echo "== 2) 컨테이너 상태 점검 (이미지 재빌드) =="
+            echo "== 2) 이미지 빌드 + 컨테이너 교체 (볼륨 유지) =="
             docker compose build
             docker compose up -d --remove-orphans
 
-            echo "== 3) DB 볼륨 확인 (절대 삭제 금지) =="
+            echo "== 3) DB 볼륨 확인 =="
             docker volume ls | grep dash_db_data || echo "WARN: dash_db_data 볼륨 없음"
 
-            echo "== 4) 헬스체크 (최대 5회, 3초 간격) =="
+            echo "== 4) 헬스체크 =="
             for i in $(seq 1 5); do
               if curl -sf http://127.0.0.1:8100/health >/dev/null; then
                 echo "health OK"; break
@@ -44,8 +48,5 @@ jobs:
               echo "waiting... ($i)"; sleep 3
             done
 
-            echo "== 5) 오래된 이미지 정리 (사용 중 아닌 것만) =="
+            echo "== 5) 오래된 이미지 정리 =="
             docker image prune -f || true
-
-
-
