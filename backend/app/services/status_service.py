@@ -1,7 +1,7 @@
 from datetime import date as date_type
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import bindparam, text
+from sqlalchemy import text
 
 from app.database import get_engine
 
@@ -22,17 +22,20 @@ def get_cutoff_at(target: date_type) -> datetime:
 
 
 def get_status(target: date_type) -> dict:
-    """상태 판별 (delivery 집계 1회 + 시간 비교). SELECT만."""
+    """상태 판별 — 일자 우선 (과거는 미완료 있어도 RESULT + incomplete 표시)."""
     now = datetime.now(KST)
     cutoff_at = get_cutoff_at(target)
+    today = now.date()
 
     engine = get_engine()
     with engine.connect() as conn:
         row = conn.execute(text(
             """
-            SELECT COUNT(DISTINCT d.id)                                                    AS total,
-                   COUNT(DISTINCT CASE WHEN d.delivered_at IS NOT NULL THEN d.id END)      AS completed,
-                   COUNT(DISTINCT CASE WHEN d.manager_id IS NULL THEN d.id END)            AS unassigned
+            SELECT COUNT(DISTINCT d.id)                                                       AS total,
+                   COUNT(DISTINCT CASE WHEN d.delivered_at IS NOT NULL THEN d.id END)         AS completed,
+                   COUNT(DISTINCT CASE WHEN d.manager_id IS NULL THEN d.id END)               AS unassigned,
+                   (SELECT COUNT(*) FROM orders o
+                      WHERE o.delivery_date = :d AND o.deleted_at IS NULL)                    AS orders_count
             FROM delivery d
             WHERE d.date = :d
               AND d.deleted_at IS NULL
@@ -42,19 +45,34 @@ def get_status(target: date_type) -> dict:
     total = int(row[0] or 0)
     completed = int(row[1] or 0)
     unassigned = int(row[2] or 0)
+    orders_count = int(row[3] or 0)
+    incomplete = total - completed
 
-    if total == 0:
-        state = "NONE"
-    elif now < cutoff_at:
+    # ---- 일자 우선 판별 ----
+    if now < cutoff_at:
+        # 마감 전 (과거·오늘·미래 모두 이 조건 우선)
         state = "PREVIEW"
-    elif completed < total:
-        state = "LIVE"
-    else:
+    elif target < today:
+        # 과거 배송일 — 일자 우선: 미완료 있어도 RESULT
         state = "RESULT"
+    elif target == today:
+        # 오늘 — 완료 여부로 판별
+        if total > 0 and completed >= total:
+            state = "RESULT"
+        elif total > 0:
+            state = "LIVE"
+        elif orders_count > 0:
+            state = "PREVIEW"      # 주문 확정됐으나 배송 일감 미생성
+        else:
+            state = "NONE"
+    else:
+        # 미래 배송일 — 마감은 지났을 수 있으나 배송 전 → PREVIEW
+        state = "PREVIEW"
 
     return {
         "date": target.isoformat(),
         "state": state,
+        "incomplete": incomplete if state == "RESULT" else 0,
         "cutoff_at": cutoff_at.isoformat(),
         "now": now.isoformat(),
         "progress": {
