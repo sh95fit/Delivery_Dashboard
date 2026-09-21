@@ -18,3 +18,4 @@ def deserialize_session(token: str) -> str | None:
         return data.get("email")
     except Exception:
         return None
+  
