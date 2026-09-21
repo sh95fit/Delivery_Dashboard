@@ -22,7 +22,7 @@ def get_cutoff_at(target: date_type) -> datetime:
 
 
 def get_status(target: date_type) -> dict:
-    """상태 판별 — 일자 우선 (과거는 미완료 있어도 RESULT + incomplete 표시)."""
+    """상태 판별 — NONE 우선(데이터 없음) → 일자 우선(과거 RESULT) 순서."""
     now = datetime.now(KST)
     cutoff_at = get_cutoff_at(target)
     today = now.date()
@@ -48,25 +48,28 @@ def get_status(target: date_type) -> dict:
     orders_count = int(row[3] or 0)
     incomplete = total - completed
 
-    # ---- 일자 우선 판별 ----
+    # ---- 판별 (NONE 우선 → 일자 우선) ----
     if now < cutoff_at:
-        # 마감 전 (과거·오늘·미래 모두 이 조건 우선)
+        # 1) 마감 전
         state = "PREVIEW"
+    elif total == 0 and orders_count == 0:
+        # 2) 배송·주문 둘 다 없음 — 과거라도 NONE (공휴일·비영업일)
+        state = "NONE"
     elif target < today:
-        # 과거 배송일 — 일자 우선: 미완료 있어도 RESULT
+        # 3) 과거 배송일 — 일자 우선: 미완료 있어도 RESULT
         state = "RESULT"
     elif target == today:
-        # 오늘 — 완료 여부로 판별
+        # 4) 오늘
         if total > 0 and completed >= total:
             state = "RESULT"
         elif total > 0:
             state = "LIVE"
         elif orders_count > 0:
-            state = "PREVIEW"      # 주문 확정됐으나 배송 일감 미생성
+            state = "PREVIEW"      # 주문 확정, 배송 일감 미생성
         else:
             state = "NONE"
     else:
-        # 미래 배송일 — 마감은 지났을 수 있으나 배송 전 → PREVIEW
+        # 5) 미래 배송일
         state = "PREVIEW"
 
     return {
