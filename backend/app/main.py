@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.routers import (
-    allowlist_routes, auth_routes, health_routes, me_routes,
+    allowlist_routes, auth_routes, delivery_routes, health_routes, me_routes,
 )
 
 app = FastAPI(title="Delivery Dashboard API", version="0.4.0")
@@ -18,3 +18,4 @@ app.include_router(health_routes.router)
 app.include_router(auth_routes.router)
 app.include_router(me_routes.router)
 app.include_router(allowlist_routes.router)
+app.include_router(delivery_routes.router)
