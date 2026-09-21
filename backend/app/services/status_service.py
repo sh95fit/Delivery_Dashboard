@@ -1,7 +1,7 @@
 from datetime import date as date_type
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from app.database import get_engine
 
@@ -10,6 +10,7 @@ from app.database import get_engine
 KST = timezone(timedelta(hours=9))
 CUTOFF_HOUR = 14
 CUTOFF_MINUTE = 30
+LINEUP_IDS = (2, 4, 23, 29)
 
 
 def get_cutoff_at(target: date_type) -> datetime:
@@ -21,8 +22,36 @@ def get_cutoff_at(target: date_type) -> datetime:
     )
 
 
+def _get_preview_estimate(conn, target: date_type) -> dict:
+    """배송 일감 생성 전 — 주문 기반 예상 배송지·식수·고객사·순매출 집계."""
+    row = conn.execute(text(
+        """
+        SELECT COUNT(DISTINCT o.address_id)                   AS stops,
+               COALESCE(SUM(od.quantity), 0)                  AS meals,
+               COUNT(DISTINCT o.account_id)                   AS accounts,
+               COALESCE(ROUND(SUM(od.total_amount) / 1.1), 0) AS net_revenue
+        FROM orders o
+        JOIN `order-details` od
+          ON od.order_id = o.id
+         AND od.is_refund = 0
+         AND od.deleted_at IS NULL
+         AND od.product_id IN :lineups
+        WHERE o.delivery_date = :d
+          AND o.deleted_at IS NULL
+        """
+    ).bindparams(bindparam("lineups", expanding=True)),
+      {"d": target, "lineups": list(LINEUP_IDS)}).fetchone()
+
+    return {
+        "total": int(row[0] or 0),            # 예상 Stops (배송지 수)
+        "estimated_meals": int(row[1] or 0),
+        "estimated_accounts": int(row[2] or 0),
+        "estimated_net_revenue": int(row[3] or 0),
+    }
+
+
 def get_status(target: date_type) -> dict:
-    """상태 판별 — NONE 우선(데이터 없음) → 일자 우선(과거 RESULT) 순서."""
+    """상태 판별 — NONE 우선 → 일자 우선. PREVIEW는 delivery 유무에 따라 집계원이 달라짐."""
     now = datetime.now(KST)
     cutoff_at = get_cutoff_at(target)
     today = now.date()
@@ -50,27 +79,43 @@ def get_status(target: date_type) -> dict:
 
     # ---- 판별 (NONE 우선 → 일자 우선) ----
     if now < cutoff_at:
-        # 1) 마감 전
-        state = "PREVIEW"
+        state = "PREVIEW"                      # 1) 마감 전
     elif total == 0 and orders_count == 0:
-        # 2) 배송·주문 둘 다 없음 — 과거라도 NONE (공휴일·비영업일)
-        state = "NONE"
+        state = "NONE"                         # 2) 둘 다 없음 (과거·미래 무관)
     elif target < today:
-        # 3) 과거 배송일 — 일자 우선: 미완료 있어도 RESULT
-        state = "RESULT"
+        state = "RESULT"                       # 3) 과거 — 일자 우선
     elif target == today:
-        # 4) 오늘
         if total > 0 and completed >= total:
             state = "RESULT"
         elif total > 0:
             state = "LIVE"
         elif orders_count > 0:
-            state = "PREVIEW"      # 주문 확정, 배송 일감 미생성
+            state = "PREVIEW"
         else:
             state = "NONE"
     else:
-        # 5) 미래 배송일
-        state = "PREVIEW"
+        state = "PREVIEW"                      # 5) 미래
+
+    # ---- PREVIEW: delivery 유무에 따라 집계원 결정 ----
+    progress = {
+        "completed": completed,
+        "total": total,
+        "unassigned": unassigned,
+    }
+    estimate = None
+    if state == "PREVIEW":
+        if total > 0:
+            # delivery가 이미 있음 → delivery 기반 (기존 값 그대로)
+            pass
+        elif orders_count > 0:
+            # delivery 없음 → 주문 기반 예상 집계
+            estimate = _get_preview_estimate(conn, target)
+            progress = {
+                "completed": 0,
+                "total": estimate["total"],    # 예상 배송지 수
+                "unassigned": 0,
+            }
+        # 둘 다 없으면 NONE이라 여기 안 옴
 
     return {
         "date": target.isoformat(),
@@ -78,9 +123,6 @@ def get_status(target: date_type) -> dict:
         "incomplete": incomplete if state == "RESULT" else 0,
         "cutoff_at": cutoff_at.isoformat(),
         "now": now.isoformat(),
-        "progress": {
-            "completed": completed,
-            "total": total,
-            "unassigned": unassigned,
-        },
+        "progress": progress,
+        "estimate": estimate,                  # delivery 없는 PREVIEW에서만 존재
     }
