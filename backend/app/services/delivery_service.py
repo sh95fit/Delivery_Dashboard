@@ -75,7 +75,7 @@ def get_delivery_day(target: date_type) -> dict:
                    COALESCE(SUM(od.quantity), 0)           AS meals,
                    COUNT(DISTINCT o.account_id)            AS accounts,
                    SUM(CASE WHEN d.manager_id IS NULL THEN 1 ELSE 0 END)       AS unassigned_stops,
-                   SUM(CASE WHEN d.delivered_at IS NOT NULL THEN 1 ELSE 0 END) AS completed_stops
+                   COUNT(DISTINCT CASE WHEN d.delivered_at IS NOT NULL THEN d.id END) AS completed_stops
             FROM delivery d
             JOIN orders o
               ON o.delivery_date = d.date
