@@ -19,5 +19,7 @@ def revenue_summary(
         raise HTTPException(status_code=400, detail="from은 to보다 이전이어야 합니다")
     try:
         return revenue_service.get_revenue_summary(from_date, to_date)
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="조회 시간 초과 — 잠시 후 다시 시도하세요")
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"순매출 집계 실패: {exc}") from exc

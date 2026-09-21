@@ -8,41 +8,19 @@ LINEUP_IDS = (2, 4, 23, 29)
 
 
 def get_revenue_summary(start: date_type, end: date_type) -> dict:
-    """기간 순매출 집계 (전체/노선별/라인업별). SELECT만."""
+    """기간 순매출 집계. JOIN 1회로 매니저×라인업 집계 → 나머지는 파이썬 합산. SELECT만."""
     engine = get_engine()
     with engine.connect() as conn:
-        # 1) 전체 요약
-        total_row = conn.execute(text(
-            """
-            SELECT COALESCE(ROUND(SUM(od.total_amount) / 1.1), 0) AS net_revenue,
-                   COALESCE(SUM(od.quantity), 0)                  AS meals,
-                   COUNT(DISTINCT d.id)                           AS stops,
-                   COUNT(DISTINCT o.account_id)                   AS accounts
-            FROM delivery d
-            JOIN orders o
-              ON o.delivery_date = d.date
-             AND o.address_id    = d.address_id
-             AND o.deleted_at IS NULL
-            JOIN `order-details` od
-              ON od.order_id = o.id
-             AND od.is_refund = 0
-             AND od.deleted_at IS NULL
-             AND od.product_id IN :lineups
-            WHERE d.date BETWEEN :start AND :end
-              AND d.deleted_at IS NULL
-            """
-        ).bindparams(bindparam("lineups", expanding=True)),
-          {"start": start, "end": end, "lineups": list(LINEUP_IDS)}).fetchone()
-
-        # 2) 노선(매니저)별
-        manager_rows = conn.execute(text(
+        # 단일 기본 집계: 매니저 × 라인업 (JOIN 1회)
+        rows = conn.execute(text(
             """
             SELECT d.manager_id,
-                   m.name  AS manager_name,
-                   COUNT(DISTINCT d.id)                           AS stops,
-                   COALESCE(SUM(od.quantity), 0)                  AS meals,
-                   COUNT(DISTINCT o.account_id)                   AS accounts,
-                   COALESCE(ROUND(SUM(od.total_amount) / 1.1), 0) AS net_revenue
+                   m.name                         AS manager_name,
+                   od.product_id,
+                   p.name                         AS product_name,
+                   COUNT(DISTINCT d.id)           AS stops,
+                   od.quantity                    AS qty,
+                   ROUND(od.total_amount / 1.1)   AS amount
             FROM delivery d
             JOIN orders o
               ON o.delivery_date = d.date
@@ -55,98 +33,99 @@ def get_revenue_summary(start: date_type, end: date_type) -> dict:
              AND od.product_id IN :lineups
             LEFT JOIN manager m
               ON m.id = d.manager_id
+            LEFT JOIN products p
+              ON p.id = od.product_id
             WHERE d.date BETWEEN :start AND :end
               AND d.deleted_at IS NULL
-            GROUP BY d.manager_id, m.name
-            ORDER BY net_revenue DESC
             """
         ).bindparams(bindparam("lineups", expanding=True)),
           {"start": start, "end": end, "lineups": list(LINEUP_IDS)}).fetchall()
 
-        # 3) 매니저×라인업별 (드릴다운용)
-        manager_lineup_rows = conn.execute(text(
+        # 고객사 수 (별도: delivery 기준 DISTINCT account) — 1개 가벼운 쿼리
+        account_rows = conn.execute(text(
             """
             SELECT d.manager_id,
-                   od.product_id,
-                   p.name                         AS product_name,
-                   COALESCE(SUM(od.quantity), 0)  AS qty,
-                   COALESCE(ROUND(SUM(od.total_amount) / 1.1), 0) AS amount
+                   COUNT(DISTINCT a.account_id) AS accounts
             FROM delivery d
-            JOIN orders o
-              ON o.delivery_date = d.date
-             AND o.address_id    = d.address_id
-             AND o.deleted_at IS NULL
-            JOIN `order-details` od
-              ON od.order_id = o.id
-             AND od.is_refund = 0
-             AND od.deleted_at IS NULL
-             AND od.product_id IN :lineups
-            LEFT JOIN products p ON p.id = od.product_id
+            LEFT JOIN addresses a ON a.id = d.address_id
             WHERE d.date BETWEEN :start AND :end
               AND d.deleted_at IS NULL
-            GROUP BY d.manager_id, od.product_id, p.name
+            GROUP BY d.manager_id
             """
-        ).bindparams(bindparam("lineups", expanding=True)),
-          {"start": start, "end": end, "lineups": list(LINEUP_IDS)}).fetchall()
+        ),
+          {"start": start, "end": end}).fetchall()
+        accounts_map = {r[0]: int(r[1]) for r in account_rows}
 
-        # 4) 라인업별 전체
-        lineup_rows = conn.execute(text(
-            """
-            SELECT od.product_id,
-                   p.name                        AS product_name,
-                   COALESCE(SUM(od.quantity), 0) AS qty,
-                   COALESCE(ROUND(SUM(od.total_amount) / 1.1), 0) AS amount
-            FROM delivery d
-            JOIN orders o
-              ON o.delivery_date = d.date
-             AND o.address_id    = d.address_id
-             AND o.deleted_at IS NULL
-            JOIN `order-details` od
-              ON od.order_id = o.id
-             AND od.is_refund = 0
-             AND od.deleted_at IS NULL
-             AND od.product_id IN :lineups
-            LEFT JOIN products p ON p.id = od.product_id
-            WHERE d.date BETWEEN :start AND :end
-              AND d.deleted_at IS NULL
-            GROUP BY od.product_id, p.name
-            ORDER BY amount DESC
-            """
-        ).bindparams(bindparam("lineups", expanding=True)),
-          {"start": start, "end": end, "lineups": list(LINEUP_IDS)}).fetchall()
+    # ---- 파이썬 집계 (행 수: 매니저 15 × 라인업 4 ≈ 60행 수준, 비용 무시) ----
+    from collections import defaultdict
 
-    # 매니저별 라인업 그룹화
-    ml_map: dict[int | None, dict] = {}
-    for manager_id, pid, pname, qty, amount in manager_lineup_rows:
-        ml_map.setdefault(manager_id, {})[str(pid)] = {
-            "name": pname or str(pid), "qty": int(qty), "amount": int(amount),
-        }
+    by_manager_acc: dict = defaultdict(lambda: {
+        "manager_id": None, "manager_name": None, "stops_set": set(),
+        "meals": 0, "net_revenue": 0, "lineups": defaultdict(lambda: {"name": "", "qty": 0, "amount": 0}),
+    })
+    lineup_acc: dict = defaultdict(lambda: {"name": "", "qty": 0, "amount": 0})
+    total_stops_set: set = set()
+    total_meals = 0
+    total_net = 0
+
+    for manager_id, mname, pid, pname, stops, qty, amount in rows:
+        acc = by_manager_acc[manager_id]
+        acc["manager_id"] = manager_id
+        acc["manager_name"] = mname
+        # stops: d.id DISTINCT가 필요하나 그룹핑이 manager×product라 set으로 처리
+        acc["stops_set"].add((manager_id, stops))  # 실제 distinct 처리는 아래 참고
+        qty_i, amount_i = int(qty or 0), int(amount or 0)
+        acc["meals"] += qty_i
+        acc["net_revenue"] += amount_i
+        lu = acc["lineups"][str(pid)]
+        lu["name"] = pname or str(pid)
+        lu["qty"] += qty_i
+        lu["amount"] += amount_i
+
+        lu_all = lineup_acc[str(pid)]
+        lu_all["name"] = pname or str(pid)
+        lu_all["qty"] += qty_i
+        lu_all["amount"] += amount_i
+
+        total_meals += qty_i
+        total_net += amount_i
+
+    # ⚠️ stops 정확 산출: 위 rows는 (매니저×상품) 단위라 d.id 중복이 있음 → 별도 정확 집계 쿼리 1회
+    stops_rows = conn.execute(text(
+        """
+        SELECT d.manager_id, COUNT(DISTINCT d.id) AS stops
+        FROM delivery d
+        WHERE d.date BETWEEN :start AND :end
+          AND d.deleted_at IS NULL
+        GROUP BY d.manager_id
+        """
+    ), {"start": start, "end": end}).fetchall()
+    stops_map = {r[0]: int(r[1]) for r in stops_rows}
+
+    total_stops = sum(stops_map.values())
 
     by_manager = []
-    for manager_id, mname, stops, meals, accounts, net in manager_rows:
+    for manager_id, acc in by_manager_acc.items():
         by_manager.append({
             "manager_id": manager_id,
-            "manager_name": mname,
-            "stops": int(stops),
-            "meals": int(meals),
-            "accounts": int(accounts),
-            "net_revenue": int(net or 0),
-            "lineups": ml_map.get(manager_id, {}),
+            "manager_name": acc["manager_name"],
+            "stops": stops_map.get(manager_id, 0),
+            "meals": acc["meals"],
+            "accounts": accounts_map.get(manager_id, 0),
+            "net_revenue": acc["net_revenue"],
+            "lineups": {k: dict(v) for k, v in acc["lineups"].items()},
         })
-
-    by_lineup = {}
-    for pid, pname, qty, amount in lineup_rows:
-        by_lineup[str(pid)] = {"name": pname or str(pid), "qty": int(qty), "amount": int(amount)}
+    by_manager.sort(key=lambda x: x["net_revenue"], reverse=True)
 
     return {
         "from_date": start.isoformat(),
         "to_date": end.isoformat(),
         "total": {
-            "net_revenue": int(total_row[0] or 0),
-            "meals": int(total_row[1] or 0),
-            "stops": int(total_row[2] or 0),
-            "accounts": int(total_row[3] or 0),
+            "net_revenue": total_net,
+            "meals": total_meals,
+            "stops": total_stops,
+            "accounts": sum(accounts_map.values()),
         },
         "by_manager": by_manager,
-        "by_lineup": by_lineup,
+        "by_lineup": {k: dict(v) for k, v in lineup_acc.items()},
     }

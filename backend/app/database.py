@@ -43,7 +43,18 @@ def get_engine():
         f"mysql+pymysql://{os.environ['RDS_USER']}:{os.environ['RDS_PASS']}"
         f"@127.0.0.1:{_tunnel.local_bind_port}/{os.environ['RDS_DB']}?charset=utf8mb4"
     )
-    _engine = create_engine(url, pool_size=3, max_overflow=5, pool_pre_ping=True)
+    _engine = create_engine(
+        url,
+        pool_size=3,
+        max_overflow=5,
+        pool_pre_ping=True,          # 사용 전 연결 생존 확인 (터널 끊김 대비)
+        pool_recycle=1800,           # 30분마다 연결 재생성 (stale 방지)
+        connect_args={
+            "connect_timeout": 10,   # 연결 확립 10초 제한
+            "read_timeout": 30,      # 쿼리 읽기 30초 제한 (무한 대기 방지)
+            "write_timeout": 30,
+        },
+    )
     logger.info("RDS engine created via SSH tunnel")
     return _engine
 
