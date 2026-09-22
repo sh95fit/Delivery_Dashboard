@@ -41,6 +41,9 @@ jobs:
             echo "== 3) DB 볼륨 확인 =="
             docker volume ls | grep dash_db_data || echo "WARN: dash_db_data 볼륨 없음"
 
+            echo "== 3.5) dash DB 마이그레이션 =="
+            docker compose exec -T backend python -m app.db_migrate
+
             echo "== 4) 헬스체크 =="
             for i in $(seq 1 5); do
               if curl -sf http://127.0.0.1:8100/health >/dev/null; then

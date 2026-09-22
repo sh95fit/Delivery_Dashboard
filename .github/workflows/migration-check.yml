@@ -1,0 +1,71 @@
+name: Migration Check
+
+on:
+  push:
+    branches: [main]
+    paths: ["backend/migrations/**", "backend/app/db_migrate.py"]
+  pull_request:
+    paths: ["backend/migrations/**"]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: delivery_dashboard
+          POSTGRES_USER: dash_user
+          POSTGRES_PASSWORD: ci_check_pass
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U dash_user -d delivery_dashboard"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install sqlalchemy psycopg2-binary sshtunnel
+
+      - name: Apply all migrations to a fresh DB
+        working-directory: backend
+        env:
+          POSTGRES_PASSWORD: ci_check_pass
+          DASH_DB_HOST: 127.0.0.1
+          BASTION_HOST: localhost        # 러너 import에 필요한 더미 (사용 안 함)
+          BASTION_USER: ci
+          RDS_HOST: localhost
+          RDS_USER: ci
+          RDS_PASS: ci
+          RDS_DB: ci
+        run: |
+          python -m app.db_migrate       # 1차 적용
+          python -m app.db_migrate       # 2차: "none (up to date)" 나와야 멱등성 통과
+
+      - name: Verify applied history
+        working-directory: backend
+        env:
+          POSTGRES_PASSWORD: ci_check_pass
+          DASH_DB_HOST: 127.0.0.1
+          BASTION_HOST: localhost
+          BASTION_USER: ci
+          RDS_HOST: localhost
+          RDS_USER: ci
+          RDS_PASS: ci
+          RDS_DB: ci
+        run: |
+          python - <<'PY'
+          from sqlalchemy import text
+          from app.database import get_dash_engine
+          with get_dash_engine().connect() as conn:
+              rows = conn.execute(text("SELECT version FROM schema_migrations ORDER BY version")).fetchall()
+          print("applied:", [r[0] for r in rows])
+          assert rows, "schema_migrations가 비어 있습니다"
+          PY
