@@ -8,6 +8,14 @@ from app.services import routes_service
 router = APIRouter(prefix="/routes", tags=["routes"])
 
 
+@router.get("/{target_date}")
+def get_all_routes(target_date: date_type, _: str = Depends(get_current_email)):
+    try:
+        return routes_service.get_routes(target_date)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"전체 경로 조회 실패: {exc}") from exc
+
+
 @router.get("/{target_date}/{manager_id}")
 def get_route(target_date: date_type, manager_id: int,
               _: str = Depends(get_current_email)):
