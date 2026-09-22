@@ -23,3 +23,8 @@ dist/
 .backup/
 rclone.conf
 **/.config/rclone/
+
+# Frontend TypeScript/Vite generated files
+*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
