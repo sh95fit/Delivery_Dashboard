@@ -10,4 +10,5 @@ CREATE TABLE IF NOT EXISTS route_cache (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(route_key)
 );
+
 CREATE INDEX IF NOT EXISTS ix_route_cache_key ON route_cache (route_key);
