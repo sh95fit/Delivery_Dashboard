@@ -388,3 +388,4 @@ def get_route(target: date_type, manager_id: int, force: bool = False) -> dict:
 
 def force_refresh(target: date_type, manager_id: int) -> dict:
     return get_route(target, manager_id, force=True)
+ 

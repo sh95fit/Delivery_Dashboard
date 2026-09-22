@@ -11,4 +11,4 @@ CREATE TABLE IF NOT EXISTS route_origins (
 -- 활성 출발지는 1개만 허용
 CREATE UNIQUE INDEX IF NOT EXISTS ux_route_origins_single_active
 ON route_origins (is_active)
-WHERE is_active = TRUE;
+WHERE is_active = TRUE; 
