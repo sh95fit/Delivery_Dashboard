@@ -78,7 +78,14 @@ def _safe_fetch_auto(target, manager_id):
 
 
 # ---------- dash DB: 조정 이력 + 미지급 ----------
+_SCHEMA_READY = False
+
+
 def _ensure_tables():
+    """안전망 — 마이그레이션(파트 A)이 원칙. 프로세스당 1회만 DDL 실행(요청마다 안 함)."""
+    global _SCHEMA_READY
+    if _SCHEMA_READY:
+        return
     engine = get_dash_engine()
     with engine.connect() as conn:
         conn.execute(text("""
@@ -106,6 +113,7 @@ def _ensure_tables():
             );
         """))
         conn.commit()
+    _SCHEMA_READY = True
 
 
 def _latest_adjustments(target: date_type, manager_id: int | None) -> dict:
