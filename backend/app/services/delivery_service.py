@@ -1,4 +1,5 @@
 from datetime import date as date_type
+import re
 
 from sqlalchemy import bindparam, text
 
@@ -6,6 +7,41 @@ from app.database import get_engine
 
 # 대상 라인업 (v7 확정: 2=석식, 4=가정식, 23=프레시밀, 29=라이트밀)
 LINEUP_IDS = (2, 4, 23, 29)
+
+
+def normalize_delivery_hour(raw: str | None) -> str | None:
+    """addresses.delivery_hour 원문에서 화면 표시용 대표 시간 1개만 추출."""
+    if not raw:
+        return None
+
+    text_value = raw.strip()
+    if not text_value:
+        return None
+
+    # 1) HH:MM 우선
+    m = re.search(r"(\d{1,2}):(\d{2})", text_value)
+    if m:
+        hh = int(m.group(1))
+        mm = int(m.group(2))
+        if 0 <= hh <= 23 and 0 <= mm <= 59:
+            return f"{hh:02d}:{mm:02d}"
+
+    # 2) HH시MM분
+    m = re.search(r"(\d{1,2})시\s*(\d{1,2})분", text_value)
+    if m:
+        hh = int(m.group(1))
+        mm = int(m.group(2))
+        if 0 <= hh <= 23 and 0 <= mm <= 59:
+            return f"{hh:02d}:{mm:02d}"
+
+    # 3) HH시
+    m = re.search(r"(\d{1,2})시", text_value)
+    if m:
+        hh = int(m.group(1))
+        if 0 <= hh <= 23:
+            return f"{hh:02d}:00"
+
+    return None
 
 
 def get_delivery_day(target: date_type) -> dict:
@@ -74,7 +110,7 @@ def get_delivery_day(target: date_type) -> dict:
             SELECT COUNT(DISTINCT d.id)                    AS stops,
                    COALESCE(SUM(od.quantity), 0)           AS meals,
                    COUNT(DISTINCT o.account_id)            AS accounts,
-                   SUM(CASE WHEN d.manager_id IS NULL THEN 1 ELSE 0 END)       AS unassigned_stops,
+                   SUM(CASE WHEN d.manager_id IS NULL THEN 1 ELSE 0 END) AS unassigned_stops,
                    COUNT(DISTINCT CASE WHEN d.delivered_at IS NOT NULL THEN d.id END) AS completed_stops
             FROM delivery d
             JOIN orders o
@@ -103,7 +139,7 @@ def get_delivery_day(target: date_type) -> dict:
                    a.name                          AS address_name,
                    a.latitude                      AS latitude,
                    a.longitude                     AS longitude,
-                   a.delivery_time                 AS delivery_time,
+                   a.delivery_hour                 AS delivery_hour,
                    od.product_id                   AS product_id,
                    p.name                          AS product_name,
                    COALESCE(SUM(od.quantity), 0)   AS qty,
@@ -129,14 +165,15 @@ def get_delivery_day(target: date_type) -> dict:
               AND a.latitude IS NOT NULL
               AND a.longitude IS NOT NULL
             GROUP BY d.id, d.address_id, d.manager_id, m.name, m.color,
-                     a.name, a.latitude, a.longitude, a.delivery_time,
+                     a.name, a.latitude, a.longitude, a.delivery_hour,
                      od.product_id, p.name
-            ORDER BY d.manager_id NULLS LAST, d.id
+            ORDER BY CASE WHEN d.manager_id IS NULL THEN 1 ELSE 0 END,
+                     d.manager_id,
+                     d.id
             """
         ).bindparams(bindparam("lineups", expanding=True)),
           {"d": target, "lineups": list(LINEUP_IDS)}).fetchall()
 
-    # 라인업 데이터 매니저별 그룹화
     lineup_map: dict[int | None, dict] = {}
     for manager_id, pid, pname, qty, amount in lineup_rows:
         lineup_map.setdefault(manager_id, {})[str(pid)] = {
@@ -158,7 +195,6 @@ def get_delivery_day(target: date_type) -> dict:
             "lineups": lineup_map.get(manager_id, {}),
         })
 
-    # stop points 그룹화
     stop_map: dict[str, dict] = {}
     for row in stop_rows:
         key = str(row.delivery_id)
@@ -168,7 +204,8 @@ def get_delivery_day(target: date_type) -> dict:
             "address_name": row.address_name,
             "latitude": float(row.latitude),
             "longitude": float(row.longitude),
-            "delivery_time": row.delivery_time,
+            "delivery_hour_raw": row.delivery_hour,
+            "delivery_time": normalize_delivery_hour(row.delivery_hour),
             "manager_id": row.manager_id,
             "manager_name": row.manager_name,
             "manager_color": row.manager_color,
@@ -180,7 +217,6 @@ def get_delivery_day(target: date_type) -> dict:
             "qty": int(row.qty or 0),
         }
 
-    # 각 stop의 총 식수
     for stop in stop_map.values():
         stop["meals"] = sum(item["qty"] for item in stop["lineups"].values())
 

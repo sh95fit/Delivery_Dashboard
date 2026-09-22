@@ -24,7 +24,8 @@ class StopPoint(BaseModel):
     address_name: str | None
     latitude: float
     longitude: float
-    delivery_time: str | None
+    delivery_hour_raw: str | None = None
+    delivery_time: str | None = None
     manager_id: int | None
     manager_name: str | None
     manager_color: str | None
