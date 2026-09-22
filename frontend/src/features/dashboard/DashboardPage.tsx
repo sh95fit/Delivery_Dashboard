@@ -28,6 +28,7 @@ export default function DashboardPage() {
   const rows = delivery.data?.managers ?? [];
   const stops = delivery.data?.stops ?? [];
   const noData = !isLoading && !error && rows.length === 0;
+  const source = delivery.data?.source;
 
   return (
     <PageLayout
@@ -36,6 +37,11 @@ export default function DashboardPage() {
         <>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           {status.data && <Badge state={status.data.state} />}
+          {source === "orders_estimate" && (
+            <span style={{ fontSize: 12, color: "#8b8b00", fontWeight: 700 }}>
+              예상치 기준
+            </span>
+          )}
           <span style={{ marginLeft: "auto", fontSize: 12, color: "#666" }}>
             마감: 배송일 전날 14:30 KST
           </span>
@@ -68,7 +74,9 @@ export default function DashboardPage() {
 
       {!error && rows.length > 0 && (
         <>
-          <h2 style={{ fontSize: 16, margin: "24px 0 8px" }}>매니저별 현황</h2>
+          <h2 style={{ fontSize: 16, margin: "24px 0 8px" }}>
+            매니저별 현황 {source === "orders_estimate" ? "(예상)" : ""}
+          </h2>
           <ManagerTable rows={rows} />
         </>
       )}

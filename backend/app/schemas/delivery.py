@@ -37,6 +37,7 @@ class StopPoint(BaseModel):
 
 class DeliveryDayResponse(BaseModel):
     date: str
+    source: str
     summary: dict
     managers: list[ManagerDelivery]
     unassigned: dict

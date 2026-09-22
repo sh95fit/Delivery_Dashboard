@@ -5,12 +5,11 @@ from sqlalchemy import bindparam, text
 
 from app.database import get_engine
 
-# 대상 라인업 (v7 확정: 2=석식, 4=가정식, 23=프레시밀, 29=라이트밀)
 LINEUP_IDS = (2, 4, 23, 29)
 
 
 def normalize_delivery_hour(raw: str | None) -> str | None:
-    """addresses.delivery_hour 원문에서 화면 표시용 대표 시간 1개만 추출."""
+    """addresses.delivery_hour 원문에서 대표 시간 1개만 추출."""
     if not raw:
         return None
 
@@ -18,7 +17,7 @@ def normalize_delivery_hour(raw: str | None) -> str | None:
     if not text_value:
         return None
 
-    # 1) HH:MM 우선
+    # 1) HH:MM
     m = re.search(r"(\d{1,2}):(\d{2})", text_value)
     if m:
         hh = int(m.group(1))
@@ -44,12 +43,94 @@ def normalize_delivery_hour(raw: str | None) -> str | None:
     return None
 
 
-def get_delivery_day(target: date_type) -> dict:
-    """날짜별 배송현황 + 지도용 stop points."""
-    engine = get_engine()
-    with engine.connect() as conn:
-        # 1) 매니저별 집계
-        rows = conn.execute(text(
+def _delivery_exists(conn, target: date_type) -> bool:
+    row = conn.execute(
+        text(
+            """
+            SELECT COUNT(*)
+            FROM delivery
+            WHERE date = :d
+              AND deleted_at IS NULL
+            """
+        ),
+        {"d": target},
+    ).fetchone()
+    return int(row[0] or 0) > 0
+
+
+def _build_response(target: date_type, rows, lineup_rows, summary_row, stop_rows, source: str) -> dict:
+    lineup_map: dict[int | None, dict] = {}
+    for manager_id, pid, pname, qty, amount in lineup_rows:
+        lineup_map.setdefault(manager_id, {})[str(pid)] = {
+            "name": pname or str(pid),
+            "qty": int(qty),
+            "amount": int(amount),
+        }
+
+    managers = []
+    for manager_id, mname, mcolor, stops, meals, accounts, net in rows:
+        managers.append(
+            {
+                "manager_id": manager_id,
+                "manager_name": mname,
+                "color": mcolor,
+                "stops": int(stops),
+                "meals": int(meals),
+                "accounts": int(accounts),
+                "net_revenue": int(net or 0),
+                "lineups": lineup_map.get(manager_id, {}),
+            }
+        )
+
+    stop_map: dict[str, dict] = {}
+    for row in stop_rows:
+        key = str(row.delivery_id)
+        stop = stop_map.setdefault(
+            key,
+            {
+                "delivery_id": key,
+                "address_id": row.address_id,
+                "address_name": row.address_name,
+                "detail_address": row.detail_address,
+                "latitude": float(row.latitude),
+                "longitude": float(row.longitude),
+                "delivery_hour_raw": row.delivery_hour,
+                "delivery_time": normalize_delivery_hour(row.delivery_hour),
+                "manager_id": row.manager_id,
+                "manager_name": row.manager_name,
+                "manager_color": row.manager_color,
+                "accounts": int(row.accounts or 0),
+                "lineups": {},
+            },
+        )
+        stop["lineups"][str(row.product_id)] = {
+            "name": row.product_name or str(row.product_id),
+            "qty": int(row.qty or 0),
+        }
+
+    for stop in stop_map.values():
+        stop["meals"] = sum(item["qty"] for item in stop["lineups"].values())
+
+    return {
+        "date": target.isoformat(),
+        "source": source,
+        "summary": {
+            "stops": int(summary_row[0] or 0),
+            "meals": int(summary_row[1] or 0),
+            "accounts": int(summary_row[2] or 0),
+            "completed_stops": int(summary_row[4] or 0),
+            "unassigned_stops": int(summary_row[3] or 0),
+        },
+        "managers": managers,
+        "unassigned": {"stops": int(summary_row[3] or 0)},
+        "stops": list(stop_map.values()),
+    }
+
+
+def _get_actual_mode(conn, target: date_type) -> dict:
+    # 1) 매니저별 집계
+    rows = conn.execute(
+        text(
             """
             SELECT d.manager_id,
                    m.name  AS manager_name,
@@ -76,10 +157,12 @@ def get_delivery_day(target: date_type) -> dict:
             ORDER BY stops DESC
             """
         ).bindparams(bindparam("lineups", expanding=True)),
-          {"d": target, "lineups": list(LINEUP_IDS)}).fetchall()
+        {"d": target, "lineups": list(LINEUP_IDS)},
+    ).fetchall()
 
-        # 2) 라인업별 수량·금액 (매니저별)
-        lineup_rows = conn.execute(text(
+    # 2) 라인업별 수량·금액
+    lineup_rows = conn.execute(
+        text(
             """
             SELECT d.manager_id,
                    od.product_id,
@@ -102,10 +185,12 @@ def get_delivery_day(target: date_type) -> dict:
             GROUP BY d.manager_id, od.product_id, p.name
             """
         ).bindparams(bindparam("lineups", expanding=True)),
-          {"d": target, "lineups": list(LINEUP_IDS)}).fetchall()
+        {"d": target, "lineups": list(LINEUP_IDS)},
+    ).fetchall()
 
-        # 3) 전체 요약
-        summary_row = conn.execute(text(
+    # 3) 전체 요약
+    summary_row = conn.execute(
+        text(
             """
             SELECT COUNT(DISTINCT d.id)                    AS stops,
                    COALESCE(SUM(od.quantity), 0)           AS meals,
@@ -126,10 +211,12 @@ def get_delivery_day(target: date_type) -> dict:
               AND d.deleted_at IS NULL
             """
         ).bindparams(bindparam("lineups", expanding=True)),
-          {"d": target, "lineups": list(LINEUP_IDS)}).fetchone()
+        {"d": target, "lineups": list(LINEUP_IDS)},
+    ).fetchone()
 
-        # 4) 지도용 stop points (배송지 단위)
-        stop_rows = conn.execute(text(
+    # 4) 지도용 stop points
+    stop_rows = conn.execute(
+        text(
             """
             SELECT d.id                            AS delivery_id,
                    d.address_id                    AS address_id,
@@ -173,65 +260,146 @@ def get_delivery_day(target: date_type) -> dict:
                      d.id
             """
         ).bindparams(bindparam("lineups", expanding=True)),
-          {"d": target, "lineups": list(LINEUP_IDS)}).fetchall()
+        {"d": target, "lineups": list(LINEUP_IDS)},
+    ).fetchall()
 
-    lineup_map: dict[int | None, dict] = {}
-    for manager_id, pid, pname, qty, amount in lineup_rows:
-        lineup_map.setdefault(manager_id, {})[str(pid)] = {
-            "name": pname or str(pid),
-            "qty": int(qty),
-            "amount": int(amount),
-        }
+    return _build_response(target, rows, lineup_rows, summary_row, stop_rows, source="delivery")
 
-    managers = []
-    for manager_id, mname, mcolor, stops, meals, accounts, net in rows:
-        managers.append({
-            "manager_id": manager_id,
-            "manager_name": mname,
-            "color": mcolor,
-            "stops": int(stops),
-            "meals": int(meals),
-            "accounts": int(accounts),
-            "net_revenue": int(net or 0),
-            "lineups": lineup_map.get(manager_id, {}),
-        })
 
-    stop_map: dict[str, dict] = {}
-    for row in stop_rows:
-        key = str(row.delivery_id)
-        stop = stop_map.setdefault(key, {
-            "delivery_id": key,
-            "address_id": row.address_id,
-            "address_name": row.address_name,
-            "detail_address": row.detail_address,
-            "latitude": float(row.latitude),
-            "longitude": float(row.longitude),
-            "delivery_hour_raw": row.delivery_hour,
-            "delivery_time": normalize_delivery_hour(row.delivery_hour),
-            "manager_id": row.manager_id,
-            "manager_name": row.manager_name,
-            "manager_color": row.manager_color,
-            "accounts": int(row.accounts or 0),
-            "lineups": {},
-        })
-        stop["lineups"][str(row.product_id)] = {
-            "name": row.product_name or str(row.product_id),
-            "qty": int(row.qty or 0),
-        }
+def _get_preview_mode(conn, target: date_type) -> dict:
+    # 1) 매니저별 예상 집계 (addresses.manager_id 기준)
+    rows = conn.execute(
+        text(
+            """
+            SELECT a.manager_id,
+                   m.name  AS manager_name,
+                   m.color AS manager_color,
+                   COUNT(DISTINCT o.address_id)                   AS stops,
+                   COALESCE(SUM(od.quantity), 0)                  AS meals,
+                   COUNT(DISTINCT o.account_id)                   AS accounts,
+                   COALESCE(ROUND(SUM(od.total_amount) / 1.1), 0) AS net_revenue
+            FROM orders o
+            JOIN addresses a
+              ON a.id = o.address_id
+            JOIN `order-details` od
+              ON od.order_id = o.id
+             AND od.is_refund = 0
+             AND od.deleted_at IS NULL
+             AND od.product_id IN :lineups
+            LEFT JOIN manager m
+              ON m.id = a.manager_id
+            WHERE o.delivery_date = :d
+              AND o.deleted_at IS NULL
+            GROUP BY a.manager_id, m.name, m.color
+            ORDER BY stops DESC
+            """
+        ).bindparams(bindparam("lineups", expanding=True)),
+        {"d": target, "lineups": list(LINEUP_IDS)},
+    ).fetchall()
 
-    for stop in stop_map.values():
-        stop["meals"] = sum(item["qty"] for item in stop["lineups"].values())
+    # 2) 라인업별 수량·금액
+    lineup_rows = conn.execute(
+        text(
+            """
+            SELECT a.manager_id,
+                   od.product_id,
+                   p.name                          AS product_name,
+                   COALESCE(SUM(od.quantity), 0)   AS qty,
+                   COALESCE(ROUND(SUM(od.total_amount) / 1.1), 0) AS amount
+            FROM orders o
+            JOIN addresses a
+              ON a.id = o.address_id
+            JOIN `order-details` od
+              ON od.order_id = o.id
+             AND od.is_refund = 0
+             AND od.deleted_at IS NULL
+             AND od.product_id IN :lineups
+            LEFT JOIN products p
+              ON p.id = od.product_id
+            WHERE o.delivery_date = :d
+              AND o.deleted_at IS NULL
+            GROUP BY a.manager_id, od.product_id, p.name
+            """
+        ).bindparams(bindparam("lineups", expanding=True)),
+        {"d": target, "lineups": list(LINEUP_IDS)},
+    ).fetchall()
 
-    return {
-        "date": target.isoformat(),
-        "summary": {
-            "stops": int(summary_row[0] or 0),
-            "meals": int(summary_row[1] or 0),
-            "accounts": int(summary_row[2] or 0),
-            "completed_stops": int(summary_row[4] or 0),
-            "unassigned_stops": int(summary_row[3] or 0),
-        },
-        "managers": managers,
-        "unassigned": {"stops": int(summary_row[3] or 0)},
-        "stops": list(stop_map.values()),
-    }
+    # 3) 전체 요약
+    summary_row = conn.execute(
+        text(
+            """
+            SELECT COUNT(DISTINCT o.address_id)                   AS stops,
+                   COALESCE(SUM(od.quantity), 0)                  AS meals,
+                   COUNT(DISTINCT o.account_id)                   AS accounts,
+                   SUM(CASE WHEN a.manager_id IS NULL THEN 1 ELSE 0 END) AS unassigned_stops,
+                   0                                              AS completed_stops
+            FROM orders o
+            JOIN addresses a
+              ON a.id = o.address_id
+            JOIN `order-details` od
+              ON od.order_id = o.id
+             AND od.is_refund = 0
+             AND od.deleted_at IS NULL
+             AND od.product_id IN :lineups
+            WHERE o.delivery_date = :d
+              AND o.deleted_at IS NULL
+            """
+        ).bindparams(bindparam("lineups", expanding=True)),
+        {"d": target, "lineups": list(LINEUP_IDS)},
+    ).fetchone()
+
+    # 4) 지도용 stop points (예상)
+    stop_rows = conn.execute(
+        text(
+            """
+            SELECT a.id                             AS delivery_id,
+                   a.id                             AS address_id,
+                   a.manager_id                     AS manager_id,
+                   m.name                           AS manager_name,
+                   m.color                          AS manager_color,
+                   a.name                           AS address_name,
+                   a.detail_address                 AS detail_address,
+                   a.latitude                       AS latitude,
+                   a.longitude                      AS longitude,
+                   a.delivery_hour                  AS delivery_hour,
+                   od.product_id                    AS product_id,
+                   p.name                           AS product_name,
+                   COALESCE(SUM(od.quantity), 0)    AS qty,
+                   COUNT(DISTINCT o.account_id)     AS accounts
+            FROM orders o
+            JOIN addresses a
+              ON a.id = o.address_id
+            JOIN `order-details` od
+              ON od.order_id = o.id
+             AND od.is_refund = 0
+             AND od.deleted_at IS NULL
+             AND od.product_id IN :lineups
+            LEFT JOIN products p
+              ON p.id = od.product_id
+            LEFT JOIN manager m
+              ON m.id = a.manager_id
+            WHERE o.delivery_date = :d
+              AND o.deleted_at IS NULL
+              AND a.latitude IS NOT NULL
+              AND a.longitude IS NOT NULL
+            GROUP BY a.id, a.manager_id, m.name, m.color,
+                     a.name, a.detail_address, a.latitude, a.longitude, a.delivery_hour,
+                     od.product_id, p.name
+            ORDER BY CASE WHEN a.manager_id IS NULL THEN 1 ELSE 0 END,
+                     a.manager_id,
+                     a.id
+            """
+        ).bindparams(bindparam("lineups", expanding=True)),
+        {"d": target, "lineups": list(LINEUP_IDS)},
+    ).fetchall()
+
+    return _build_response(target, rows, lineup_rows, summary_row, stop_rows, source="orders_estimate")
+
+
+def get_delivery_day(target: date_type) -> dict:
+    """delivery 있으면 실제, 없으면 orders+addresses 기반 예상 배송현황."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        if _delivery_exists(conn, target):
+            return _get_actual_mode(conn, target)
+        return _get_preview_mode(conn, target)

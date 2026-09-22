@@ -23,7 +23,9 @@ function loadGoogleMaps(): Promise<void> {
     const existing = document.getElementById("google-maps-script") as HTMLScriptElement | null;
     if (existing) {
       existing.addEventListener("load", () => resolve());
-      existing.addEventListener("error", () => reject(new Error("Google Maps 스크립트 로드 실패")));
+      existing.addEventListener("error", () =>
+        reject(new Error("Google Maps 스크립트 로드 실패")),
+      );
       return;
     }
 
@@ -51,27 +53,50 @@ type StopGroup = {
   items: StopPoint[];
 };
 
+function escapeHtml(value: string | null | undefined) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function buildPopupHtml(group: StopGroup) {
-  const title = group.items[0]?.address_name ?? String(group.items[0]?.address_id ?? "배송지");
-  const total = group.items.length;
+  const title =
+    group.items.length > 1
+      ? `동일 위치 배송 ${group.items.length}건`
+      : escapeHtml(group.items[0]?.address_name ?? "배송지");
 
   const itemsHtml = group.items
+    .slice()
     .sort((a, b) => {
       const at = a.delivery_time ?? "99:99";
       const bt = b.delivery_time ?? "99:99";
       if (at !== bt) return at.localeCompare(bt);
+
+      const an = a.address_name ?? "";
+      const bn = b.address_name ?? "";
+      if (an !== bn) return an.localeCompare(bn);
+
       return (a.detail_address ?? "").localeCompare(b.detail_address ?? "");
     })
     .map((stop, idx) => {
-      const detail = stop.detail_address?.trim() || "상세주소 없음";
+      const name = escapeHtml(stop.address_name?.trim() || `주소ID ${stop.address_id}`);
+      const detail = stop.detail_address?.trim() ? escapeHtml(stop.detail_address) : "";
+      const manager = escapeHtml(stop.manager_name ?? "미배정");
+      const time = escapeHtml(stop.delivery_time ?? "없음");
+      const lineup = escapeHtml(lineupText(stop) || "없음");
+
       return `
         <div style="padding:8px 0; ${idx > 0 ? "border-top:1px solid #eee;" : ""}">
-          <div style="font-weight:700">${detail}</div>
-          <div>매니저: ${stop.manager_name ?? "미배정"}</div>
-          <div>희망시간: ${stop.delivery_time ?? "없음"}</div>
+          <div style="font-weight:700">${name}</div>
+          ${detail ? `<div style="color:#666">${detail}</div>` : ""}
+          <div>매니저: ${manager}</div>
+          <div>희망시간: ${time}</div>
           <div>식수: ${stop.meals}</div>
           <div>고객사: ${stop.accounts}</div>
-          <div>라인업: ${lineupText(stop) || "없음"}</div>
+          <div>라인업: ${lineup}</div>
         </div>
       `;
     })
@@ -79,7 +104,7 @@ function buildPopupHtml(group: StopGroup) {
 
   return `
     <div style="font-size:12px;line-height:1.5;min-width:260px;max-width:320px">
-      <div style="font-weight:700;font-size:13px;margin-bottom:6px">${title} ${total > 1 ? `(총 ${total}건)` : ""}</div>
+      <div style="font-weight:700;font-size:13px;margin-bottom:6px">${title}</div>
       ${itemsHtml}
     </div>
   `;
@@ -93,6 +118,7 @@ export default function MapSection({ stops }: { stops: StopPoint[] }) {
 
     stops.forEach((stop) => {
       const key = `${stop.latitude.toFixed(6)},${stop.longitude.toFixed(6)}`;
+
       if (!map.has(key)) {
         map.set(key, {
           key,
@@ -102,6 +128,7 @@ export default function MapSection({ stops }: { stops: StopPoint[] }) {
           items: [],
         });
       }
+
       map.get(key)!.items.push(stop);
     });
 
@@ -133,14 +160,15 @@ export default function MapSection({ stops }: { stops: StopPoint[] }) {
             map,
             position: pos,
             title: group.items[0]?.address_name || String(group.items[0]?.address_id),
-            label: extraCount > 0
-              ? {
-                  text: `+${extraCount}`,
-                  color: "#ffffff",
-                  fontSize: "11px",
-                  fontWeight: "700",
-                }
-              : undefined,
+            label:
+              extraCount > 0
+                ? {
+                    text: `+${extraCount}`,
+                    color: "#ffffff",
+                    fontSize: "11px",
+                    fontWeight: "700",
+                  }
+                : undefined,
             icon: {
               path: window.google.maps.SymbolPath.CIRCLE,
               scale: extraCount > 0 ? 12 : 10,
@@ -189,7 +217,7 @@ export default function MapSection({ stops }: { stops: StopPoint[] }) {
         }}
       />
       <p style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
-        같은 좌표의 배송지는 마커 1개로 묶어 표시하며, 추가 건수는 <b>+N</b> 으로 표시됩니다.
+        같은 좌표의 배송지는 마커 1개로 묶어 표시하며, 추가 건수는 <b>+N</b>으로 표시됩니다.
       </p>
     </div>
   );

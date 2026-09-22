@@ -15,6 +15,12 @@ export interface StatusResp {
   };
 }
 
+export interface StopLineup {
+  name: string;
+  qty: number;
+  amount?: number;
+}
+
 export interface ManagerRow {
   manager_id: number;
   manager_name?: string | null;
@@ -23,12 +29,7 @@ export interface ManagerRow {
   meals: number;
   accounts: number;
   net_revenue?: number;
-}
-
-export interface StopLineup {
-  name: string;
-  qty: number;
-  amount?: number;
+  lineups?: Record<string, StopLineup>;
 }
 
 export interface StopPoint {
@@ -50,6 +51,7 @@ export interface StopPoint {
 
 export interface DeliveryResp {
   date: string;
+  source: "delivery" | "orders_estimate";
   summary: {
     stops: number;
     meals: number;
