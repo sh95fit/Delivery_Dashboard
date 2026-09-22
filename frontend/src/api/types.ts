@@ -35,6 +35,7 @@ export interface StopPoint {
   delivery_id: string;
   address_id: number;
   address_name?: string | null;
+  detail_address?: string | null;
   latitude: number;
   longitude: number;
   delivery_hour_raw?: string | null;

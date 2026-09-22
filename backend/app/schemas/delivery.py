@@ -22,6 +22,7 @@ class StopPoint(BaseModel):
     delivery_id: str
     address_id: int
     address_name: str | None
+    detail_address: str | None = None
     latitude: float
     longitude: float
     delivery_hour_raw: str | None = None

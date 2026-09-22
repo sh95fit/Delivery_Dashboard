@@ -137,6 +137,7 @@ def get_delivery_day(target: date_type) -> dict:
                    m.name                          AS manager_name,
                    m.color                         AS manager_color,
                    a.name                          AS address_name,
+                   a.detail_address                AS detail_address,
                    a.latitude                      AS latitude,
                    a.longitude                     AS longitude,
                    a.delivery_hour                 AS delivery_hour,
@@ -165,7 +166,7 @@ def get_delivery_day(target: date_type) -> dict:
               AND a.latitude IS NOT NULL
               AND a.longitude IS NOT NULL
             GROUP BY d.id, d.address_id, d.manager_id, m.name, m.color,
-                     a.name, a.latitude, a.longitude, a.delivery_hour,
+                     a.name, a.detail_address, a.latitude, a.longitude, a.delivery_hour,
                      od.product_id, p.name
             ORDER BY CASE WHEN d.manager_id IS NULL THEN 1 ELSE 0 END,
                      d.manager_id,
@@ -202,6 +203,7 @@ def get_delivery_day(target: date_type) -> dict:
             "delivery_id": key,
             "address_id": row.address_id,
             "address_name": row.address_name,
+            "detail_address": row.detail_address,
             "latitude": float(row.latitude),
             "longitude": float(row.longitude),
             "delivery_hour_raw": row.delivery_hour,
