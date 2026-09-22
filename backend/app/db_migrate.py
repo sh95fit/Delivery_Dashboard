@@ -1,10 +1,9 @@
 """dash_db 마이그레이션 러너.
 - backend/migrations/ 의 NNN_*.sql 을 번호 순서대로 적용
 - 적용 이력은 schema_migrations 테이블에 기록 (중복 적용 없음)
-- 배포 시 자동 실행: docker compose exec backend python -m app.db_migrate
+- 배포 시 자동 실행: docker compose exec -T backend python -m app.db_migrate
 """
 import logging
-import os
 from pathlib import Path
 
 from sqlalchemy import text

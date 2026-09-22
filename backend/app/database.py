@@ -98,7 +98,7 @@ def get_dash_engine():
         "postgresql+psycopg2",
         username="dash_user",
         password=os.environ.get("POSTGRES_PASSWORD", ""),
-        host=os.environ.get("DASH_DB_HOST", "db"),   # ← 기존 하드코딩 "db"를 이 한 줄로
+        host=os.environ.get("DASH_DB_HOST", "db"),   # ← 기존 "db" 하드코딩을 이 한 줄로
         port=5432,
         database="delivery_dashboard",
     )

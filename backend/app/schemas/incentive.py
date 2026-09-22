@@ -38,6 +38,7 @@ class IncentiveRow(BaseModel):
     stops: int
     gajung_qty: int
     mil_qty: int
+    seoksik_qty: int = 0        # 석식 — 현재 미포함. SEOKSIK_IDS 활성화 시 자동 채워짐
     collection_count: int
     accounts: int
     product_total: int
@@ -57,6 +58,7 @@ class IncentiveOne(BaseModel):
     stops: int
     gajung_qty: int
     mil_qty: int
+    seoksik_qty: int = 0
     collection_count: int
     accounts: int
     product_total: int

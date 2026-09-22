@@ -29,6 +29,7 @@ def get_incentive_one(target_date: date_type, manager_id: int,
 @router.post("/{target_date}/{manager_id}/adjust")
 def adjust_incentive(target_date: date_type, manager_id: int, body: AdjustRequest,
                      email: str = Depends(get_current_email)):
+    """수기 조정 — 수거 건수·수량·배송지·고객사 (사유 필수, 이력 보존)."""
     if not is_admin_email(email):
         raise HTTPException(status_code=403, detail="관리자만 가능합니다")
     try:
@@ -45,6 +46,7 @@ def adjust_incentive(target_date: date_type, manager_id: int, body: AdjustReques
 @router.post("/{target_date}/{manager_id}/hold")
 def hold_incentive(target_date: date_type, manager_id: int, body: HoldRequest,
                    email: str = Depends(get_current_email)):
+    """미지급 등록 — 배송 이슈 등 (사유 필수, 계산값은 유지·기록 보존)."""
     if not is_admin_email(email):
         raise HTTPException(status_code=403, detail="관리자만 가능합니다")
     try:
@@ -58,6 +60,7 @@ def hold_incentive(target_date: date_type, manager_id: int, body: HoldRequest,
 @router.delete("/{target_date}/{manager_id}/hold")
 def release_incentive(target_date: date_type, manager_id: int,
                       email: str = Depends(get_current_email)):
+    """미지급 해제 — 이력 행은 유지(released_at 기록)."""
     if not is_admin_email(email):
         raise HTTPException(status_code=403, detail="관리자만 가능합니다")
     try:

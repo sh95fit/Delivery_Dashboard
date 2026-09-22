@@ -39,7 +39,7 @@ jobs:
         env:
           POSTGRES_PASSWORD: ci_check_pass
           DASH_DB_HOST: 127.0.0.1
-          BASTION_HOST: localhost        # 러너 import에 필요한 더미 (사용 안 함)
+          BASTION_HOST: localhost
           BASTION_USER: ci
           RDS_HOST: localhost
           RDS_USER: ci
@@ -47,7 +47,7 @@ jobs:
           RDS_DB: ci
         run: |
           python -m app.db_migrate       # 1차 적용
-          python -m app.db_migrate       # 2차: "none (up to date)" 나와야 멱등성 통과
+          python -m app.db_migrate       # 2차: "none (up to date)" — 멱등성 통과 확인
 
       - name: Verify applied history
         working-directory: backend

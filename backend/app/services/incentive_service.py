@@ -4,13 +4,32 @@ from sqlalchemy import bindparam, text
 
 from app.database import get_dash_engine, get_engine
 
-LINEUP_IDS = (2, 4, 23, 29)
-GAJUNG = 4
+# ── 인센티브 제품 그룹 설정 (2026-09-22 확정) ──────────────────────────
+# 산식에는 GROUPS에 등록된 그룹만 합산된다.
+# 석식(2) 포함 전환 = SEOKSIK_IDS 주석 해제 1줄 — 집계·산식·응답·스키마에 자동 반영.
+GAJUNG_IDS = (4,)          # 가정식 단독
+MIL_IDS = (23, 29)         # 밀수량 = 프레시밀 + 라이트밀
+SEOKSIK_IDS: tuple = ()    # (2,)   ← 석식 포함 시 이 주석 해제
+
+GROUPS: dict[str, tuple[int, ...]] = {
+    "gajung_qty": GAJUNG_IDS,
+    "mil_qty": MIL_IDS,
+}
+if SEOKSIK_IDS:
+    GROUPS["seoksik_qty"] = SEOKSIK_IDS
+
+# 인센티브 집계 라인업 = GROUPS 합집합 (현재 4,23,29 — 석식 제외)
+# ※ deliveries·revenue API의 라인업 (2,4,23,29) 과는 별개 — 순매출에는 석식이 포함된다.
+INCENTIVE_LINEUPS = tuple(sorted({p for ids in GROUPS.values() for p in ids}))
+
 ADJUSTABLE_FIELDS = {"gajung_qty", "mil_qty", "collection_count", "stops", "accounts"}
+if SEOKSIK_IDS:
+    ADJUSTABLE_FIELDS.add("seoksik_qty")
 
 
 # ---------- 산식 (2026-09 확정: 초과분 × 구간단가) ----------
 def product_incentive(q: int) -> int:
+    """제품수 인센티브 — 300 초과분에 구간단가 적용."""
     if q <= 300:
         return 0
     excess = q - 300
@@ -19,6 +38,7 @@ def product_incentive(q: int) -> int:
 
 
 def account_incentive(c: int) -> int:
+    """고객사수 인센티브 — 40 초과분에 구간단가 적용 (45 이하 → 300)."""
     if c <= 40:
         return 0
     excess = c - 40
@@ -26,13 +46,22 @@ def account_incentive(c: int) -> int:
     return excess * rate
 
 
-# ---------- RDS 자동 집계 (배송지 기준 — LEFT JOIN으로 미연결 배송지도 포함) ----------
+# ---------- RDS 자동 집계 (배송지 기준 LEFT JOIN + 그룹별 수량) ----------
 def _fetch_auto(target: date_type, manager_id: int | None):
-    sql = """
+    parts: list[str] = []
+    group_params: dict = {}
+    for i, (field, ids) in enumerate(GROUPS.items()):
+        key = f"g{i}"
+        parts.append(
+            f"COALESCE(SUM(CASE WHEN od.product_id IN :{key} THEN od.quantity END), 0) AS {field}"
+        )
+        group_params[key] = list(ids)
+    group_select = ",\n               ".join(parts)
+
+    sql = f"""
         SELECT d.manager_id                          AS manager_id,
                COUNT(DISTINCT d.id)                  AS stops,
-               COALESCE(SUM(CASE WHEN od.product_id = :gajung THEN od.quantity END), 0) AS gajung_qty,
-               COALESCE(SUM(CASE WHEN od.product_id IN :mil THEN od.quantity END), 0)   AS mil_qty,
+               {group_select},
                COUNT(DISTINCT o.account_id)          AS accounts_distinct
         FROM delivery d
         LEFT JOIN orders o
@@ -48,23 +77,22 @@ def _fetch_auto(target: date_type, manager_id: int | None):
           AND d.deleted_at IS NULL
           AND d.manager_id IS NOT NULL
     """
-    params: dict = {"d": target, "lineups": list(LINEUP_IDS), "gajung": GAJUNG,
-                    "mil": [23, 29]}
+    params: dict = {"d": target, "lineups": list(INCENTIVE_LINEUPS)}
     if manager_id is not None:
         sql += " AND d.manager_id = :mid"
         params["mid"] = manager_id
     sql += " GROUP BY d.manager_id ORDER BY d.manager_id"
 
+    binds = [bindparam("lineups", expanding=True)] + [
+        bindparam(k, expanding=True) for k in group_params
+    ]
     engine = get_engine()
     with engine.connect() as conn:
-        return conn.execute(
-            text(sql).bindparams(bindparam("lineups", expanding=True),
-                                 bindparam("mil", expanding=True)),
-            params,
-        ).fetchall()
+        return conn.execute(text(sql).bindparams(*binds), {**params, **group_params}).fetchall()
 
 
 def _safe_fetch_auto(target, manager_id):
+    """터널 실패 시 1회 재시도 (Week 2 표준 패턴)."""
     try:
         return _fetch_auto(target, manager_id)
     except Exception:
@@ -82,7 +110,7 @@ _SCHEMA_READY = False
 
 
 def _ensure_tables():
-    """안전망 — 마이그레이션(파트 A)이 원칙. 프로세스당 1회만 DDL 실행(요청마다 안 함)."""
+    """안전망 — 스키마 소유는 마이그레이션(001). 프로세스당 1회만 실행(요청마다 DDL 금지)."""
     global _SCHEMA_READY
     if _SCHEMA_READY:
         return
@@ -117,7 +145,7 @@ def _ensure_tables():
 
 
 def _latest_adjustments(target: date_type, manager_id: int | None) -> dict:
-    """(manager, date, field) 최신 조정값 — 이력은 행으로 보존."""
+    """(manager, date, field) 최신 조정값 — 이력은 행으로 영구 보존."""
     _ensure_tables()
     engine = get_dash_engine()
     sql = """
@@ -145,6 +173,7 @@ def _latest_adjustments(target: date_type, manager_id: int | None) -> dict:
 
 def set_adjustment(target: date_type, manager_id: int, field: str, value: int,
                    reason: str, email: str) -> None:
+    """수기 조정 등록 — 사유 필수, 이력 적재."""
     if field not in ADJUSTABLE_FIELDS:
         raise ValueError(f"허용되지 않는 필드: {field}")
     _ensure_tables()
@@ -159,6 +188,7 @@ def set_adjustment(target: date_type, manager_id: int, field: str, value: int,
 
 
 def set_hold(target: date_type, manager_id: int, reason: str, email: str) -> None:
+    """미지급 등록 — 사유 필수. 재등록 시 사유 갱신 + 재활성."""
     _ensure_tables()
     engine = get_dash_engine()
     with engine.connect() as conn:
@@ -174,6 +204,7 @@ def set_hold(target: date_type, manager_id: int, reason: str, email: str) -> Non
 
 
 def release_hold(target: date_type, manager_id: int) -> None:
+    """미지급 해제 — 레코드는 유지, released_at만 기록 (기록 유지 요구)."""
     _ensure_tables()
     engine = get_dash_engine()
     with engine.connect() as conn:
@@ -198,12 +229,11 @@ def _active_holds(target: date_type) -> dict[int, str]:
 # ---------- 응답 조립 ----------
 def _build_row(row, adj: dict, is_held: bool, hold_reason: str | None) -> dict:
     stops = int(adj.get("stops", {}).get("value", row.stops or 0))
-    gajung = int(adj.get("gajung_qty", {}).get("value", row.gajung_qty or 0))
-    mil = int(adj.get("mil_qty", {}).get("value", row.mil_qty or 0))
     collection = int(adj.get("collection_count", {}).get("value", 0))   # 수기 입력 전용
     accounts = int(adj.get("accounts", {}).get("value", stops + collection))
 
-    product_total = gajung + mil
+    qty = {f: int(adj.get(f, {}).get("value", getattr(row, f, 0) or 0)) for f in GROUPS}
+    product_total = sum(qty.values())
     prod = product_incentive(product_total)
     acct = account_incentive(accounts)
     total = prod + acct
@@ -211,16 +241,18 @@ def _build_row(row, adj: dict, is_held: bool, hold_reason: str | None) -> dict:
     applied = [{"field": k, **v} for k, v in adj.items()]
     return {
         "manager_id": int(row.manager_id),
-        "stops": stops, "gajung_qty": gajung, "mil_qty": mil,
-        "collection_count": collection, "accounts": accounts,
+        "stops": stops,
+        **qty,                                   # gajung_qty · mil_qty (· seoksik_qty)
+        "collection_count": collection,
+        "accounts": accounts,
         "product_total": product_total,
         "product_incentive": prod, "account_incentive": acct,
         "total_incentive": total,
         "is_held": is_held, "hold_reason": hold_reason,
         "payable_incentive": 0 if is_held else total,
         "adjustments": applied,
-        "auto": {"stops": int(row.stops or 0), "gajung_qty": int(row.gajung_qty or 0),
-                 "mil_qty": int(row.mil_qty or 0),
+        "auto": {"stops": int(row.stops or 0),
+                 **{f: int(getattr(row, f, 0) or 0) for f in GROUPS},
                  "accounts_distinct": int(row.accounts_distinct or 0)},
     }
 
@@ -231,9 +263,9 @@ def get_incentive(target: date_type, manager_id: int) -> dict:
     adjustments = _latest_adjustments(target, manager_id)
     if not rows:
         return {"date": target.isoformat(), "manager_id": manager_id,
-                "stops": 0, "gajung_qty": 0, "mil_qty": 0, "collection_count": 0,
-                "accounts": 0, "product_total": 0, "product_incentive": 0,
-                "account_incentive": 0, "total_incentive": 0,
+                "stops": 0, "gajung_qty": 0, "mil_qty": 0, "seoksik_qty": 0,
+                "collection_count": 0, "accounts": 0, "product_total": 0,
+                "product_incentive": 0, "account_incentive": 0, "total_incentive": 0,
                 "is_held": manager_id in holds, "hold_reason": holds.get(manager_id),
                 "payable_incentive": 0, "adjustments": [], "auto": {}}
     r = rows[0]
