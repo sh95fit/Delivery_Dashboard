@@ -10,7 +10,7 @@ import ManagerTable from "./components/ManagerTable";
 import MapSection from "@/features/map/MapSection";
 import { getStatus } from "@/api/status";
 import { getDeliveries } from "@/api/deliveries";
-import { getRoute, type RouteResp } from "@/api/routes";
+import { getAllRoutes, type AllRoutesResp } from "@/api/routes";
 import { useAsync } from "@/hooks/useAsync";
 import { usePolling } from "@/hooks/usePolling";
 import { todayISO } from "@/lib/date";
@@ -18,27 +18,18 @@ import { todayISO } from "@/lib/date";
 export default function DashboardPage() {
   const [date, setDate] = useState(todayISO());
   const [selectedManagerId, setSelectedManagerId] = useState<number | null>(null);
-  const [route, setRoute] = useState<RouteResp | null>(null);
-  const [routeLoading, setRouteLoading] = useState(false);
+  const [routesData, setRoutesData] = useState<AllRoutesResp | null>(null);
+  const [routesLoading, setRoutesLoading] = useState(false);
+  const [routesError, setRoutesError] = useState("");
 
   const status = useAsync(() => getStatus(date), [date]);
   const delivery = useAsync(() => getDeliveries(date), [date]);
 
   const shouldPoll = status.data?.state === "PREVIEW" || status.data?.state === "LIVE";
 
-  const retryAll = () => {
-    status.refetch().catch(() => {});
-    delivery.refetch().catch(() => {});
-    if (selectedManagerId != null) {
-      loadRoute(selectedManagerId).catch(() => {});
-    }
-  };
-
-  const isLoading = status.loading || delivery.loading;
-  const error = status.error || delivery.error;
   const rows = delivery.data?.managers ?? [];
   const stops = delivery.data?.stops ?? [];
-  const noData = !isLoading && !error && rows.length === 0;
+  const noData = !status.loading && !delivery.loading && !status.error && !delivery.error && rows.length === 0;
   const source = delivery.data?.source;
 
   const managerOptions = useMemo(
@@ -46,33 +37,44 @@ export default function DashboardPage() {
     [rows],
   );
 
-  async function loadRoute(managerId: number) {
-    setRouteLoading(true);
+  const displayedRoutes = useMemo(() => {
+    if (!routesData) return [];
+    if (selectedManagerId == null) return routesData.routes;
+    return routesData.routes.filter((r) => r.manager_id === selectedManagerId);
+  }, [routesData, selectedManagerId]);
+
+  async function loadRoutes() {
+    setRoutesLoading(true);
+    setRoutesError("");
     try {
-      const data = await getRoute(date, managerId);
-      setRoute(data);
-    } catch {
-      setRoute(null);
+      const data = await getAllRoutes(date);
+      setRoutesData(data);
+    } catch (e) {
+      setRoutesError(e instanceof Error ? e.message : String(e));
+      setRoutesData(null);
     } finally {
-      setRouteLoading(false);
+      setRoutesLoading(false);
     }
   }
 
+  const retryAll = () => {
+    status.refetch().catch(() => {});
+    delivery.refetch().catch(() => {});
+    loadRoutes().catch(() => {});
+  };
+
   useEffect(() => {
-    if (selectedManagerId == null) {
-      setRoute(null);
-      return;
-    }
-    loadRoute(selectedManagerId).catch(() => {});
-  }, [date, selectedManagerId]);
+    loadRoutes().catch(() => {});
+  }, [date]);
 
   usePolling(() => {
     status.refetch().catch(() => {});
     delivery.refetch().catch(() => {});
-    if (selectedManagerId != null) {
-      loadRoute(selectedManagerId).catch(() => {});
-    }
+    loadRoutes().catch(() => {});
   }, 30000, Boolean(shouldPoll));
+
+  const isLoading = status.loading || delivery.loading || routesLoading;
+  const error = status.error || delivery.error || routesError;
 
   return (
     <PageLayout
@@ -111,27 +113,27 @@ export default function DashboardPage() {
       {!error && status.data && <StatusCards status={status.data} />}
 
       {!error && managerOptions.length > 0 && (
-        <div style={{ marginTop: 16, marginBottom: 8, display: "flex", gap: 12, alignItems: "center" }}>
+        <div style={{ marginTop: 16, marginBottom: 8, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <label htmlFor="manager-select" style={{ fontSize: 14, fontWeight: 600 }}>
-            경로 조회 매니저
+            노선 강조 매니저
           </label>
           <select
             id="manager-select"
             value={selectedManagerId ?? ""}
             onChange={(e) => setSelectedManagerId(e.target.value ? Number(e.target.value) : null)}
           >
-            <option value="">선택 안 함</option>
+            <option value="">전체 노선</option>
             {managerOptions.map((m) => (
               <option key={m.manager_id} value={m.manager_id}>
                 {m.manager_name ?? m.manager_id}
               </option>
             ))}
           </select>
-          {routeLoading && <span style={{ fontSize: 12, color: "#666" }}>경로 불러오는 중…</span>}
+          {routesLoading && <span style={{ fontSize: 12, color: "#666" }}>경로 불러오는 중…</span>}
         </div>
       )}
 
-      {!error && stops.length > 0 && <MapSection stops={stops} route={route} />}
+      {!error && stops.length > 0 && <MapSection stops={stops} routes={displayedRoutes} selectedManagerId={selectedManagerId} />}
 
       {!error && noData && (
         <div style={{ marginTop: 24 }}>

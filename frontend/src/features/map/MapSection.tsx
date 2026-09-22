@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { StopPoint } from "@/api/types";
-import type { RouteResp } from "@/api/routes";
+import type { RouteSummary } from "@/api/routes";
 
 const DEFAULT_CENTER = { lat: 37.5665, lng: 126.9780 };
 
@@ -146,12 +146,24 @@ function decodePolyline(encoded: string): Array<{ lat: number; lng: number }> {
   return coordinates;
 }
 
+function routeColor(route: RouteSummary, selectedManagerId: number | null) {
+  if (selectedManagerId == null) return route.manager_color || "#3367d6";
+  return route.manager_id === selectedManagerId ? route.manager_color || "#3367d6" : "#c7cdd6";
+}
+
+function routeOpacity(route: RouteSummary, selectedManagerId: number | null) {
+  if (selectedManagerId == null) return 0.9;
+  return route.manager_id === selectedManagerId ? 1 : 0.28;
+}
+
 export default function MapSection({
   stops,
-  route,
+  routes,
+  selectedManagerId,
 }: {
   stops: StopPoint[];
-  route: RouteResp | null;
+  routes: RouteSummary[];
+  selectedManagerId: number | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -179,7 +191,7 @@ export default function MapSection({
 
   useEffect(() => {
     let markers: any[] = [];
-    let polyline: any = null;
+    let polylines: any[] = [];
     let map: any;
     let infoWindow: any;
 
@@ -232,20 +244,49 @@ export default function MapSection({
           bounds.extend(pos);
         });
 
-        if (route?.polyline) {
-          const path = decodePolyline(route.polyline);
-          if (path.length > 0) {
-            polyline = new window.google.maps.Polyline({
-              path,
-              geodesic: true,
-              strokeColor: "#3367d6",
-              strokeOpacity: 0.9,
-              strokeWeight: 4,
-            });
-            polyline.setMap(map);
-            path.forEach((p) => bounds.extend(p));
+        routes.forEach((route) => {
+          const color = routeColor(route, selectedManagerId);
+          const opacity = routeOpacity(route, selectedManagerId);
+
+          if (route.completed_polyline) {
+            const completedPath = decodePolyline(route.completed_polyline);
+            if (completedPath.length > 0) {
+              const line = new window.google.maps.Polyline({
+                path: completedPath,
+                geodesic: true,
+                strokeColor: color,
+                strokeOpacity: opacity,
+                strokeWeight: selectedManagerId === route.manager_id ? 5 : 4,
+              });
+              line.setMap(map);
+              polylines.push(line);
+              completedPath.forEach((p) => bounds.extend(p));
+            }
           }
-        }
+
+          if (route.remaining_polyline) {
+            const remainingPath = decodePolyline(route.remaining_polyline);
+            if (remainingPath.length > 0) {
+              const line = new window.google.maps.Polyline({
+                path: remainingPath,
+                geodesic: true,
+                strokeColor: color,
+                strokeOpacity: opacity * 0.85,
+                strokeWeight: selectedManagerId === route.manager_id ? 5 : 4,
+                icons: [
+                  {
+                    icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 3 },
+                    offset: "0",
+                    repeat: "12px",
+                  },
+                ],
+              });
+              line.setMap(map);
+              polylines.push(line);
+              remainingPath.forEach((p) => bounds.extend(p));
+            }
+          }
+        });
 
         if (!bounds.isEmpty()) {
           map.fitBounds(bounds);
@@ -257,9 +298,13 @@ export default function MapSection({
 
     return () => {
       markers.forEach((m) => m.setMap(null));
-      if (polyline) polyline.setMap(null);
+      polylines.forEach((p) => p.setMap(null));
     };
-  }, [groups, route]);
+  }, [groups, routes, selectedManagerId]);
+
+  const selectedRoute = selectedManagerId == null
+    ? null
+    : routes.find((r) => r.manager_id === selectedManagerId) ?? null;
 
   return (
     <div>
@@ -268,7 +313,7 @@ export default function MapSection({
         ref={ref}
         style={{
           width: "100%",
-          height: 460,
+          height: 560,
           borderRadius: 12,
           border: "1px solid #e5e7eb",
           background: "#f8f9fb",
@@ -278,13 +323,17 @@ export default function MapSection({
         <div>
           같은 좌표의 배송지는 마커 1개로 묶어 표시하며, 추가 건수는 <b>+N</b>으로 표시됩니다.
         </div>
-        {route && (
+        {selectedRoute ? (
           <div>
-            경로 상태: {route.source === "cache" ? "캐시" : route.source === "routes_api" ? "새 계산" : "경로 없음"}
-            {route.distance_m > 0 && ` · ${(route.distance_m / 1000).toFixed(1)}km`}
-            {route.duration_s > 0 && ` · ${Math.round(route.duration_s / 60)}분`}
-            {route.origin_name ? ` · 출발지: ${route.origin_name}` : ""}
+            선택 노선: {selectedRoute.manager_name ?? selectedRoute.manager_id}
+            {selectedRoute.distance_m > 0 && ` · ${(selectedRoute.distance_m / 1000).toFixed(1)}km`}
+            {selectedRoute.duration_s > 0 && ` · ${Math.round(selectedRoute.duration_s / 60)}분`}
+            {selectedRoute.origin_name ? ` · 출발지: ${selectedRoute.origin_name}` : ""}
+            {` · 완료 ${selectedRoute.completed_stops} / 남은 ${selectedRoute.remaining_stops}`}
+            {selectedRoute.source === "cache" ? " · 캐시" : selectedRoute.source === "routes_api" ? " · 새 계산" : " · 경로 없음"}
           </div>
+        ) : (
+          <div>전체 노선 표시 중</div>
         )}
       </div>
     </div>
