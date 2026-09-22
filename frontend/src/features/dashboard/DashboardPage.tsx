@@ -7,6 +7,7 @@ import EmptyState from "@/components/ui/EmptyState";
 import RetryButton from "@/components/ui/RetryButton";
 import StatusCards from "./components/StatusCards";
 import ManagerTable from "./components/ManagerTable";
+import MapSection from "@/features/map/MapSection";
 import { getStatus } from "@/api/status";
 import { getDeliveries } from "@/api/deliveries";
 import { useAsync } from "@/hooks/useAsync";
@@ -25,6 +26,7 @@ export default function DashboardPage() {
   const isLoading = status.loading || delivery.loading;
   const error = status.error || delivery.error;
   const rows = delivery.data?.managers ?? [];
+  const stops = delivery.data?.stops ?? [];
   const noData = !isLoading && !error && rows.length === 0;
 
   return (
@@ -52,6 +54,8 @@ export default function DashboardPage() {
       {isLoading && <Spinner />}
 
       {!error && status.data && <StatusCards status={status.data} />}
+
+      {!error && stops.length > 0 && <MapSection stops={stops} />}
 
       {!error && noData && (
         <div style={{ marginTop: 24 }}>

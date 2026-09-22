@@ -25,6 +25,27 @@ export interface ManagerRow {
   net_revenue?: number;
 }
 
+export interface StopLineup {
+  name: string;
+  qty: number;
+  amount?: number;
+}
+
+export interface StopPoint {
+  delivery_id: string;
+  address_id: number;
+  address_name?: string | null;
+  latitude: number;
+  longitude: number;
+  delivery_time?: string | null;
+  manager_id?: number | null;
+  manager_name?: string | null;
+  manager_color?: string | null;
+  accounts: number;
+  meals: number;
+  lineups: Record<string, StopLineup>;
+}
+
 export interface DeliveryResp {
   date: string;
   summary: {
@@ -36,6 +57,7 @@ export interface DeliveryResp {
   };
   managers: ManagerRow[];
   unassigned?: { stops: number };
+  stops: StopPoint[];
 }
 
 export interface MeResp {
