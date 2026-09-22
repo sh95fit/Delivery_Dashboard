@@ -63,6 +63,13 @@ def is_admin_email(email: str) -> bool:
 
 
 def get_current_email(request: Request) -> str:
+    # 0) 내부 토큰 헤더 우회 (Swagger·curl·Postman·로컬 개발용)
+    internal = os.environ.get("INTERNAL_API_TOKEN", "").strip()
+    header_token = (request.headers.get("X-Internal-Token") or "").strip()
+    if internal and header_token and header_token == internal:
+        return "internal@lunchlab.me"   # 감사 로그용 가상 이메일
+
+    # 1) 기존 쿠키 세션 검사
     token = request.cookies.get("lunchlab_session")
     if not token:
         raise HTTPException(status_code=401, detail="로그인이 필요합니다")
