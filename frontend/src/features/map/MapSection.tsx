@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { StopPoint } from "@/api/types";
+import type { RouteResp } from "@/api/routes";
 
 const DEFAULT_CENTER = { lat: 37.5665, lng: 126.9780 };
 
@@ -23,9 +24,7 @@ function loadGoogleMaps(): Promise<void> {
     const existing = document.getElementById("google-maps-script") as HTMLScriptElement | null;
     if (existing) {
       existing.addEventListener("load", () => resolve());
-      existing.addEventListener("error", () =>
-        reject(new Error("Google Maps 스크립트 로드 실패")),
-      );
+      existing.addEventListener("error", () => reject(new Error("Google Maps 스크립트 로드 실패")));
       return;
     }
 
@@ -58,7 +57,7 @@ function escapeHtml(value: string | null | undefined) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
+    .replace(/\"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
 
@@ -110,7 +109,50 @@ function buildPopupHtml(group: StopGroup) {
   `;
 }
 
-export default function MapSection({ stops }: { stops: StopPoint[] }) {
+function decodePolyline(encoded: string): Array<{ lat: number; lng: number }> {
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+  const coordinates: Array<{ lat: number; lng: number }> = [];
+
+  while (index < encoded.length) {
+    let shift = 0;
+    let result = 0;
+    let byte: number;
+
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+
+    const deltaLat = (result & 1) ? ~(result >> 1) : (result >> 1);
+    lat += deltaLat;
+
+    shift = 0;
+    result = 0;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+
+    const deltaLng = (result & 1) ? ~(result >> 1) : (result >> 1);
+    lng += deltaLng;
+
+    coordinates.push({ lat: lat / 1e5, lng: lng / 1e5 });
+  }
+
+  return coordinates;
+}
+
+export default function MapSection({
+  stops,
+  route,
+}: {
+  stops: StopPoint[];
+  route: RouteResp | null;
+}) {
   const ref = useRef<HTMLDivElement>(null);
 
   const groups = useMemo<StopGroup[]>(() => {
@@ -137,6 +179,7 @@ export default function MapSection({ stops }: { stops: StopPoint[] }) {
 
   useEffect(() => {
     let markers: any[] = [];
+    let polyline: any = null;
     let map: any;
     let infoWindow: any;
 
@@ -189,7 +232,22 @@ export default function MapSection({ stops }: { stops: StopPoint[] }) {
           bounds.extend(pos);
         });
 
-        if (groups.length > 0) {
+        if (route?.polyline) {
+          const path = decodePolyline(route.polyline);
+          if (path.length > 0) {
+            polyline = new window.google.maps.Polyline({
+              path,
+              geodesic: true,
+              strokeColor: "#3367d6",
+              strokeOpacity: 0.9,
+              strokeWeight: 4,
+            });
+            polyline.setMap(map);
+            path.forEach((p) => bounds.extend(p));
+          }
+        }
+
+        if (!bounds.isEmpty()) {
           map.fitBounds(bounds);
         }
       })
@@ -199,9 +257,9 @@ export default function MapSection({ stops }: { stops: StopPoint[] }) {
 
     return () => {
       markers.forEach((m) => m.setMap(null));
-      markers = [];
+      if (polyline) polyline.setMap(null);
     };
-  }, [groups]);
+  }, [groups, route]);
 
   return (
     <div>
@@ -216,9 +274,19 @@ export default function MapSection({ stops }: { stops: StopPoint[] }) {
           background: "#f8f9fb",
         }}
       />
-      <p style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
-        같은 좌표의 배송지는 마커 1개로 묶어 표시하며, 추가 건수는 <b>+N</b>으로 표시됩니다.
-      </p>
+      <div style={{ marginTop: 8, fontSize: 12, color: "#666", display: "grid", gap: 4 }}>
+        <div>
+          같은 좌표의 배송지는 마커 1개로 묶어 표시하며, 추가 건수는 <b>+N</b>으로 표시됩니다.
+        </div>
+        {route && (
+          <div>
+            경로 상태: {route.source === "cache" ? "캐시" : route.source === "routes_api" ? "새 계산" : "경로 없음"}
+            {route.distance_m > 0 && ` · ${(route.distance_m / 1000).toFixed(1)}km`}
+            {route.duration_s > 0 && ` · ${Math.round(route.duration_s / 60)}분`}
+            {route.origin_name ? ` · 출발지: ${route.origin_name}` : ""}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
