@@ -1,0 +1,30 @@
+import path from "node:path";
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+var PROD = "https://dashboard.lunchlab.me";
+export default defineConfig({
+    plugins: [react()],
+    resolve: {
+        alias: {
+            "@": path.resolve(__dirname, "src"),
+        },
+    },
+    server: {
+        host: "0.0.0.0",
+        port: 5173,
+        proxy: {
+            "/api": {
+                target: PROD,
+                changeOrigin: true,
+            },
+            "/admin": {
+                target: PROD,
+                changeOrigin: true,
+            },
+        },
+    },
+    build: {
+        outDir: "dist",
+        sourcemap: false,
+    },
+});
