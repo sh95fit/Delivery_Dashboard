@@ -12,12 +12,8 @@ from sqlalchemy import text
 from app.database import get_dash_engine, get_engine
 
 KST = timezone(timedelta(hours=9))
-
-# NAVER Maps Directions 15 최신 엔드포인트
 NAVER_DIRECTIONS_URL = "https://maps.apigw.ntruss.com/map-direction-15/v1/driving"
-
-# NAVER Directions 15는 waypoint 최대 15개 기준
-MAX_STOPS_PER_BATCH = 15
+MAX_STOPS_PER_BATCH = 5
 
 
 def _today_kst() -> date_type:
@@ -247,10 +243,18 @@ def _job_state_get(route_date: date_type, manager_id: int, state: str) -> dict |
     }
 
 
-def _job_state_upsert(route_date: date_type, manager_id: int, state: str,
-                      signature: str, route_key: str, status: str,
-                      last_error: str | None = None, last_error_payload: dict | None = None,
-                      next_retry_at=None, retry_count: int = 0) -> None:
+def _job_state_upsert(
+    route_date: date_type,
+    manager_id: int,
+    state: str,
+    signature: str,
+    route_key: str,
+    status: str,
+    last_error: str | None = None,
+    last_error_payload: dict | None = None,
+    next_retry_at=None,
+    retry_count: int = 0,
+) -> None:
     engine = get_dash_engine()
     with engine.connect() as conn:
         conn.execute(text("""
@@ -336,6 +340,20 @@ def _to_lonlat(stop: dict) -> str:
     return f"{stop['longitude']},{stop['latitude']}"
 
 
+def _dedupe_stops(stops: list[dict]) -> list[dict]:
+    result = []
+    seen = set()
+
+    for s in stops:
+        key = (round(s["longitude"], 6), round(s["latitude"], 6))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(s)
+
+    return result
+
+
 def _naver_driving(start: dict, ordered_stops: list[dict], option: str = "trafast") -> dict:
     if not ordered_stops:
         return {
@@ -366,9 +384,11 @@ def _naver_driving(start: dict, ordered_stops: list[dict], option: str = "trafas
         params=params,
         timeout=20,
     )
-    resp.raise_for_status()
-    payload = resp.json()
 
+    if not resp.ok:
+        raise RuntimeError(f"NAVER Directions HTTP {resp.status_code}: {resp.text}")
+
+    payload = resp.json()
     code = int(payload.get("code", -1))
     if code != 0:
         return {
@@ -422,6 +442,8 @@ def _merge_paths(chunks: list[list[dict]]) -> list[dict]:
 
 
 def _compute_route_batched(origin: dict, ordered_stops: list[dict]) -> dict:
+    ordered_stops = _dedupe_stops(ordered_stops)
+
     if len(ordered_stops) == 0:
         return {
             "path": [],
@@ -581,9 +603,18 @@ def _next_retry_time(retry_count: int):
     return now + timedelta(hours=1)
 
 
-def _build_manager_route(target: date_type, state: str, origin: dict, origin_sig: str,
-                         manager_id: int, manager_name: str | None, manager_color: str | None,
-                         manager_stops: list[dict], force: bool = False, trigger_reason: str = "api_read") -> dict:
+def _build_manager_route(
+    target: date_type,
+    state: str,
+    origin: dict,
+    origin_sig: str,
+    manager_id: int,
+    manager_name: str | None,
+    manager_color: str | None,
+    manager_stops: list[dict],
+    force: bool = False,
+    trigger_reason: str = "api_read",
+) -> dict:
     if not manager_stops:
         return {
             "manager_id": manager_id,
@@ -622,7 +653,7 @@ def _build_manager_route(target: date_type, state: str, origin: dict, origin_sig
             [s for s in manager_stops if s["delivered_at"] is None],
             key=lambda s: (s["delivery_time"], s["address_name"] or "", s["id"]),
         )
-    else:  # PREVIEW
+    else:
         completed = []
         remaining = _preview_nearest_neighbor(origin, manager_stops)
 
@@ -656,7 +687,12 @@ def _build_manager_route(target: date_type, state: str, origin: dict, origin_sig
 
     if state == "LIVE" and not force:
         job = _job_state_get(target, manager_id, state)
-        if job and job["current_signature"] == stop_signature and job["current_route_key"] == route_key and job["status"] == "ready":
+        if (
+            job
+            and job["current_signature"] == stop_signature
+            and job["current_route_key"] == route_key
+            and job["status"] == "ready"
+        ):
             cached = _cache_get(route_key)
             if cached:
                 _job_state_touch(target, manager_id, state)
@@ -706,7 +742,6 @@ def _build_manager_route(target: date_type, state: str, origin: dict, origin_sig
                 }
 
     if state == "PREVIEW" and trigger_reason == "api_read" and not force:
-        # PREVIEW는 기본 조회에선 경로 계산하지 않음 (버튼 시뮬레이션 전용)
         return {
             "manager_id": manager_id,
             "manager_name": manager_name,
@@ -730,14 +765,28 @@ def _build_manager_route(target: date_type, state: str, origin: dict, origin_sig
         }
 
     completed_route = {
-        "path": [], "distance_m": 0, "duration_ms": 0, "toll_fare": 0,
-        "fuel_price_naver": 0, "source": "unavailable", "payloads": [],
-        "status": "not_needed", "last_error": None, "last_error_payload": {}
+        "path": [],
+        "distance_m": 0,
+        "duration_ms": 0,
+        "toll_fare": 0,
+        "fuel_price_naver": 0,
+        "source": "unavailable",
+        "payloads": [],
+        "status": "not_needed",
+        "last_error": None,
+        "last_error_payload": {},
     }
     remaining_route = {
-        "path": [], "distance_m": 0, "duration_ms": 0, "toll_fare": 0,
-        "fuel_price_naver": 0, "source": "unavailable", "payloads": [],
-        "status": "not_needed", "last_error": None, "last_error_payload": {}
+        "path": [],
+        "distance_m": 0,
+        "duration_ms": 0,
+        "toll_fare": 0,
+        "fuel_price_naver": 0,
+        "source": "unavailable",
+        "payloads": [],
+        "status": "not_needed",
+        "last_error": None,
+        "last_error_payload": {},
     }
 
     if completed:
@@ -786,7 +835,13 @@ def _build_manager_route(target: date_type, state: str, origin: dict, origin_sig
             "completed_raw": completed_route["payloads"],
             "remaining_raw": remaining_route["payloads"],
         },
-        "status": "ready" if has_any_path else (remaining_route["status"] if remaining_route["status"] != "not_needed" else completed_route["status"]),
+        "status": "ready"
+        if has_any_path
+        else (
+            remaining_route["status"]
+            if remaining_route["status"] != "not_needed"
+            else completed_route["status"]
+        ),
     }
 
     if has_any_path or state == "RESULT":
@@ -799,7 +854,11 @@ def _build_manager_route(target: date_type, state: str, origin: dict, origin_sig
         status = payload["status"] if payload["status"] in ("failed_retryable", "failed_final") else "failed_retryable"
         next_retry_at = _next_retry_time(retry_count) if status == "failed_retryable" else None
         _job_state_upsert(
-            target, manager_id, state, stop_signature, route_key,
+            target,
+            manager_id,
+            state,
+            stop_signature,
+            route_key,
             status=status,
             retry_count=retry_count if status == "failed_retryable" else 0,
             next_retry_at=next_retry_at,
