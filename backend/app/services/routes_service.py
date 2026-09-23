@@ -308,6 +308,13 @@ def _distance_sq(origin: dict, stop: dict) -> float:
     return (origin["latitude"] - stop["latitude"]) ** 2 + (origin["longitude"] - stop["longitude"]) ** 2
 
 
+def _same_point(a: dict, b: dict, precision: int = 6) -> bool:
+    return (
+        round(float(a["latitude"]), precision) == round(float(b["latitude"]), precision)
+        and round(float(a["longitude"]), precision) == round(float(b["longitude"]), precision)
+    )
+
+
 def _preview_nearest_neighbor(origin: dict, stops: list[dict]) -> list[dict]:
     remaining = stops[:]
     ordered: list[dict] = []
@@ -365,6 +372,18 @@ def _naver_driving(start: dict, ordered_stops: list[dict], option: str = "trafas
             "payload": {},
             "source": "unavailable",
             "code": -1,
+        }
+
+    if len(ordered_stops) == 1 and _same_point(start, ordered_stops[0]):
+        return {
+            "path": [],
+            "distance_m": 0,
+            "duration_ms": 0,
+            "toll_fare": 0,
+            "fuel_price_naver": 0,
+            "payload": {"note": "start and goal are same"},
+            "source": "same_point",
+            "code": 1,
         }
 
     params = {
@@ -465,11 +484,22 @@ def _compute_route_batched(origin: dict, ordered_stops: list[dict]) -> dict:
     while remaining:
         batch = remaining[:MAX_STOPS_PER_BATCH]
         remaining = remaining[MAX_STOPS_PER_BATCH:]
+
+        batch = _dedupe_stops(batch)
+
+        while batch and _same_point(current_origin, batch[0]):
+            batch = batch[1:]
+
+        if not batch:
+            continue
+
         result = _naver_driving(current_origin, batch)
         chunks.append(result)
         current_origin = batch[-1]
 
-    good_chunks = [c for c in chunks if c["path"]]
+    good_chunks = [c for c in chunks if c["source"] in ("naver", "same_point")]
+    nav_chunks = [c for c in chunks if c["source"] == "naver"]
+
     if not good_chunks:
         errors = [c for c in chunks if c["source"] == "unavailable"]
         retryable = any(c.get("code") in (-1,) for c in errors)
@@ -487,14 +517,15 @@ def _compute_route_batched(origin: dict, ordered_stops: list[dict]) -> dict:
             "last_error_payload": {"chunks": [c.get("payload", {}) for c in chunks]},
         }
 
-    path = _merge_paths([c["path"] for c in good_chunks])
+    path = _merge_paths([c["path"] for c in nav_chunks]) if nav_chunks else []
+
     return {
         "path": path,
-        "distance_m": sum(c["distance_m"] for c in good_chunks),
-        "duration_ms": sum(c["duration_ms"] for c in good_chunks),
-        "toll_fare": sum(c["toll_fare"] for c in good_chunks),
-        "fuel_price_naver": sum(c["fuel_price_naver"] for c in good_chunks),
-        "source": "naver",
+        "distance_m": sum(c["distance_m"] for c in nav_chunks),
+        "duration_ms": sum(c["duration_ms"] for c in nav_chunks),
+        "toll_fare": sum(c["toll_fare"] for c in nav_chunks),
+        "fuel_price_naver": sum(c["fuel_price_naver"] for c in nav_chunks),
+        "source": "naver" if nav_chunks else "same_point",
         "payloads": [c.get("payload", {}) for c in chunks],
         "status": "ready",
         "last_error": None,
