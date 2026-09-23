@@ -242,13 +242,35 @@ def _compute_segment(origin: dict, destination: dict, intermediates: list[dict])
         },
         timeout=20,
     )
-    resp.raise_for_status()
 
-    route = resp.json()["routes"][0]
+    # 1) HTTP 에러면 원문 포함
+    if not resp.ok:
+        raise RuntimeError(f"Routes API HTTP {resp.status_code}: {resp.text}")
+
+    # 2) JSON 파싱
+    try:
+        payload = resp.json()
+    except Exception as exc:
+        raise RuntimeError(f"Routes API JSON 파싱 실패: {resp.text}") from exc
+
+    # 3) routes 키 검증
+    routes = payload.get("routes")
+    if not routes:
+        raise RuntimeError(f"Routes API 응답 이상: {payload}")
+
+    route = routes[0]
+
+    polyline = route.get("polyline", {}).get("encodedPolyline")
+    distance_m = route.get("distanceMeters")
+    duration_raw = route.get("duration")
+
+    if not polyline or distance_m is None or not duration_raw:
+        raise RuntimeError(f"Routes API 필수 필드 누락: {payload}")
+
     return {
-        "polyline": route["polyline"]["encodedPolyline"],
-        "distance_m": int(route["distanceMeters"]),
-        "duration_s": int(route["duration"].rstrip("s")),
+        "polyline": polyline,
+        "distance_m": int(distance_m),
+        "duration_s": int(str(duration_raw).rstrip("s")),
     }
 
 
