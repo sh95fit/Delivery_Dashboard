@@ -1,47 +1,12 @@
 import { useEffect, useMemo, useRef } from "react";
-import type { StopPoint } from "@/api/types";
-import type { RouteSummary } from "@/api/routes";
+import type { RouteSummary, StopPoint } from "@/api/types";
 
 const DEFAULT_CENTER = { lat: 37.5665, lng: 126.9780 };
 
 declare global {
   interface Window {
-    google?: any;
+    naver?: any;
   }
-}
-
-function lineupText(stop: StopPoint) {
-  const parts = Object.values(stop.lineups)
-    .filter((x) => x.qty > 0)
-    .map((x) => `${x.name} ${x.qty}`);
-  return parts.join(" / ");
-}
-
-function loadGoogleMaps(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (window.google?.maps) return resolve();
-
-    const existing = document.getElementById("google-maps-script") as HTMLScriptElement | null;
-    if (existing) {
-      existing.addEventListener("load", () => resolve());
-      existing.addEventListener("error", () => reject(new Error("Google Maps 스크립트 로드 실패")));
-      return;
-    }
-
-    const key = import.meta.env.VITE_MAPS_API_KEY;
-    if (!key) {
-      reject(new Error("VITE_MAPS_API_KEY가 없습니다"));
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.id = "google-maps-script";
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${key}`;
-    script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Google Maps 스크립트 로드 실패"));
-    document.head.appendChild(script);
-  });
 }
 
 type StopGroup = {
@@ -57,8 +22,42 @@ function escapeHtml(value: string | null | undefined) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
+    .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function lineupText(stop: StopPoint) {
+  const parts = Object.values(stop.lineups)
+    .filter((x) => x.qty > 0)
+    .map((x) => `${x.name} ${x.qty}`);
+  return parts.join(" / ");
+}
+
+function loadNaverMaps(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (window.naver?.maps) return resolve();
+
+    const existing = document.getElementById("naver-maps-script") as HTMLScriptElement | null;
+    if (existing) {
+      existing.addEventListener("load", () => resolve());
+      existing.addEventListener("error", () => reject(new Error("NAVER Maps 스크립트 로드 실패")));
+      return;
+    }
+
+    const keyId = import.meta.env.VITE_NAVER_MAP_KEY_ID;
+    if (!keyId) {
+      reject(new Error("VITE_NAVER_MAP_KEY_ID가 없습니다"));
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = "naver-maps-script";
+    script.src = `https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${keyId}`;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("NAVER Maps 스크립트 로드 실패"));
+    document.head.appendChild(script);
+  });
 }
 
 function buildPopupHtml(group: StopGroup) {
@@ -109,43 +108,6 @@ function buildPopupHtml(group: StopGroup) {
   `;
 }
 
-function decodePolyline(encoded: string): Array<{ lat: number; lng: number }> {
-  let index = 0;
-  let lat = 0;
-  let lng = 0;
-  const coordinates: Array<{ lat: number; lng: number }> = [];
-
-  while (index < encoded.length) {
-    let shift = 0;
-    let result = 0;
-    let byte: number;
-
-    do {
-      byte = encoded.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20);
-
-    const deltaLat = (result & 1) ? ~(result >> 1) : (result >> 1);
-    lat += deltaLat;
-
-    shift = 0;
-    result = 0;
-    do {
-      byte = encoded.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20);
-
-    const deltaLng = (result & 1) ? ~(result >> 1) : (result >> 1);
-    lng += deltaLng;
-
-    coordinates.push({ lat: lat / 1e5, lng: lng / 1e5 });
-  }
-
-  return coordinates;
-}
-
 function routeColor(route: RouteSummary, selectedManagerId: number | null) {
   if (selectedManagerId == null) return route.manager_color || "#3367d6";
   return route.manager_id === selectedManagerId ? route.manager_color || "#3367d6" : "#c7cdd6";
@@ -153,7 +115,27 @@ function routeColor(route: RouteSummary, selectedManagerId: number | null) {
 
 function routeOpacity(route: RouteSummary, selectedManagerId: number | null) {
   if (selectedManagerId == null) return 0.9;
-  return route.manager_id === selectedManagerId ? 1 : 0.28;
+  return route.manager_id === selectedManagerId ? 1 : 0.25;
+}
+
+function groupStops(stops: StopPoint[]): StopGroup[] {
+  const map = new Map<string, StopGroup>();
+
+  stops.forEach((stop) => {
+    const key = `${stop.latitude.toFixed(6)},${stop.longitude.toFixed(6)}`;
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        latitude: stop.latitude,
+        longitude: stop.longitude,
+        managerColor: stop.manager_color,
+        items: [],
+      });
+    }
+    map.get(key)!.items.push(stop);
+  });
+
+  return Array.from(map.values());
 }
 
 export default function MapSection({
@@ -166,28 +148,7 @@ export default function MapSection({
   selectedManagerId: number | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-
-  const groups = useMemo<StopGroup[]>(() => {
-    const map = new Map<string, StopGroup>();
-
-    stops.forEach((stop) => {
-      const key = `${stop.latitude.toFixed(6)},${stop.longitude.toFixed(6)}`;
-
-      if (!map.has(key)) {
-        map.set(key, {
-          key,
-          latitude: stop.latitude,
-          longitude: stop.longitude,
-          managerColor: stop.manager_color,
-          items: [],
-        });
-      }
-
-      map.get(key)!.items.push(stop);
-    });
-
-    return Array.from(map.values());
-  }, [stops]);
+  const groups = useMemo(() => groupStops(stops), [stops]);
 
   useEffect(() => {
     let markers: any[] = [];
@@ -195,49 +156,51 @@ export default function MapSection({
     let map: any;
     let infoWindow: any;
 
-    loadGoogleMaps()
+    loadNaverMaps()
       .then(() => {
-        if (!ref.current || !window.google) return;
+        if (!ref.current || !window.naver?.maps) return;
+        const naver = window.naver;
 
-        map = new window.google.maps.Map(ref.current, {
-          center: DEFAULT_CENTER,
+        map = new naver.maps.Map(ref.current, {
+          center: new naver.maps.LatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng),
           zoom: 11,
         });
 
-        infoWindow = new window.google.maps.InfoWindow();
-        const bounds = new window.google.maps.LatLngBounds();
+        infoWindow = new naver.maps.InfoWindow({
+          content: "",
+          maxWidth: 340,
+          backgroundColor: "#fff",
+          borderColor: "#ddd",
+          borderWidth: 1,
+          anchorSize: new naver.maps.Size(12, 14),
+        });
+
+        const bounds = new naver.maps.LatLngBounds();
 
         groups.forEach((group) => {
-          const pos = { lat: group.latitude, lng: group.longitude };
+          const pos = new naver.maps.LatLng(group.latitude, group.longitude);
           const extraCount = Math.max(group.items.length - 1, 0);
+          const color = group.managerColor || "#3367d6";
 
-          const marker = new window.google.maps.Marker({
+          const marker = new naver.maps.Marker({
             map,
             position: pos,
-            title: group.items[0]?.address_name || String(group.items[0]?.address_id),
-            label:
-              extraCount > 0
-                ? {
-                    text: `+${extraCount}`,
-                    color: "#ffffff",
-                    fontSize: "11px",
-                    fontWeight: "700",
-                  }
-                : undefined,
             icon: {
-              path: window.google.maps.SymbolPath.CIRCLE,
-              scale: extraCount > 0 ? 12 : 10,
-              fillColor: group.managerColor || "#3367d6",
-              fillOpacity: 1,
-              strokeColor: "#ffffff",
-              strokeWeight: 1.5,
+              content: `
+                <div style="position:relative;transform:translate(-50%, -50%);">
+                  <div style="width:${extraCount > 0 ? 24 : 20}px;height:${extraCount > 0 ? 24 : 20}px;border-radius:9999px;background:${color};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);"></div>
+                  ${extraCount > 0 ? `<div style="position:absolute;left:50%;top:50%;transform:translate(-50%, -50%);color:#fff;font-size:11px;font-weight:700;">+${extraCount}</div>` : ""}
+                </div>
+              `,
+              anchor: new naver.maps.Point(extraCount > 0 ? 12 : 10, extraCount > 0 ? 12 : 10),
             },
+            title: group.items[0]?.address_name || String(group.items[0]?.address_id),
           });
 
           const html = buildPopupHtml(group);
-          marker.addListener("click", () => {
+          naver.maps.Event.addListener(marker, "click", () => {
             infoWindow.setContent(html);
-            infoWindow.open({ map, anchor: marker });
+            infoWindow.open(map, marker);
           });
 
           markers.push(marker);
@@ -248,43 +211,35 @@ export default function MapSection({
           const color = routeColor(route, selectedManagerId);
           const opacity = routeOpacity(route, selectedManagerId);
 
-          if (route.completed_polyline) {
-            const completedPath = decodePolyline(route.completed_polyline);
-            if (completedPath.length > 0) {
-              const line = new window.google.maps.Polyline({
-                path: completedPath,
-                geodesic: true,
-                strokeColor: color,
-                strokeOpacity: opacity,
-                strokeWeight: selectedManagerId === route.manager_id ? 5 : 4,
-              });
-              line.setMap(map);
-              polylines.push(line);
-              completedPath.forEach((p) => bounds.extend(p));
-            }
+          if (route.completed_path?.length) {
+            const path = route.completed_path.map((p) => new naver.maps.LatLng(p.lat, p.lng));
+            const line = new naver.maps.Polyline({
+              map,
+              path,
+              strokeColor: color,
+              strokeOpacity: opacity,
+              strokeWeight: selectedManagerId === route.manager_id ? 6 : 4,
+              strokeLineCap: "round",
+              strokeLineJoin: "round",
+            });
+            polylines.push(line);
+            path.forEach((p) => bounds.extend(p));
           }
 
-          if (route.remaining_polyline) {
-            const remainingPath = decodePolyline(route.remaining_polyline);
-            if (remainingPath.length > 0) {
-              const line = new window.google.maps.Polyline({
-                path: remainingPath,
-                geodesic: true,
-                strokeColor: color,
-                strokeOpacity: opacity * 0.85,
-                strokeWeight: selectedManagerId === route.manager_id ? 5 : 4,
-                icons: [
-                  {
-                    icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 3 },
-                    offset: "0",
-                    repeat: "12px",
-                  },
-                ],
-              });
-              line.setMap(map);
-              polylines.push(line);
-              remainingPath.forEach((p) => bounds.extend(p));
-            }
+          if (route.remaining_path?.length) {
+            const path = route.remaining_path.map((p) => new naver.maps.LatLng(p.lat, p.lng));
+            const line = new naver.maps.Polyline({
+              map,
+              path,
+              strokeColor: color,
+              strokeOpacity: opacity * 0.9,
+              strokeWeight: selectedManagerId === route.manager_id ? 6 : 4,
+              strokeStyle: "shortdash",
+              strokeLineCap: "round",
+              strokeLineJoin: "round",
+            });
+            polylines.push(line);
+            path.forEach((p) => bounds.extend(p));
           }
         });
 
@@ -302,9 +257,10 @@ export default function MapSection({
     };
   }, [groups, routes, selectedManagerId]);
 
-  const selectedRoute = selectedManagerId == null
-    ? null
-    : routes.find((r) => r.manager_id === selectedManagerId) ?? null;
+  const selectedRoute =
+    selectedManagerId == null
+      ? null
+      : routes.find((r) => r.manager_id === selectedManagerId) ?? null;
 
   return (
     <div>
@@ -313,7 +269,7 @@ export default function MapSection({
         ref={ref}
         style={{
           width: "100%",
-          height: 560,
+          height: 620,
           borderRadius: 12,
           border: "1px solid #e5e7eb",
           background: "#f8f9fb",
@@ -327,10 +283,19 @@ export default function MapSection({
           <div>
             선택 노선: {selectedRoute.manager_name ?? selectedRoute.manager_id}
             {selectedRoute.distance_m > 0 && ` · ${(selectedRoute.distance_m / 1000).toFixed(1)}km`}
-            {selectedRoute.duration_s > 0 && ` · ${Math.round(selectedRoute.duration_s / 60)}분`}
+            {selectedRoute.duration_ms > 0 && ` · ${Math.round(selectedRoute.duration_ms / 60000)}분`}
             {selectedRoute.origin_name ? ` · 출발지: ${selectedRoute.origin_name}` : ""}
             {` · 완료 ${selectedRoute.completed_stops} / 남은 ${selectedRoute.remaining_stops}`}
-            {selectedRoute.source === "cache" ? " · 캐시" : selectedRoute.source === "routes_api" ? " · 새 계산" : " · 경로 없음"}
+            {selectedRoute.toll_fare > 0 && ` · 예상 통행요금 ${selectedRoute.toll_fare.toLocaleString()}원`}
+            {selectedRoute.fuel_price_naver > 0 && ` · NAVER 예상 유류비 ${selectedRoute.fuel_price_naver.toLocaleString()}원`}
+            {selectedRoute.fuel_price_opinet && ` · 오피넷 기준 예상 유류비 ${selectedRoute.fuel_price_opinet.toLocaleString()}원`}
+            {selectedRoute.source === "cache"
+              ? " · 캐시"
+              : selectedRoute.source === "naver"
+                ? " · 새 계산"
+                : selectedRoute.source === "pending"
+                  ? " · 예상 경로 계산 전"
+                  : " · 경로 없음"}
           </div>
         ) : (
           <div>전체 노선 표시 중</div>

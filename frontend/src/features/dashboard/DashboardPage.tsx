@@ -133,7 +133,9 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {!error && stops.length > 0 && <MapSection stops={stops} routes={displayedRoutes} selectedManagerId={selectedManagerId} />}
+      {!error && stops.length > 0 && (
+        <MapSection stops={stops} routes={displayedRoutes} selectedManagerId={selectedManagerId} />
+      )}
 
       {!error && noData && (
         <div style={{ marginTop: 24 }}>
