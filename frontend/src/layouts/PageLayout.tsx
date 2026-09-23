@@ -10,8 +10,24 @@ export default function PageLayout({
   right?: ReactNode;
 }) {
   return (
-    <div style={{ maxWidth: 1080, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" }}>
-      <header style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+    <div
+      style={{
+        width: "100%",
+        maxWidth: "none",
+        padding: "16px 20px 28px",
+        fontFamily: "system-ui, sans-serif",
+        boxSizing: "border-box",
+      }}
+    >
+      <header
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          marginBottom: 16,
+          flexWrap: "wrap",
+        }}
+      >
         <h1 style={{ fontSize: 20, margin: 0 }}>{title}</h1>
         {right}
       </header>

@@ -64,6 +64,35 @@ export interface DeliveryResp {
   stops: StopPoint[];
 }
 
+export interface RouteSummary {
+  manager_id: number;
+  manager_name?: string | null;
+  manager_color?: string | null;
+  mode: "preview" | "live" | "result";
+  completed_path: Array<{ lat: number; lng: number }>;
+  remaining_path: Array<{ lat: number; lng: number }>;
+  distance_m: number;
+  duration_ms: number;
+  completed_stops: number;
+  remaining_stops: number;
+  toll_fare: number;
+  fuel_price_naver: number;
+  fuel_price_opinet?: number | null;
+  origin_name?: string | null;
+  source: "cache" | "naver" | "pending" | "unavailable";
+  completed_stop_ids?: number[];
+  remaining_stop_ids?: number[];
+  payload?: Record<string, unknown>;
+  status?: string;
+}
+
+export interface AllRoutesResp {
+  date: string;
+  state: "PREVIEW" | "LIVE" | "RESULT" | "NONE";
+  source: "delivery" | "orders_estimate";
+  routes: RouteSummary[];
+}
+
 export interface MeResp {
   email: string;
   is_admin?: boolean;
