@@ -41,5 +41,16 @@ services:
     ports:
       - "127.0.0.1:6380:6379"
 
+  route_worker:
+    build: ./backend
+    container_name: dash_route_worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: ["python", "-m", "app.route_collector"]
+    depends_on:
+      - db
+      - redis
+
 volumes:
   dash_db_data:
