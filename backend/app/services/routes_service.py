@@ -19,7 +19,7 @@ from sqlalchemy import text
 from app.database import get_dash_engine, get_engine
 
 ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
-FIELD_MASK = "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline"
+FIELD_MASK = "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,fallbackInfo"
 MAX_STOPS_PER_BATCH = 20
 
 
@@ -243,20 +243,25 @@ def _compute_segment(origin: dict, destination: dict, intermediates: list[dict])
         timeout=20,
     )
 
-    # 1) HTTP 에러면 원문 포함
     if not resp.ok:
         raise RuntimeError(f"Routes API HTTP {resp.status_code}: {resp.text}")
 
-    # 2) JSON 파싱
     try:
         payload = resp.json()
     except Exception as exc:
         raise RuntimeError(f"Routes API JSON 파싱 실패: {resp.text}") from exc
 
-    # 3) routes 키 검증
     routes = payload.get("routes")
+
+    # 핵심: routes가 없거나 비어 있으면 '경로 없음'으로 처리
     if not routes:
-        raise RuntimeError(f"Routes API 응답 이상: {payload}")
+        return {
+            "polyline": "",
+            "distance_m": 0,
+            "duration_s": 0,
+            "source": "unavailable",
+            "raw_response": payload,
+        }
 
     route = routes[0]
 
@@ -265,12 +270,20 @@ def _compute_segment(origin: dict, destination: dict, intermediates: list[dict])
     duration_raw = route.get("duration")
 
     if not polyline or distance_m is None or not duration_raw:
-        raise RuntimeError(f"Routes API 필수 필드 누락: {payload}")
+        return {
+            "polyline": "",
+            "distance_m": 0,
+            "duration_s": 0,
+            "source": "unavailable",
+            "raw_response": payload,
+        }
 
     return {
         "polyline": polyline,
         "distance_m": int(distance_m),
         "duration_s": int(str(duration_raw).rstrip("s")),
+        "source": "routes_api",
+        "raw_response": payload,
     }
 
 
@@ -310,6 +323,8 @@ def _compute_route_batched(origin: dict, ordered_stops: list[dict]) -> dict:
     total_duration = 0
 
     for i, seg in enumerate(segments):
+        if not seg["polyline"]:
+            continue
         pts = _decode_polyline(seg["polyline"])
         if i > 0 and pts:
             pts = pts[1:]
