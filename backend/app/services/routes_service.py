@@ -121,6 +121,38 @@ def _cache_key(target: date_type, manager_id: int, state: str, origin_sig: str, 
     return f"{target.isoformat()}:{manager_id}:{state}:{origin_sig}:{stop_signature}"
 
 
+def _full_route_key(target: date_type, manager_id: int, origin_sig: str, all_sig: str) -> str:
+    return _cache_key(target, manager_id, "FULL", origin_sig, all_sig)
+
+
+def _split_full_path(full_path: list[dict], completed: list[dict], remaining: list[dict], origin: dict) -> tuple[list[dict], list[dict]]:
+    """FULL 경로를 완료 stop 좌표 기준으로 잘라 completed/remaining으로 나눈다 (NAVER 호출 0회).
+    완료 stop 중 경로 상에서 가장 마지막으로 등장하는 지점까지를 completed로 본다."""
+    if not full_path:
+        return [], []
+
+    done_points = [(round(float(s["latitude"]), 6), round(float(s["longitude"]), 6)) for s in completed]
+
+    # 경로 위에서 완료 지점의 마지막 등장 인덱스
+    last_done_idx = -1
+    for idx, pt in enumerate(full_path):
+        key = (round(float(pt["lat"]), 6), round(float(pt["lng"]), 6))
+        if key in done_points:
+            last_done_idx = idx
+        # 근사 매칭: 소수 4자리(약 11m)까지 동일하면 같은 지점으로 본다
+        key4 = (round(float(pt["lat"]), 4), round(float(pt["lng"]), 4))
+        for dlat, dlng in done_points:
+            if key4 == (round(dlat, 4), round(dlng, 4)):
+                last_done_idx = idx
+
+    if last_done_idx < 0:
+        return [], full_path
+
+    completed_part = full_path[: last_done_idx + 1]
+    remaining_part = full_path[last_done_idx:]
+    return completed_part, remaining_part
+
+
 def _cache_get(route_key: str) -> dict | None:
     with get_dash_engine().connect() as conn:
         row = conn.execute(
@@ -1093,123 +1125,57 @@ def _build_manager_route(
         "last_error_payload": {},
     }
 
-    completed_route = {
-        "path": [], "distance_m": 0, "duration_ms": 0,
-        "toll_fare": 0, "fuel_price_naver": 0,
-        "source": "not_needed", "payloads": [],
-        "status": "not_needed", "last_error": None, "last_error_payload": {},
-    }
+    all_stops = completed + remaining
+    all_sig = _build_node_signature(_group_route_nodes(all_stops))
+    full_key = _full_route_key(target, manager_id, origin_sig, all_sig)
+    cached_full = _cache_get(full_key)
 
-    if completed:
-        comp_key = _cache_key(target, manager_id, "COMPLETED_FIXED", origin_sig,
-                              _completed_signature(completed))
-        cached_completed = _cache_get(comp_key)
+    completed_path: list[dict] = []
+    remaining_path: list[dict] = []
 
-        if cached_completed and cached_completed["remaining_path"]:
-            # 완료 구간: 캐시 재사용 - NAVER 호출 0회
-            completed_route = {
-                "path": cached_completed["remaining_path"],
-                "distance_m": cached_completed["distance_m"],
-                "duration_ms": cached_completed["duration_ms"],
-                "toll_fare": cached_completed["toll_fare"],
-                "fuel_price_naver": cached_completed["fuel_price_naver"],
-                "source": "cache", "payloads": [], "status": "ready",
-                "last_error": None, "last_error_payload": {},
-            }
-        elif len(completed) > 1:
-            # 증분: 기존 완료 경로 마지막 점에서 새 완료 stop까지 1배치만 계산
-            prev_key = _cache_key(target, manager_id, "COMPLETED_FIXED", origin_sig,
-                                  _completed_signature(completed[:-1]))
-            prev_cached = _cache_get(prev_key)
-            if prev_cached and prev_cached["remaining_path"]:
-                last_point = prev_cached["remaining_path"][-1]
-                new_seg = _compute_route_batched(
-                    {"name": "prev_completed_end",
-                     "latitude": last_point["lat"], "longitude": last_point["lng"]},
-                    [completed[-1]],
-                )
-                merged = prev_cached["remaining_path"] + (
-                    new_seg["path"][1:] if new_seg["path"] else []
-                )
-                completed_route = {
-                    "path": merged,
-                    "distance_m": prev_cached["distance_m"] + new_seg["distance_m"],
-                    "duration_ms": prev_cached["duration_ms"] + new_seg["duration_ms"],
-                    "toll_fare": prev_cached["toll_fare"] + new_seg["toll_fare"],
-                    "fuel_price_naver": prev_cached["fuel_price_naver"] + new_seg["fuel_price_naver"],
-                    "source": "naver" if new_seg["source"] == "naver" else "cache",
-                    "payloads": [], "status": "ready",
-                    "last_error": None, "last_error_payload": {},
-                }
-            else:
-                completed_route = _compute_route_batched(origin, completed)
-
-            _cache_put(comp_key, "COMPLETED_FIXED", _completed_signature(completed), {
+    if cached_full and (cached_full["completed_path"] or cached_full["remaining_path"]):
+        # FULL 경로 재사용 — NAVER 호출 0회. 완료/남은 경계만 stop 좌표로 잘라낸다.
+        stored = cached_full["completed_path"] + cached_full["remaining_path"]
+        completed_path, remaining_path = _split_full_path(stored, completed, remaining, origin)
+    else:
+        # 하루 1회 계산: delivered_at 순(완료 먼저) + 남은 배송지(희망시간 순) 순서로 전체 경로 계산
+        ordered = completed + remaining
+        result = _compute_route_batched(origin, ordered)
+        if result["source"] in ("naver", "same_point") and result["path"]:
+            full_payload = {
                 "completed_path": [],
-                "remaining_path": completed_route["path"],
-                "distance_m": completed_route["distance_m"],
-                "duration_ms": completed_route["duration_ms"],
-                "completed_stops": len(completed), "remaining_stops": 0,
-                "toll_fare": completed_route["toll_fare"],
-                "fuel_price_naver": completed_route["fuel_price_naver"],
+                "remaining_path": result["path"],
+                "distance_m": result["distance_m"],
+                "duration_ms": result["duration_ms"],
+                "completed_stops": len(completed), "remaining_stops": len(remaining),
+                "toll_fare": result["toll_fare"],
+                "fuel_price_naver": result["fuel_price_naver"],
                 "fuel_price_opinet": None, "origin_name": origin["name"],
+                "origin_latitude": origin["latitude"],
+                "origin_longitude": origin["longitude"],
+                "completed_stop_ids": [str(s2["id"]) for s2 in completed],
+                "remaining_stop_ids": [str(s2["id"]) for s2 in remaining],
                 "payload": {}, "source": "naver", "status": "ready",
-            })
-        else:
-            # 완료 1건 첫 계산
-            completed_route = _compute_route_batched(origin, completed)
-            if completed_route["source"] in ("naver", "same_point"):
-                _cache_put(comp_key, "COMPLETED_FIXED", _completed_signature(completed), {
-                    "completed_path": [],
-                    "remaining_path": completed_route["path"],
-                    "distance_m": completed_route["distance_m"],
-                    "duration_ms": completed_route["duration_ms"],
-                    "completed_stops": len(completed), "remaining_stops": 0,
-                    "toll_fare": completed_route["toll_fare"],
-                    "fuel_price_naver": completed_route["fuel_price_naver"],
-                    "fuel_price_opinet": None, "origin_name": origin["name"],
-                    "payload": {}, "source": completed_route["source"], "status": "ready",
-                })
-
-    rem_origin = origin  # 남은 구간도 출발지에서 시작 (요구사항: 모든 노선이 출발지에서 시작)
-
-    remaining_route = {
-        "path": [], "distance_m": 0, "duration_ms": 0,
-        "toll_fare": 0, "fuel_price_naver": 0,
-        "source": "not_needed", "payloads": [],
-        "status": "not_needed", "last_error": None, "last_error_payload": {},
-    }
-
-    if remaining:
-        rem_sig = _build_node_signature(_group_route_nodes(remaining))
-        rem_key = _cache_key(target, manager_id, "REMAINING", origin_sig, rem_sig)
-        cached_remaining = _cache_get(rem_key)
-
-        if cached_remaining and cached_remaining["remaining_path"]:
-            # 배송지 집합 불변 - 재계산 없이 재사용 (호출 0회)
-            remaining_route = {
-                "path": cached_remaining["remaining_path"],
-                "distance_m": cached_remaining["distance_m"],
-                "duration_ms": cached_remaining["duration_ms"],
-                "toll_fare": cached_remaining["toll_fare"],
-                "fuel_price_naver": cached_remaining["fuel_price_naver"],
-                "source": "cache", "payloads": [], "status": "ready",
-                "last_error": None, "last_error_payload": {},
             }
+            _cache_put(full_key, "FULL", all_sig, full_payload)
+            completed_path, remaining_path = _split_full_path(result["path"], completed, remaining, origin)
         else:
-            remaining_route = _compute_route_batched(rem_origin, remaining)
-            if remaining_route["source"] in ("naver", "same_point"):
-                _cache_put(rem_key, "REMAINING", rem_sig, {
-                    "completed_path": [],
-                    "remaining_path": remaining_route["path"],
-                    "distance_m": remaining_route["distance_m"],
-                    "duration_ms": remaining_route["duration_ms"],
-                    "completed_stops": 0, "remaining_stops": len(remaining),
-                    "toll_fare": remaining_route["toll_fare"],
-                    "fuel_price_naver": remaining_route["fuel_price_naver"],
-                    "fuel_price_opinet": None, "origin_name": rem_origin["name"],
-                    "payload": {}, "source": remaining_route["source"], "status": "ready",
-                })
+            completed_path, remaining_path = [], []
+
+    completed_route = {
+        "path": completed_path,
+        "distance_m": 0, "duration_ms": 0, "toll_fare": 0, "fuel_price_naver": 0,
+        "source": "cache" if completed_path else "not_needed", "payloads": [],
+        "status": "ready" if completed_path else "not_needed",
+        "last_error": None, "last_error_payload": {},
+    }
+    remaining_route = {
+        "path": remaining_path,
+        "distance_m": 0, "duration_ms": 0, "toll_fare": 0, "fuel_price_naver": 0,
+        "source": "cache" if remaining_path else "not_needed", "payloads": [],
+        "status": "ready" if remaining_path else "not_needed",
+        "last_error": None, "last_error_payload": {},
+    }
 
     fuel_price_opinet = _latest_opinet_fuel_price()
     overall_distance = completed_route["distance_m"] + remaining_route["distance_m"]
