@@ -224,6 +224,8 @@ export default function MapSection({
     polylinesRef.current = [];
 
     const bounds = new naver.maps.LatLngBounds();
+    // NAVER LatLngBounds에는 isEmpty()가 없다 -> 확장 여부를 직접 기록
+    let hasBoundsPoints = false;
 
     // 마커
     groups.forEach((group) => {
@@ -259,6 +261,7 @@ export default function MapSection({
 
       markersRef.current.push(marker);
       bounds.extend(pos);
+      hasBoundsPoints = true;
     });
 
     // 경로선
@@ -286,6 +289,7 @@ export default function MapSection({
         });
         polylinesRef.current.push(line);
         path.forEach((p) => bounds.extend(new naver.maps.LatLng(p.lat, p.lng)));
+        hasBoundsPoints = true;
       }
 
       if (remaining.length >= 2) {
@@ -302,13 +306,14 @@ export default function MapSection({
         });
         polylinesRef.current.push(line);
         path.forEach((p) => bounds.extend(new naver.maps.LatLng(p.lat, p.lng)));
+        hasBoundsPoints = true;
       }
     });
 
     // 자동 재정렬은 autoFitKey가 바뀔 때만.
     // 폴링은 autoFitKey를 바꾸지 않으므로, 여기서 지도 시점이 초기화되지 않는다.
     if (lastAutoFitKeyRef.current !== autoFitKey && !hasUserInteractedRef.current) {
-      if (!bounds.isEmpty()) {
+      if (hasBoundsPoints) {
         map.fitBounds(bounds, { top: 40, right: 40, bottom: 40, left: 40 });
       }
       lastAutoFitKeyRef.current = autoFitKey;
@@ -339,7 +344,7 @@ export default function MapSection({
       });
     });
 
-    if (!bounds.isEmpty()) {
+    if (groups.length > 0 || routes.length > 0) {
       map.fitBounds(bounds, { top: 40, right: 40, bottom: 40, left: 40 });
     } else {
       map.setCenter(new naver.maps.LatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng));
