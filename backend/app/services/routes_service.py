@@ -163,7 +163,7 @@ def _cache_get(route_key: str) -> dict | None:
 def _latest_cache_for_manager(target: date_type, manager_id: int, state: str) -> dict | None:
     """서명 무관, 해당 매니저/날짜/상태의 가장 최근 성공 캐시 1건."""
     prefix = f"{target.isoformat()}:{manager_id}:{state}:"
-    engine = get_engine()
+    engine = get_dash_engine()
     with engine.connect() as conn:
         row = conn.execute(text("""
             SELECT route_key, completed_path_json, remaining_path_json,
