@@ -52,13 +52,17 @@ def _normalize_delivery_hour(raw: str | None) -> str:
 
 def _active_origin() -> tuple[dict, str]:
     with get_dash_engine().connect() as conn:
-        row = conn.execute(text("""
-            SELECT id, name, latitude, longitude
-            FROM route_origins
-            WHERE is_active = TRUE
-            ORDER BY id DESC
-            LIMIT 1
-        """)).fetchone()
+        row = conn.execute(
+            text(
+                """
+                SELECT id, name, latitude, longitude
+                FROM route_origins
+                WHERE is_active = TRUE
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            )
+        ).fetchone()
 
     if row:
         origin = {
@@ -86,13 +90,17 @@ def _active_origin() -> tuple[dict, str]:
 def _latest_opinet_fuel_price() -> int | None:
     try:
         with get_dash_engine().connect() as conn:
-            row = conn.execute(text("""
-                SELECT price
-                FROM fuel_price_log
-                WHERE fuel_type = 'gasoline'
-                ORDER BY price_date DESC, id DESC
-                LIMIT 1
-            """)).fetchone()
+            row = conn.execute(
+                text(
+                    """
+                    SELECT price
+                    FROM fuel_price_log
+                    WHERE fuel_type = 'gasoline'
+                    ORDER BY price_date DESC, id DESC
+                    LIMIT 1
+                    """
+                )
+            ).fetchone()
         return int(row.price) if row else None
     except Exception:
         return None
@@ -104,14 +112,19 @@ def _cache_key(target: date_type, manager_id: int, state: str, origin_sig: str, 
 
 def _cache_get(route_key: str) -> dict | None:
     with get_dash_engine().connect() as conn:
-        row = conn.execute(text("""
-            SELECT route_key, state, completed_path_json, remaining_path_json,
-                   distance_m, duration_s, completed_stops, remaining_stops,
-                   toll_fare, fuel_price_naver, fuel_price_opinet,
-                   origin_name, source, payload
-            FROM route_cache
-            WHERE route_key = :k
-        """), {"k": route_key}).fetchone()
+        row = conn.execute(
+            text(
+                """
+                SELECT route_key, state, completed_path_json, remaining_path_json,
+                       distance_m, duration_s, completed_stops, remaining_stops,
+                       toll_fare, fuel_price_naver, fuel_price_opinet,
+                       origin_name, source, payload
+                FROM route_cache
+                WHERE route_key = :k
+                """
+            ),
+            {"k": route_key},
+        ).fetchone()
 
     if not row:
         return None
@@ -137,101 +150,116 @@ def _cache_get(route_key: str) -> dict | None:
 def _cache_put(route_key: str, state: str, stop_signature: str, payload: dict) -> None:
     engine = get_dash_engine()
     with engine.connect() as conn:
-        conn.execute(text("""
-            INSERT INTO route_cache (
-                route_key, state, polyline, distance_m, duration_s, stops_count, source,
-                completed_path_json, remaining_path_json, completed_stops, remaining_stops,
-                toll_fare, fuel_price_naver, fuel_price_opinet, origin_name, stop_signature, payload
-            ) VALUES (
-                :route_key, :state, '', :distance_m, :duration_ms, :stops_count, :source,
-                CAST(:completed_path_json AS jsonb), CAST(:remaining_path_json AS jsonb),
-                :completed_stops, :remaining_stops,
-                :toll_fare, :fuel_price_naver, :fuel_price_opinet,
-                :origin_name, :stop_signature, CAST(:payload AS jsonb)
-            )
-            ON CONFLICT (route_key)
-            DO UPDATE SET
-                state = EXCLUDED.state,
-                distance_m = EXCLUDED.distance_m,
-                duration_s = EXCLUDED.duration_s,
-                stops_count = EXCLUDED.stops_count,
-                source = EXCLUDED.source,
-                completed_path_json = EXCLUDED.completed_path_json,
-                remaining_path_json = EXCLUDED.remaining_path_json,
-                completed_stops = EXCLUDED.completed_stops,
-                remaining_stops = EXCLUDED.remaining_stops,
-                toll_fare = EXCLUDED.toll_fare,
-                fuel_price_naver = EXCLUDED.fuel_price_naver,
-                fuel_price_opinet = EXCLUDED.fuel_price_opinet,
-                origin_name = EXCLUDED.origin_name,
-                stop_signature = EXCLUDED.stop_signature,
-                payload = EXCLUDED.payload,
-                created_at = NOW()
-        """), {
-            "route_key": route_key,
-            "state": state,
-            "distance_m": payload["distance_m"],
-            "duration_ms": payload["duration_ms"],
-            "stops_count": payload["completed_stops"] + payload["remaining_stops"],
-            "source": payload["source"],
-            "completed_path_json": json.dumps(payload["completed_path"]),
-            "remaining_path_json": json.dumps(payload["remaining_path"]),
-            "completed_stops": payload["completed_stops"],
-            "remaining_stops": payload["remaining_stops"],
-            "toll_fare": payload["toll_fare"],
-            "fuel_price_naver": payload["fuel_price_naver"],
-            "fuel_price_opinet": payload["fuel_price_opinet"],
-            "origin_name": payload["origin_name"],
-            "stop_signature": stop_signature,
-            "payload": json.dumps(payload.get("payload", {})),
-        })
+        conn.execute(
+            text(
+                """
+                INSERT INTO route_cache (
+                    route_key, state, polyline, distance_m, duration_s, stops_count, source,
+                    completed_path_json, remaining_path_json, completed_stops, remaining_stops,
+                    toll_fare, fuel_price_naver, fuel_price_opinet, origin_name, stop_signature, payload
+                ) VALUES (
+                    :route_key, :state, '', :distance_m, :duration_ms, :stops_count, :source,
+                    CAST(:completed_path_json AS jsonb), CAST(:remaining_path_json AS jsonb),
+                    :completed_stops, :remaining_stops,
+                    :toll_fare, :fuel_price_naver, :fuel_price_opinet,
+                    :origin_name, :stop_signature, CAST(:payload AS jsonb)
+                )
+                ON CONFLICT (route_key)
+                DO UPDATE SET
+                    state = EXCLUDED.state,
+                    distance_m = EXCLUDED.distance_m,
+                    duration_s = EXCLUDED.duration_s,
+                    stops_count = EXCLUDED.stops_count,
+                    source = EXCLUDED.source,
+                    completed_path_json = EXCLUDED.completed_path_json,
+                    remaining_path_json = EXCLUDED.remaining_path_json,
+                    completed_stops = EXCLUDED.completed_stops,
+                    remaining_stops = EXCLUDED.remaining_stops,
+                    toll_fare = EXCLUDED.toll_fare,
+                    fuel_price_naver = EXCLUDED.fuel_price_naver,
+                    fuel_price_opinet = EXCLUDED.fuel_price_opinet,
+                    origin_name = EXCLUDED.origin_name,
+                    stop_signature = EXCLUDED.stop_signature,
+                    payload = EXCLUDED.payload,
+                    created_at = NOW()
+                """
+            ),
+            {
+                "route_key": route_key,
+                "state": state,
+                "distance_m": payload["distance_m"],
+                "duration_ms": payload["duration_ms"],
+                "stops_count": payload["completed_stops"] + payload["remaining_stops"],
+                "source": payload["source"],
+                "completed_path_json": json.dumps(payload["completed_path"]),
+                "remaining_path_json": json.dumps(payload["remaining_path"]),
+                "completed_stops": payload["completed_stops"],
+                "remaining_stops": payload["remaining_stops"],
+                "toll_fare": payload["toll_fare"],
+                "fuel_price_naver": payload["fuel_price_naver"],
+                "fuel_price_opinet": payload["fuel_price_opinet"],
+                "origin_name": payload["origin_name"],
+                "stop_signature": stop_signature,
+                "payload": json.dumps(payload.get("payload", {})),
+            },
+        )
         conn.commit()
 
 
 def _snapshot_insert(route_date: date_type, manager_id: int, state: str, trigger_reason: str, payload: dict) -> None:
     engine = get_dash_engine()
     with engine.connect() as conn:
-        conn.execute(text("""
-            INSERT INTO route_snapshots (
-                route_date, manager_id, state, trigger_reason, origin_name,
-                completed_stop_ids_json, remaining_stop_ids_json,
-                completed_path_json, remaining_path_json,
-                distance_m, duration_ms, toll_fare,
-                fuel_price_naver, fuel_price_opinet, payload
-            ) VALUES (
-                :route_date, :manager_id, :state, :trigger_reason, :origin_name,
-                CAST(:completed_stop_ids_json AS jsonb), CAST(:remaining_stop_ids_json AS jsonb),
-                CAST(:completed_path_json AS jsonb), CAST(:remaining_path_json AS jsonb),
-                :distance_m, :duration_ms, :toll_fare,
-                :fuel_price_naver, :fuel_price_opinet, CAST(:payload AS jsonb)
-            )
-        """), {
-            "route_date": route_date,
-            "manager_id": manager_id,
-            "state": state,
-            "trigger_reason": trigger_reason,
-            "origin_name": payload["origin_name"],
-            "completed_stop_ids_json": json.dumps(payload["completed_stop_ids"]),
-            "remaining_stop_ids_json": json.dumps(payload["remaining_stop_ids"]),
-            "completed_path_json": json.dumps(payload["completed_path"]),
-            "remaining_path_json": json.dumps(payload["remaining_path"]),
-            "distance_m": payload["distance_m"],
-            "duration_ms": payload["duration_ms"],
-            "toll_fare": payload["toll_fare"],
-            "fuel_price_naver": payload["fuel_price_naver"],
-            "fuel_price_opinet": payload["fuel_price_opinet"],
-            "payload": json.dumps(payload.get("payload", {})),
-        })
+        conn.execute(
+            text(
+                """
+                INSERT INTO route_snapshots (
+                    route_date, manager_id, state, trigger_reason, origin_name,
+                    completed_stop_ids_json, remaining_stop_ids_json,
+                    completed_path_json, remaining_path_json,
+                    distance_m, duration_ms, toll_fare,
+                    fuel_price_naver, fuel_price_opinet, payload
+                ) VALUES (
+                    :route_date, :manager_id, :state, :trigger_reason, :origin_name,
+                    CAST(:completed_stop_ids_json AS jsonb), CAST(:remaining_stop_ids_json AS jsonb),
+                    CAST(:completed_path_json AS jsonb), CAST(:remaining_path_json AS jsonb),
+                    :distance_m, :duration_ms, :toll_fare,
+                    :fuel_price_naver, :fuel_price_opinet, CAST(:payload AS jsonb)
+                )
+                """
+            ),
+            {
+                "route_date": route_date,
+                "manager_id": manager_id,
+                "state": state,
+                "trigger_reason": trigger_reason,
+                "origin_name": payload["origin_name"],
+                "completed_stop_ids_json": json.dumps(payload["completed_stop_ids"]),
+                "remaining_stop_ids_json": json.dumps(payload["remaining_stop_ids"]),
+                "completed_path_json": json.dumps(payload["completed_path"]),
+                "remaining_path_json": json.dumps(payload["remaining_path"]),
+                "distance_m": payload["distance_m"],
+                "duration_ms": payload["duration_ms"],
+                "toll_fare": payload["toll_fare"],
+                "fuel_price_naver": payload["fuel_price_naver"],
+                "fuel_price_opinet": payload["fuel_price_opinet"],
+                "payload": json.dumps(payload.get("payload", {})),
+            },
+        )
         conn.commit()
 
 
 def _job_state_get(route_date: date_type, manager_id: int, state: str) -> dict | None:
     with get_dash_engine().connect() as conn:
-        row = conn.execute(text("""
-            SELECT current_signature, current_route_key, status, retry_count, next_retry_at
-            FROM route_job_state
-            WHERE route_date = :d AND manager_id = :m AND state = :s
-        """), {"d": route_date, "m": manager_id, "s": state}).fetchone()
+        row = conn.execute(
+            text(
+                """
+                SELECT current_signature, current_route_key, status, retry_count, next_retry_at
+                FROM route_job_state
+                WHERE route_date = :d AND manager_id = :m AND state = :s
+                """
+            ),
+            {"d": route_date, "m": manager_id, "s": state},
+        ).fetchone()
     if not row:
         return None
     return {
@@ -257,50 +285,60 @@ def _job_state_upsert(
 ) -> None:
     engine = get_dash_engine()
     with engine.connect() as conn:
-        conn.execute(text("""
-            INSERT INTO route_job_state (
-                route_date, manager_id, state, current_signature, current_route_key,
-                status, retry_count, next_retry_at, last_error, last_error_payload,
-                last_changed_at, last_collected_at
-            ) VALUES (
-                :d, :m, :s, :sig, :rk,
-                :status, :retry_count, :next_retry_at, :last_error, CAST(:last_error_payload AS jsonb),
-                NOW(), NOW()
-            )
-            ON CONFLICT (route_date, manager_id, state)
-            DO UPDATE SET
-                current_signature = EXCLUDED.current_signature,
-                current_route_key = EXCLUDED.current_route_key,
-                status = EXCLUDED.status,
-                retry_count = EXCLUDED.retry_count,
-                next_retry_at = EXCLUDED.next_retry_at,
-                last_error = EXCLUDED.last_error,
-                last_error_payload = EXCLUDED.last_error_payload,
-                last_changed_at = NOW(),
-                last_collected_at = NOW()
-        """), {
-            "d": route_date,
-            "m": manager_id,
-            "s": state,
-            "sig": signature,
-            "rk": route_key,
-            "status": status,
-            "retry_count": retry_count,
-            "next_retry_at": next_retry_at,
-            "last_error": last_error,
-            "last_error_payload": json.dumps(last_error_payload or {}),
-        })
+        conn.execute(
+            text(
+                """
+                INSERT INTO route_job_state (
+                    route_date, manager_id, state, current_signature, current_route_key,
+                    status, retry_count, next_retry_at, last_error, last_error_payload,
+                    last_changed_at, last_collected_at
+                ) VALUES (
+                    :d, :m, :s, :sig, :rk,
+                    :status, :retry_count, :next_retry_at, :last_error, CAST(:last_error_payload AS jsonb),
+                    NOW(), NOW()
+                )
+                ON CONFLICT (route_date, manager_id, state)
+                DO UPDATE SET
+                    current_signature = EXCLUDED.current_signature,
+                    current_route_key = EXCLUDED.current_route_key,
+                    status = EXCLUDED.status,
+                    retry_count = EXCLUDED.retry_count,
+                    next_retry_at = EXCLUDED.next_retry_at,
+                    last_error = EXCLUDED.last_error,
+                    last_error_payload = EXCLUDED.last_error_payload,
+                    last_changed_at = NOW(),
+                    last_collected_at = NOW()
+                """
+            ),
+            {
+                "d": route_date,
+                "m": manager_id,
+                "s": state,
+                "sig": signature,
+                "rk": route_key,
+                "status": status,
+                "retry_count": retry_count,
+                "next_retry_at": next_retry_at,
+                "last_error": last_error,
+                "last_error_payload": json.dumps(last_error_payload or {}),
+            },
+        )
         conn.commit()
 
 
 def _job_state_touch(route_date: date_type, manager_id: int, state: str) -> None:
     engine = get_dash_engine()
     with engine.connect() as conn:
-        conn.execute(text("""
-            UPDATE route_job_state
-               SET last_collected_at = NOW()
-             WHERE route_date = :d AND manager_id = :m AND state = :s
-        """), {"d": route_date, "m": manager_id, "s": state})
+        conn.execute(
+            text(
+                """
+                UPDATE route_job_state
+                   SET last_collected_at = NOW()
+                 WHERE route_date = :d AND manager_id = :m AND state = :s
+                """
+            ),
+            {"d": route_date, "m": manager_id, "s": state},
+        )
         conn.commit()
 
 
@@ -347,22 +385,43 @@ def _to_lonlat(stop: dict) -> str:
     return f"{stop['longitude']},{stop['latitude']}"
 
 
-def _dedupe_stops(stops: list[dict]) -> list[dict]:
-    result = []
-    seen = set()
+def _group_route_nodes(stops: list[dict], precision: int = 6) -> list[dict]:
+    """stop은 유지하고, 경로 계산용 좌표 node만 통합한다."""
+    nodes: list[dict] = []
+    index_by_key: dict[tuple[float, float], int] = {}
 
-    for s in stops:
-        key = (round(s["longitude"], 6), round(s["latitude"], 6))
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(s)
+    for stop in stops:
+        key = (
+            round(float(stop["longitude"]), precision),
+            round(float(stop["latitude"]), precision),
+        )
 
-    return result
+        if key not in index_by_key:
+            index_by_key[key] = len(nodes)
+            nodes.append({
+                "longitude": float(stop["longitude"]),
+                "latitude": float(stop["latitude"]),
+                "stop_ids": [stop["id"]],
+                "stops": [stop],
+            })
+        else:
+            idx = index_by_key[key]
+            nodes[idx]["stop_ids"].append(stop["id"])
+            nodes[idx]["stops"].append(stop)
+
+    return nodes
 
 
-def _naver_driving(start: dict, ordered_stops: list[dict], option: str = "trafast") -> dict:
-    if not ordered_stops:
+def _build_node_signature(nodes: list[dict]) -> str:
+    src = [
+        f"{round(n['latitude'],6)},{round(n['longitude'],6)}:{','.join(map(str, n['stop_ids']))}"
+        for n in nodes
+    ]
+    return hashlib.sha1("|".join(src).encode()).hexdigest()[:16]
+
+
+def _naver_driving(start: dict, ordered_nodes: list[dict], option: str = "trafast") -> dict:
+    if not ordered_nodes:
         return {
             "path": [],
             "distance_m": 0,
@@ -374,7 +433,7 @@ def _naver_driving(start: dict, ordered_stops: list[dict], option: str = "trafas
             "code": -1,
         }
 
-    if len(ordered_stops) == 1 and _same_point(start, ordered_stops[0]):
+    if len(ordered_nodes) == 1 and _same_point(start, ordered_nodes[0]):
         return {
             "path": [],
             "distance_m": 0,
@@ -388,12 +447,12 @@ def _naver_driving(start: dict, ordered_stops: list[dict], option: str = "trafas
 
     params = {
         "start": f"{start['longitude']},{start['latitude']}",
-        "goal": _to_lonlat(ordered_stops[-1]),
+        "goal": _to_lonlat(ordered_nodes[-1]),
         "option": option,
         "lang": "ko",
     }
 
-    waypoints = ordered_stops[:-1]
+    waypoints = ordered_nodes[:-1]
     if waypoints:
         params["waypoints"] = "|".join(_to_lonlat(x) for x in waypoints)
 
@@ -461,9 +520,9 @@ def _merge_paths(chunks: list[list[dict]]) -> list[dict]:
 
 
 def _compute_route_batched(origin: dict, ordered_stops: list[dict]) -> dict:
-    ordered_stops = _dedupe_stops(ordered_stops)
+    route_nodes = _group_route_nodes(ordered_stops)
 
-    if len(ordered_stops) == 0:
+    if len(route_nodes) == 0:
         return {
             "path": [],
             "distance_m": 0,
@@ -479,13 +538,11 @@ def _compute_route_batched(origin: dict, ordered_stops: list[dict]) -> dict:
 
     chunks: list[dict] = []
     current_origin = origin
-    remaining = ordered_stops[:]
+    remaining = route_nodes[:]
 
     while remaining:
         batch = remaining[:MAX_STOPS_PER_BATCH]
         remaining = remaining[MAX_STOPS_PER_BATCH:]
-
-        batch = _dedupe_stops(batch)
 
         while batch and _same_point(current_origin, batch[0]):
             batch = batch[1:]
@@ -688,7 +745,7 @@ def _build_manager_route(
         completed = []
         remaining = _preview_nearest_neighbor(origin, manager_stops)
 
-    stop_signature = _build_stop_signature(completed + remaining)
+    stop_signature = _build_node_signature(_group_route_nodes(completed + remaining))
     route_key = _cache_key(target, manager_id, state, origin_sig, stop_signature)
 
     if state == "RESULT" and not force:
