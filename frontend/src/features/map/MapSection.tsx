@@ -69,7 +69,7 @@ function loadNaverMaps(): Promise<void> {
   });
 }
 
-/** 도착 순서 맵: stop id -> 순번(1부터). completed 먼저, 다음 remaining. */
+/** 도착 순서 맵: ID(숫자/UUID 모두)를 문자열 키로 통일해 매칭 실패 방지 */
 function buildOrderMap(routes: RouteSummary[]) {
   const order = new Map<string, number>();
   routes.forEach((route) => {
@@ -265,18 +265,18 @@ export default function MapSection({
     };
   }, []);
 
-  // 2) 출발지 핀 — 노선 데이터가 하나라도 있으면 표시 (별도 모형 마커)
+  // 2) 출발지 핀 — 백엔드가 내려준 origin 좌표 사용 (배치 이음선이 아니라 진짜 출발지)
   useEffect(() => {
     const naver = window.naver;
     const map = mapRef.current;
     if (!naver?.maps || !map) return;
 
-    const firstPoint =
-      effectiveRoutes[0]?.completed_path?.[0] ??
-      effectiveRoutes[0]?.remaining_path?.[0] ??
-      null;
+    const firstRoute = effectiveRoutes[0];
+    const origin = firstRoute
+      ? { lat: firstRoute.origin_latitude, lng: firstRoute.origin_longitude }
+      : null;
 
-    if (!firstPoint || !Number.isFinite(firstPoint.lat) || !Number.isFinite(firstPoint.lng)) {
+    if (!origin || !Number.isFinite(origin.lat) || !Number.isFinite(origin.lng)) {
       if (originMarkerRef.current) {
         originMarkerRef.current.setMap(null);
         originMarkerRef.current = null;
@@ -287,7 +287,7 @@ export default function MapSection({
     if (!originMarkerRef.current) {
       originMarkerRef.current = new naver.maps.Marker({
         map,
-        position: new naver.maps.LatLng(firstPoint.lat, firstPoint.lng),
+        position: new naver.maps.LatLng(origin.lat, origin.lng),
         icon: {
           content: `
             <div style="position:relative;transform:translate(-50%, -100%);">
@@ -300,7 +300,7 @@ export default function MapSection({
         zIndex: 100,
       });
     } else {
-      originMarkerRef.current.setPosition(new naver.maps.LatLng(firstPoint.lat, firstPoint.lng));
+      originMarkerRef.current.setPosition(new naver.maps.LatLng(origin.lat, origin.lng));
     }
   }, [effectiveRoutes]);
 
@@ -328,8 +328,9 @@ export default function MapSection({
 
       const representative = group.items[0];
       const orderNo =
-        representative?.delivery_id != null
-          ? orderMap.get(String(representative.delivery_id))
+        representative
+          ? orderMap.get(String(representative.delivery_id)) ??
+            orderMap.get(String(representative.address_id))
           : undefined;
 
       const size = 26;

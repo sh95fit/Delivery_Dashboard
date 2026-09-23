@@ -15,6 +15,12 @@ KST = timezone(timedelta(hours=9))
 NAVER_DIRECTIONS_URL = "https://maps.apigw.ntruss.com/map-direction-15/v1/driving"
 MAX_STOPS_PER_BATCH = 5
 
+def _get_origin(origin_row: dict | None) -> dict:
+    return {
+        "name": origin_row["name"] if origin_row else "기본 출발지",
+        "latitude": float(origin_row["latitude"]) if origin_row else float(os.environ.get("DEPOT_LAT", "37.5700682")),
+        "longitude": float(origin_row["longitude"]) if origin_row else float(os.environ.get("DEPOT_LNG", "127.0684966")),
+    }
 
 def _today_kst() -> date_type:
     return datetime.now(KST).date()
@@ -753,6 +759,8 @@ def _build_manager_route(
             "fuel_price_naver": 0,
             "fuel_price_opinet": None,
             "origin_name": origin["name"],
+            "origin_latitude": origin["latitude"],
+            "origin_longitude": origin["longitude"],            
             "source": "unavailable",
             "completed_stop_ids": [],
             "remaining_stop_ids": [],

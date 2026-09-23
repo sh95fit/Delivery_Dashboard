@@ -79,6 +79,8 @@ export interface RouteSummary {
   fuel_price_naver: number;
   fuel_price_opinet?: number | null;
   origin_name?: string | null;
+  origin_latitude?: number | null;
+  origin_longitude?: number | null;
   source: "cache" | "naver" | "pending" | "unavailable";
   completed_stop_ids?: number[];
   remaining_stop_ids?: number[];
