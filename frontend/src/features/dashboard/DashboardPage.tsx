@@ -44,6 +44,10 @@ export default function DashboardPage() {
     return routesData.routes.filter((r) => r.manager_id === selectedManagerId);
   }, [routesData, selectedManagerId]);
 
+  // 폴링과 무관하게, 날짜/담당자 선택이 바뀔 때만 값이 바뀌는 키.
+  // MapSection은 이 키가 바뀔 때만 자동으로 fitBounds 한다.
+  const autoFitKey = `${date}:${selectedManagerId ?? "all"}`;
+
   async function loadRoutes() {
     setRoutesLoading(true);
     setRoutesError("");
@@ -65,8 +69,16 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
+    setSelectedManagerId(null); // 날짜가 바뀔 때만 선택 초기화
     loadRoutes().catch(() => {});
   }, [date]);
+
+  // 폴링 중 선택한 매니저가 데이터에서 사라졌을 때만 선택 해제
+  useEffect(() => {
+    if (selectedManagerId == null) return;
+    const exists = rows.some((m) => m.manager_id === selectedManagerId);
+    if (!exists) setSelectedManagerId(null);
+  }, [rows, selectedManagerId]);
 
   usePolling(() => {
     status.refetch().catch(() => {});
@@ -135,7 +147,13 @@ export default function DashboardPage() {
       )}
 
       {!error && stops.length > 0 && (
-        <MapSection stops={stops} routes={displayedRoutes} selectedManagerId={selectedManagerId} />
+        <MapSection
+          stops={stops}
+          routes={displayedRoutes}
+          selectedManagerId={selectedManagerId}
+          onSelectManager={setSelectedManagerId}
+          autoFitKey={autoFitKey}
+        />
       )}
 
       {!error && noData && (
