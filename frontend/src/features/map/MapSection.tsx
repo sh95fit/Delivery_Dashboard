@@ -285,7 +285,7 @@ export default function MapSection({
           strokeLineJoin: "round",
         });
         polylinesRef.current.push(line);
-        path.forEach((p) => bounds.extend(p));
+        path.forEach((p) => bounds.extend(new naver.maps.LatLng(p.lat, p.lng)));
       }
 
       if (remaining.length >= 2) {
@@ -301,7 +301,7 @@ export default function MapSection({
           strokeLineJoin: "round",
         });
         polylinesRef.current.push(line);
-        path.forEach((p) => bounds.extend(p));
+        path.forEach((p) => bounds.extend(new naver.maps.LatLng(p.lat, p.lng)));
       }
     });
 
