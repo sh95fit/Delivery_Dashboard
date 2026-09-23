@@ -12,7 +12,11 @@ from sqlalchemy import text
 from app.database import get_dash_engine, get_engine
 
 KST = timezone(timedelta(hours=9))
-NAVER_DIRECTIONS_URL = "https://naveropenapi.apigw.ntruss.com/map-direction-15/v1/driving"
+
+# NAVER Maps Directions 15 최신 엔드포인트
+NAVER_DIRECTIONS_URL = "https://maps.apigw.ntruss.com/map-direction-15/v1/driving"
+
+# NAVER Directions 15는 waypoint 최대 15개 기준
 MAX_STOPS_PER_BATCH = 15
 
 
