@@ -1,35 +1,24 @@
-"""차량 경로 계산 서비스.
-- 기본 상태: 전체 차량 노선 반환
-- RESULT: 실제 완료 경로(delivered_at ASC)
-- LIVE: 완료 구간 + 남은 구간 분리
-- PREVIEW: 출발지 기준 가까운 거리 우선(Nearest Neighbor) 예상 경로
-- 출발지: route_origins 우선, 없으면 ENV fallback
-- Google Routes API waypoint 제한 대응: 20개 단위 배치
-"""
-from __future__ import annotations
-
-import hashlib
-import os
-import re
 from datetime import date as date_type
+import re
 
-import requests
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
-from app.database import get_dash_engine, get_engine
+from app.database import get_engine
 
-ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
-FIELD_MASK = "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline"
-MAX_STOPS_PER_BATCH = 20
+# 대상 라인업 (v7 확정: 2=석식, 4=가정식, 23=프레시밀, 29=라이트밀)
+LINEUP_IDS = (2, 4, 23, 29)
 
 
-def _normalize_delivery_hour(raw: str | None) -> str:
+def normalize_delivery_hour(raw: str | None) -> str | None:
+    """addresses.delivery_hour 원문에서 화면 표시용 대표 시간 1개만 추출."""
     if not raw:
-        return "99:99"
+        return None
+
     text_value = raw.strip()
     if not text_value:
-        return "99:99"
+        return None
 
+    # 1) HH:MM 우선
     m = re.search(r"(\d{1,2}):(\d{2})", text_value)
     if m:
         hh = int(m.group(1))
@@ -37,6 +26,7 @@ def _normalize_delivery_hour(raw: str | None) -> str:
         if 0 <= hh <= 23 and 0 <= mm <= 59:
             return f"{hh:02d}:{mm:02d}"
 
+    # 2) HH시MM분
     m = re.search(r"(\d{1,2})시\s*(\d{1,2})분", text_value)
     if m:
         hh = int(m.group(1))
@@ -44,526 +34,349 @@ def _normalize_delivery_hour(raw: str | None) -> str:
         if 0 <= hh <= 23 and 0 <= mm <= 59:
             return f"{hh:02d}:{mm:02d}"
 
+    # 3) HH시
     m = re.search(r"(\d{1,2})시", text_value)
     if m:
         hh = int(m.group(1))
         if 0 <= hh <= 23:
             return f"{hh:02d}:00"
 
-    return "99:99"
+    return None
 
 
-def _active_origin() -> tuple[dict, str]:
-    with get_dash_engine().connect() as conn:
-        row = conn.execute(text("""
-            SELECT id, name, latitude, longitude
-            FROM route_origins
-            WHERE is_active = TRUE
-            ORDER BY id DESC
-            LIMIT 1
-        """)).fetchone()
+def _delivery_exists(conn, target: date_type) -> bool:
+    row = conn.execute(text(
+        """
+        SELECT COUNT(*)
+        FROM delivery
+        WHERE date = :d
+          AND deleted_at IS NULL
+        """
+    ), {"d": target}).fetchone()
+    return int(row[0] or 0) > 0
 
-    if row:
-        origin = {
-            "name": row.name,
+
+def _build_response(target: date_type, rows, lineup_rows, summary_row, stop_rows, source: str) -> dict:
+    lineup_map: dict[int | None, dict] = {}
+    for manager_id, pid, pname, qty, amount in lineup_rows:
+        lineup_map.setdefault(manager_id, {})[str(pid)] = {
+            "name": pname or str(pid),
+            "qty": int(qty),
+            "amount": int(amount),
+        }
+
+    managers = []
+    for manager_id, mname, mcolor, stops, meals, accounts, net in rows:
+        managers.append({
+            "manager_id": manager_id,
+            "manager_name": mname,
+            "color": mcolor,
+            "stops": int(stops),
+            "meals": int(meals),
+            "accounts": int(accounts),
+            "net_revenue": int(net or 0),
+            "lineups": lineup_map.get(manager_id, {}),
+        })
+
+    stop_map: dict[str, dict] = {}
+    for row in stop_rows:
+        key = str(row.delivery_id)
+        stop = stop_map.setdefault(key, {
+            "delivery_id": key,
+            "address_id": row.address_id,
+            "address_name": row.address_name,
+            "detail_address": row.detail_address,
             "latitude": float(row.latitude),
             "longitude": float(row.longitude),
-        }
-        origin_sig = f"db-{row.id}"
-        return origin, origin_sig
-
-    lat = os.environ.get("DEPOT_LAT")
-    lng = os.environ.get("DEPOT_LNG")
-    if lat and lng:
-        origin = {
-            "name": "ENV fallback",
-            "latitude": float(lat),
-            "longitude": float(lng),
-        }
-        origin_sig = f"env-{lat},{lng}"
-        return origin, origin_sig
-
-    raise RuntimeError("출발지(route_origins 또는 DEPOT_LAT/LNG)가 없습니다")
-
-
-def _encode_polyline(points: list[tuple[float, float]]) -> str:
-    def encode_value(value: int) -> str:
-        value = ~(value << 1) if value < 0 else (value << 1)
-        chunks = []
-        while value >= 0x20:
-            chunks.append(chr((0x20 | (value & 0x1F)) + 63))
-            value >>= 5
-        chunks.append(chr(value + 63))
-        return "".join(chunks)
-
-    result: list[str] = []
-    prev_lat = prev_lng = 0
-
-    for lat, lng in points:
-        ilat = int(round(lat * 1e5))
-        ilng = int(round(lng * 1e5))
-        result.append(encode_value(ilat - prev_lat))
-        result.append(encode_value(ilng - prev_lng))
-        prev_lat = ilat
-        prev_lng = ilng
-
-    return "".join(result)
-
-
-def _decode_polyline(encoded: str) -> list[tuple[float, float]]:
-    points: list[tuple[float, float]] = []
-    index = lat = lng = 0
-
-    while index < len(encoded):
-        shift = result = 0
-        while True:
-            b = ord(encoded[index]) - 63
-            index += 1
-            result |= (b & 0x1F) << shift
-            shift += 5
-            if b < 0x20:
-                break
-        delta_lat = ~(result >> 1) if (result & 1) else (result >> 1)
-        lat += delta_lat
-
-        shift = result = 0
-        while True:
-            b = ord(encoded[index]) - 63
-            index += 1
-            result |= (b & 0x1F) << shift
-            shift += 5
-            if b < 0x20:
-                break
-        delta_lng = ~(result >> 1) if (result & 1) else (result >> 1)
-        lng += delta_lng
-
-        points.append((lat / 1e5, lng / 1e5))
-
-    return points
-
-
-def _cache_key(target: date_type, manager_id: int, state: str, origin_sig: str, stop_signature: str) -> str:
-    return f"{target.isoformat()}:{manager_id}:{state}:{origin_sig}:{stop_signature}"
-
-
-def _cache_get(route_key: str) -> dict | None:
-    with get_dash_engine().connect() as conn:
-        row = conn.execute(text("""
-            SELECT polyline, distance_m, duration_s, stops_count, source
-            FROM route_cache
-            WHERE route_key = :k
-        """), {"k": route_key}).fetchone()
-
-    if not row:
-        return None
-
-    return {
-        "polyline": row.polyline,
-        "distance_m": int(row.distance_m),
-        "duration_s": int(row.duration_s),
-        "stops_count": int(row.stops_count),
-        "source": "cache",
-    }
-
-
-def _cache_put(route_key: str, data: dict) -> None:
-    engine = get_dash_engine()
-    with engine.connect() as conn:
-        conn.execute(text("""
-            INSERT INTO route_cache (route_key, polyline, distance_m, duration_s, stops_count, source)
-            VALUES (:k, :p, :dm, :ds, :sc, :src)
-            ON CONFLICT (route_key)
-            DO UPDATE SET
-                polyline = EXCLUDED.polyline,
-                distance_m = EXCLUDED.distance_m,
-                duration_s = EXCLUDED.duration_s,
-                stops_count = EXCLUDED.stops_count,
-                source = EXCLUDED.source,
-                created_at = NOW()
-        """), {
-            "k": route_key,
-            "p": data["polyline"],
-            "dm": data["distance_m"],
-            "ds": data["duration_s"],
-            "sc": data["stops_count"],
-            "src": data.get("source", "routes_api"),
+            "delivery_hour_raw": row.delivery_hour,
+            "delivery_time": normalize_delivery_hour(row.delivery_hour),
+            "manager_id": row.manager_id,
+            "manager_name": row.manager_name,
+            "manager_color": row.manager_color,
+            "accounts": int(row.accounts or 0),
+            "lineups": {},
         })
-        conn.commit()
-
-
-def _compute_segment(origin: dict, destination: dict, intermediates: list[dict]) -> dict:
-    key = os.environ.get("GOOGLE_ROUTES_API_KEY", "")
-    if not key:
-        raise RuntimeError("GOOGLE_ROUTES_API_KEY가 없습니다")
-
-    body = {
-        "origin": {
-            "location": {
-                "latLng": {
-                    "latitude": origin["latitude"],
-                    "longitude": origin["longitude"],
-                }
-            }
-        },
-        "destination": {
-            "location": {
-                "latLng": {
-                    "latitude": destination["latitude"],
-                    "longitude": destination["longitude"],
-                }
-            }
-        },
-        "intermediates": [
-            {
-                "location": {
-                    "latLng": {
-                        "latitude": p["latitude"],
-                        "longitude": p["longitude"],
-                    }
-                }
-            }
-            for p in intermediates
-        ],
-        "travelMode": "DRIVE",
-        "routingPreference": "TRAFFIC_UNAWARE",
-        "polylineQuality": "HIGH_QUALITY",
-        "languageCode": "ko-KR",
-        "units": "METRIC",
-    }
-
-    resp = requests.post(
-        ROUTES_URL,
-        json=body,
-        headers={
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": key,
-            "X-Goog-FieldMask": FIELD_MASK,
-        },
-        timeout=20,
-    )
-    resp.raise_for_status()
-
-    route = resp.json()["routes"][0]
-    return {
-        "polyline": route["polyline"]["encodedPolyline"],
-        "distance_m": int(route["distanceMeters"]),
-        "duration_s": int(route["duration"].rstrip("s")),
-    }
-
-
-def _compute_route_batched(origin: dict, ordered_stops: list[dict]) -> dict:
-    if len(ordered_stops) == 0:
-        return {
-            "polyline": "",
-            "distance_m": 0,
-            "duration_s": 0,
-            "stops_count": 0,
-            "source": "unavailable",
+        stop["lineups"][str(row.product_id)] = {
+            "name": row.product_name or str(row.product_id),
+            "qty": int(row.qty or 0),
         }
 
-    segments: list[dict] = []
-    current_origin = origin
-    remaining = ordered_stops[:]
-
-    while remaining:
-        chunk = remaining[:MAX_STOPS_PER_BATCH]
-        remaining = remaining[MAX_STOPS_PER_BATCH:]
-
-        destination = chunk[-1]
-        intermediates = chunk[:-1]
-
-        segment = _compute_segment(current_origin, destination, intermediates)
-        segments.append(segment)
-        current_origin = destination
-
-    all_points: list[tuple[float, float]] = []
-    total_distance = 0
-    total_duration = 0
-
-    for i, seg in enumerate(segments):
-        pts = _decode_polyline(seg["polyline"])
-        if i > 0 and pts:
-            pts = pts[1:]
-        all_points.extend(pts)
-        total_distance += seg["distance_m"]
-        total_duration += seg["duration_s"]
-
-    return {
-        "polyline": _encode_polyline(all_points) if all_points else "",
-        "distance_m": total_distance,
-        "duration_s": total_duration,
-        "stops_count": len(ordered_stops),
-        "source": "routes_api",
-    }
-
-
-def _fetch_state_and_groups(target: date_type) -> tuple[str, str, list[dict]]:
-    engine = get_engine()
-    with engine.connect() as conn:
-        status_row = conn.execute(text("""
-            SELECT COUNT(*) AS delivery_count,
-                   COUNT(CASE WHEN delivered_at IS NOT NULL THEN 1 END) AS delivered_count
-            FROM delivery
-            WHERE date = :d
-              AND deleted_at IS NULL
-        """), {"d": target}).fetchone()
-
-        delivery_count = int(status_row[0] or 0)
-        delivered_count = int(status_row[1] or 0)
-
-        if delivery_count == 0:
-            state = "PREVIEW"
-            source = "orders_estimate"
-        elif delivered_count >= delivery_count:
-            state = "RESULT"
-            source = "delivery"
-        else:
-            state = "LIVE"
-            source = "delivery"
-
-        if source == "delivery":
-            rows = conn.execute(text("""
-                SELECT d.id AS item_id,
-                       d.manager_id,
-                       m.name AS manager_name,
-                       m.color AS manager_color,
-                       a.latitude,
-                       a.longitude,
-                       a.delivery_hour,
-                       a.name AS address_name,
-                       a.detail_address,
-                       d.delivered_at
-                FROM delivery d
-                JOIN addresses a ON a.id = d.address_id
-                LEFT JOIN manager m ON m.id = d.manager_id
-                WHERE d.date = :d
-                  AND d.deleted_at IS NULL
-                  AND a.latitude IS NOT NULL
-                  AND a.longitude IS NOT NULL
-            """), {"d": target}).fetchall()
-        else:
-            rows = conn.execute(text("""
-                SELECT DISTINCT a.id AS item_id,
-                       a.manager_id,
-                       m.name AS manager_name,
-                       m.color AS manager_color,
-                       a.latitude,
-                       a.longitude,
-                       a.delivery_hour,
-                       a.name AS address_name,
-                       a.detail_address,
-                       NULL AS delivered_at
-                FROM orders o
-                JOIN addresses a ON a.id = o.address_id
-                LEFT JOIN manager m ON m.id = a.manager_id
-                WHERE o.delivery_date = :d
-                  AND o.deleted_at IS NULL
-                  AND a.latitude IS NOT NULL
-                  AND a.longitude IS NOT NULL
-            """), {"d": target}).fetchall()
-
-    items = []
-    for r in rows:
-        items.append({
-            "id": r.item_id,
-            "manager_id": r.manager_id,
-            "manager_name": r.manager_name,
-            "manager_color": r.manager_color,
-            "latitude": float(r.latitude),
-            "longitude": float(r.longitude),
-            "delivery_hour": r.delivery_hour,
-            "delivery_time": _normalize_delivery_hour(r.delivery_hour),
-            "address_name": r.address_name,
-            "detail_address": r.detail_address,
-            "delivered_at": r.delivered_at,
-        })
-
-    return state, source, items
-
-
-def _distance_sq(origin: dict, stop: dict) -> float:
-    return (origin["latitude"] - stop["latitude"]) ** 2 + (origin["longitude"] - stop["longitude"]) ** 2
-
-
-def _preview_nearest_neighbor(origin: dict, stops: list[dict]) -> list[dict]:
-    remaining = stops[:]
-    ordered: list[dict] = []
-    current = {"latitude": origin["latitude"], "longitude": origin["longitude"]}
-
-    while remaining:
-        nxt = min(
-            remaining,
-            key=lambda s: (_distance_sq(current, s), s["delivery_time"], s["address_name"] or "", s["id"]),
-        )
-        ordered.append(nxt)
-        remaining.remove(nxt)
-        current = {"latitude": nxt["latitude"], "longitude": nxt["longitude"]}
-
-    return ordered
-
-
-def _build_manager_route(target: date_type, state: str, origin: dict, origin_sig: str,
-                         manager_id: int, manager_name: str | None, manager_color: str | None,
-                         manager_stops: list[dict], force: bool = False) -> dict:
-    if state == "RESULT":
-        completed = sorted(
-            [s for s in manager_stops if s["delivered_at"] is not None],
-            key=lambda s: (s["delivered_at"], s["id"]),
-        )
-        remaining: list[dict] = []
-    elif state == "LIVE":
-        completed = sorted(
-            [s for s in manager_stops if s["delivered_at"] is not None],
-            key=lambda s: (s["delivered_at"], s["id"]),
-        )
-        remaining = sorted(
-            [s for s in manager_stops if s["delivered_at"] is None],
-            key=lambda s: (s["delivery_time"], s["address_name"] or "", s["id"]),
-        )
-    else:
-        completed = []
-        remaining = _preview_nearest_neighbor(origin, manager_stops)
-
-    stop_signature_src = [
-        f"{s['id']}:{s['latitude']},{s['longitude']}:{s['delivery_time']}:{s['delivered_at']}"
-        for s in completed + remaining
-    ]
-    stop_signature = hashlib.sha1("|".join(stop_signature_src).encode()).hexdigest()[:12]
-    route_key = _cache_key(target, manager_id, state, origin_sig, stop_signature)
-
-    if not force:
-        cached = _cache_get(route_key)
-        if cached:
-            return {
-                "manager_id": manager_id,
-                "manager_name": manager_name,
-                "manager_color": manager_color,
-                "mode": state.lower(),
-                "completed_polyline": cached["polyline"] if state == "RESULT" else "",
-                "remaining_polyline": "" if state == "RESULT" else cached["polyline"],
-                "distance_m": cached["distance_m"],
-                "duration_s": cached["duration_s"],
-                "completed_stops": len(completed),
-                "remaining_stops": len(remaining),
-                "origin_name": origin["name"],
-                "source": "cache",
-            }
-
-    completed_route = {
-        "polyline": "",
-        "distance_m": 0,
-        "duration_s": 0,
-        "stops_count": 0,
-        "source": "unavailable",
-    }
-    remaining_route = {
-        "polyline": "",
-        "distance_m": 0,
-        "duration_s": 0,
-        "stops_count": 0,
-        "source": "unavailable",
-    }
-
-    if completed:
-        completed_route = _compute_route_batched(origin, completed)
-
-    if remaining:
-        rem_origin = origin
-        if completed:
-            last = completed[-1]
-            rem_origin = {
-                "name": "last_completed",
-                "latitude": last["latitude"],
-                "longitude": last["longitude"],
-            }
-        remaining_route = _compute_route_batched(rem_origin, remaining)
-
-    distance_m = completed_route["distance_m"] + remaining_route["distance_m"]
-    duration_s = completed_route["duration_s"] + remaining_route["duration_s"]
-
-    cache_payload = {
-        "polyline": completed_route["polyline"] or remaining_route["polyline"],
-        "distance_m": distance_m,
-        "duration_s": duration_s,
-        "stops_count": len(completed) + len(remaining),
-        "source": "routes_api",
-    }
-    _cache_put(route_key, cache_payload)
-
-    return {
-        "manager_id": manager_id,
-        "manager_name": manager_name,
-        "manager_color": manager_color,
-        "mode": state.lower(),
-        "completed_polyline": completed_route["polyline"],
-        "remaining_polyline": remaining_route["polyline"],
-        "distance_m": distance_m,
-        "duration_s": duration_s,
-        "completed_stops": len(completed),
-        "remaining_stops": len(remaining),
-        "origin_name": origin["name"],
-        "source": "routes_api",
-    }
-
-
-def get_routes(target: date_type, force: bool = False) -> dict:
-    origin, origin_sig = _active_origin()
-    state, source, items = _fetch_state_and_groups(target)
-
-    groups: dict[int, dict] = {}
-    for item in items:
-        if item["manager_id"] is None:
-            continue
-        groups.setdefault(item["manager_id"], {
-            "manager_name": item["manager_name"],
-            "manager_color": item["manager_color"],
-            "items": [],
-        })["items"].append(item)
-
-    routes = []
-    for manager_id, payload in groups.items():
-        routes.append(
-            _build_manager_route(
-                target=target,
-                state=state,
-                origin=origin,
-                origin_sig=origin_sig,
-                manager_id=manager_id,
-                manager_name=payload["manager_name"],
-                manager_color=payload["manager_color"],
-                manager_stops=payload["items"],
-                force=force,
-            )
-        )
+    for stop in stop_map.values():
+        stop["meals"] = sum(item["qty"] for item in stop["lineups"].values())
 
     return {
         "date": target.isoformat(),
-        "state": state,
         "source": source,
-        "routes": routes,
+        "summary": {
+            "stops": int(summary_row[0] or 0),
+            "meals": int(summary_row[1] or 0),
+            "accounts": int(summary_row[2] or 0),
+            "completed_stops": int(summary_row[4] or 0),
+            "unassigned_stops": int(summary_row[3] or 0),
+        },
+        "managers": managers,
+        "unassigned": {"stops": int(summary_row[3] or 0)},
+        "stops": list(stop_map.values()),
     }
 
 
-def get_route(target: date_type, manager_id: int, force: bool = False) -> dict:
-    all_routes = get_routes(target, force=force)
-    for route in all_routes["routes"]:
-        if int(route["manager_id"]) == int(manager_id):
-            return route
-    return {
-        "manager_id": manager_id,
-        "manager_name": None,
-        "manager_color": None,
-        "mode": all_routes["state"].lower(),
-        "completed_polyline": "",
-        "remaining_polyline": "",
-        "distance_m": 0,
-        "duration_s": 0,
-        "completed_stops": 0,
-        "remaining_stops": 0,
-        "origin_name": None,
-        "source": "unavailable",
-    }
+def _get_actual_mode(conn, target: date_type) -> dict:
+    # 1) 매니저별 집계
+    rows = conn.execute(text(
+        """
+        SELECT d.manager_id,
+               m.name  AS manager_name,
+               m.color AS manager_color,
+               COUNT(DISTINCT d.id)                           AS stops,
+               COALESCE(SUM(od.quantity), 0)                  AS meals,
+               COUNT(DISTINCT o.account_id)                   AS accounts,
+               COALESCE(ROUND(SUM(od.total_amount) / 1.1), 0) AS net_revenue
+        FROM delivery d
+        JOIN orders o
+          ON o.delivery_date = d.date
+         AND o.address_id    = d.address_id
+         AND o.deleted_at IS NULL
+        JOIN `order-details` od
+          ON od.order_id = o.id
+         AND od.is_refund = 0
+         AND od.deleted_at IS NULL
+         AND od.product_id IN :lineups
+        LEFT JOIN manager m
+          ON m.id = d.manager_id
+        WHERE d.date = :d
+          AND d.deleted_at IS NULL
+        GROUP BY d.manager_id, m.name, m.color
+        ORDER BY stops DESC
+        """
+    ).bindparams(bindparam("lineups", expanding=True)),
+      {"d": target, "lineups": list(LINEUP_IDS)}).fetchall()
+
+    # 2) 라인업별 수량·금액 (매니저별)
+    lineup_rows = conn.execute(text(
+        """
+        SELECT d.manager_id,
+               od.product_id,
+               p.name                         AS product_name,
+               COALESCE(SUM(od.quantity), 0)  AS qty,
+               COALESCE(ROUND(SUM(od.total_amount) / 1.1), 0) AS amount
+        FROM delivery d
+        JOIN orders o
+          ON o.delivery_date = d.date
+         AND o.address_id    = d.address_id
+         AND o.deleted_at IS NULL
+        JOIN `order-details` od
+          ON od.order_id = o.id
+         AND od.is_refund = 0
+         AND od.deleted_at IS NULL
+         AND od.product_id IN :lineups
+        LEFT JOIN products p ON p.id = od.product_id
+        WHERE d.date = :d
+          AND d.deleted_at IS NULL
+        GROUP BY d.manager_id, od.product_id, p.name
+        """
+    ).bindparams(bindparam("lineups", expanding=True)),
+      {"d": target, "lineups": list(LINEUP_IDS)}).fetchall()
+
+    # 3) 전체 요약
+    summary_row = conn.execute(text(
+        """
+        SELECT COUNT(DISTINCT d.id)                    AS stops,
+               COALESCE(SUM(od.quantity), 0)           AS meals,
+               COUNT(DISTINCT o.account_id)            AS accounts,
+               SUM(CASE WHEN d.manager_id IS NULL THEN 1 ELSE 0 END) AS unassigned_stops,
+               COUNT(DISTINCT CASE WHEN d.delivered_at IS NOT NULL THEN d.id END) AS completed_stops
+        FROM delivery d
+        JOIN orders o
+          ON o.delivery_date = d.date
+         AND o.address_id    = d.address_id
+         AND o.deleted_at IS NULL
+        JOIN `order-details` od
+          ON od.order_id = o.id
+         AND od.is_refund = 0
+         AND od.deleted_at IS NULL
+         AND od.product_id IN :lineups
+        WHERE d.date = :d
+          AND d.deleted_at IS NULL
+        """
+    ).bindparams(bindparam("lineups", expanding=True)),
+      {"d": target, "lineups": list(LINEUP_IDS)}).fetchone()
+
+    # 4) 지도용 stop points (실제)
+    stop_rows = conn.execute(text(
+        """
+        SELECT d.id                            AS delivery_id,
+               d.address_id                    AS address_id,
+               d.manager_id                    AS manager_id,
+               m.name                          AS manager_name,
+               m.color                         AS manager_color,
+               a.name                          AS address_name,
+               a.detail_address                AS detail_address,
+               a.latitude                      AS latitude,
+               a.longitude                     AS longitude,
+               a.delivery_hour                 AS delivery_hour,
+               od.product_id                   AS product_id,
+               p.name                          AS product_name,
+               COALESCE(SUM(od.quantity), 0)   AS qty,
+               COUNT(DISTINCT o.account_id)    AS accounts
+        FROM delivery d
+        JOIN addresses a
+          ON a.id = d.address_id
+        JOIN orders o
+          ON o.delivery_date = d.date
+         AND o.address_id    = d.address_id
+         AND o.deleted_at IS NULL
+        JOIN `order-details` od
+          ON od.order_id = o.id
+         AND od.is_refund = 0
+         AND od.deleted_at IS NULL
+         AND od.product_id IN :lineups
+        LEFT JOIN products p
+          ON p.id = od.product_id
+        LEFT JOIN manager m
+          ON m.id = d.manager_id
+        WHERE d.date = :d
+          AND d.deleted_at IS NULL
+          AND a.latitude IS NOT NULL
+          AND a.longitude IS NOT NULL
+        GROUP BY d.id, d.address_id, d.manager_id, m.name, m.color,
+                 a.name, a.detail_address, a.latitude, a.longitude, a.delivery_hour,
+                 od.product_id, p.name
+        ORDER BY CASE WHEN d.manager_id IS NULL THEN 1 ELSE 0 END,
+                 d.manager_id,
+                 d.id
+        """
+    ).bindparams(bindparam("lineups", expanding=True)),
+      {"d": target, "lineups": list(LINEUP_IDS)}).fetchall()
+
+    return _build_response(target, rows, lineup_rows, summary_row, stop_rows, source="delivery")
 
 
-def force_refresh(target: date_type, manager_id: int) -> dict:
-    return get_route(target, manager_id, force=True)
+def _get_preview_mode(conn, target: date_type) -> dict:
+    # 1) 매니저별 예상 집계 (addresses.manager_id 기준)
+    rows = conn.execute(text(
+        """
+        SELECT a.manager_id,
+               m.name  AS manager_name,
+               m.color AS manager_color,
+               COUNT(DISTINCT o.address_id)                   AS stops,
+               COALESCE(SUM(od.quantity), 0)                  AS meals,
+               COUNT(DISTINCT o.account_id)                   AS accounts,
+               COALESCE(ROUND(SUM(od.total_amount) / 1.1), 0) AS net_revenue
+        FROM orders o
+        JOIN addresses a
+          ON a.id = o.address_id
+        JOIN `order-details` od
+          ON od.order_id = o.id
+         AND od.is_refund = 0
+         AND od.deleted_at IS NULL
+         AND od.product_id IN :lineups
+        LEFT JOIN manager m
+          ON m.id = a.manager_id
+        WHERE o.delivery_date = :d
+          AND o.deleted_at IS NULL
+        GROUP BY a.manager_id, m.name, m.color
+        ORDER BY stops DESC
+        """
+    ).bindparams(bindparam("lineups", expanding=True)),
+      {"d": target, "lineups": list(LINEUP_IDS)}).fetchall()
+
+    # 2) 라인업별 수량·금액 (예상, 매니저별)
+    lineup_rows = conn.execute(text(
+        """
+        SELECT a.manager_id,
+               od.product_id,
+               p.name                          AS product_name,
+               COALESCE(SUM(od.quantity), 0)   AS qty,
+               COALESCE(ROUND(SUM(od.total_amount) / 1.1), 0) AS amount
+        FROM orders o
+        JOIN addresses a
+          ON a.id = o.address_id
+        JOIN `order-details` od
+          ON od.order_id = o.id
+         AND od.is_refund = 0
+         AND od.deleted_at IS NULL
+         AND od.product_id IN :lineups
+        LEFT JOIN products p
+          ON p.id = od.product_id
+        WHERE o.delivery_date = :d
+          AND o.deleted_at IS NULL
+        GROUP BY a.manager_id, od.product_id, p.name
+        """
+    ).bindparams(bindparam("lineups", expanding=True)),
+      {"d": target, "lineups": list(LINEUP_IDS)}).fetchall()
+
+    # 3) 전체 요약 (예상)
+    summary_row = conn.execute(text(
+        """
+        SELECT COUNT(DISTINCT o.address_id)                   AS stops,
+               COALESCE(SUM(od.quantity), 0)                  AS meals,
+               COUNT(DISTINCT o.account_id)                   AS accounts,
+               SUM(CASE WHEN a.manager_id IS NULL THEN 1 ELSE 0 END) AS unassigned_stops,
+               0                                              AS completed_stops
+        FROM orders o
+        JOIN addresses a
+          ON a.id = o.address_id
+        JOIN `order-details` od
+          ON od.order_id = o.id
+         AND od.is_refund = 0
+         AND od.deleted_at IS NULL
+         AND od.product_id IN :lineups
+        WHERE o.delivery_date = :d
+          AND o.deleted_at IS NULL
+        """
+    ).bindparams(bindparam("lineups", expanding=True)),
+      {"d": target, "lineups": list(LINEUP_IDS)}).fetchone()
+
+    # 4) 지도용 stop points (예상)
+    stop_rows = conn.execute(text(
+        """
+        SELECT a.id                             AS delivery_id,
+               a.id                             AS address_id,
+               a.manager_id                     AS manager_id,
+               m.name                           AS manager_name,
+               m.color                          AS manager_color,
+               a.name                           AS address_name,
+               a.detail_address                 AS detail_address,
+               a.latitude                       AS latitude,
+               a.longitude                      AS longitude,
+               a.delivery_hour                  AS delivery_hour,
+               od.product_id                    AS product_id,
+               p.name                           AS product_name,
+               COALESCE(SUM(od.quantity), 0)    AS qty,
+               COUNT(DISTINCT o.account_id)     AS accounts
+        FROM orders o
+        JOIN addresses a
+          ON a.id = o.address_id
+        JOIN `order-details` od
+          ON od.order_id = o.id
+         AND od.is_refund = 0
+         AND od.deleted_at IS NULL
+         AND od.product_id IN :lineups
+        LEFT JOIN products p
+          ON p.id = od.product_id
+        LEFT JOIN manager m
+          ON m.id = a.manager_id
+        WHERE o.delivery_date = :d
+          AND o.deleted_at IS NULL
+          AND a.latitude IS NOT NULL
+          AND a.longitude IS NOT NULL
+        GROUP BY a.id, a.manager_id, m.name, m.color,
+                 a.name, a.detail_address, a.latitude, a.longitude, a.delivery_hour,
+                 od.product_id, p.name
+        ORDER BY CASE WHEN a.manager_id IS NULL THEN 1 ELSE 0 END,
+                 a.manager_id,
+                 a.id
+        """
+    ).bindparams(bindparam("lineups", expanding=True)),
+      {"d": target, "lineups": list(LINEUP_IDS)}).fetchall()
+
+    return _build_response(target, rows, lineup_rows, summary_row, stop_rows, source="orders_estimate")
+
+
+def get_delivery_day(target: date_type) -> dict:
+    """delivery 있으면 실제, 없으면 orders+addresses 기반 예상 배송현황."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        if _delivery_exists(conn, target):
+            return _get_actual_mode(conn, target)
+        return _get_preview_mode(conn, target)
