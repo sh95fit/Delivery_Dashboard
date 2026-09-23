@@ -129,7 +129,8 @@ def _cache_get(route_key: str) -> dict | None:
                 SELECT route_key, state, completed_path_json, remaining_path_json,
                        distance_m, duration_s, completed_stops, remaining_stops,
                        toll_fare, fuel_price_naver, fuel_price_opinet,
-                       origin_name, source, payload
+                       origin_name, source, payload,
+                       completed_stop_ids_json, remaining_stop_ids_json
                 FROM route_cache
                 WHERE route_key = :k
                 """
@@ -153,6 +154,8 @@ def _cache_get(route_key: str) -> dict | None:
         "fuel_price_naver": int(row.fuel_price_naver or 0),
         "fuel_price_opinet": row.fuel_price_opinet,
         "origin_name": row.origin_name,
+        "completed_stop_ids": row.completed_stop_ids_json or [],
+        "remaining_stop_ids": row.remaining_stop_ids_json or [],
         "source": "cache",
         "payload": row.payload or {},
     }
@@ -164,6 +167,7 @@ def _latest_cache_for_manager(target: date_type, manager_id: int, state: str) ->
     with engine.connect() as conn:
         row = conn.execute(text("""
             SELECT route_key, completed_path_json, remaining_path_json,
+                   completed_stop_ids_json, remaining_stop_ids_json,
                    distance_m, duration_ms, toll_fare, fuel_price_naver,
                    completed_stops, remaining_stops
             FROM route_cache
@@ -186,6 +190,8 @@ def _latest_cache_for_manager(target: date_type, manager_id: int, state: str) ->
             "fuel_price_naver": int(row["fuel_price_naver"] or 0),
             "fuel_price_opinet": None,
             "origin_name": None,
+            "completed_stop_ids": row["completed_stop_ids_json"] or [],
+            "remaining_stop_ids": row["remaining_stop_ids_json"] or [],
         }
 
 
@@ -893,8 +899,8 @@ def _build_manager_route(
                 "origin_latitude": origin["latitude"],
                 "origin_longitude": origin["longitude"],
                 "source": "cache",
-                "completed_stop_ids": [],
-                "remaining_stop_ids": [],
+                "completed_stop_ids": cached.get("completed_stop_ids") or [],
+                "remaining_stop_ids": cached.get("remaining_stop_ids") or [],
                 "payload": cached.get("payload", {}),
                 "status": "ready",
             }
@@ -1008,8 +1014,8 @@ def _build_manager_route(
                 "origin_latitude": origin["latitude"],
                 "origin_longitude": origin["longitude"],
                 "source": "cache",
-                "completed_stop_ids": [],
-                "remaining_stop_ids": [],
+                "completed_stop_ids": cached_any.get("completed_stop_ids") or [],
+                "remaining_stop_ids": cached_any.get("remaining_stop_ids") or [],
                 "payload": {"note": "stale cache while worker recalculates"},
                 "status": "ready",
             }
