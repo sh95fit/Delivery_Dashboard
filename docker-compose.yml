@@ -27,7 +27,7 @@ services:
     build:
       context: ./frontend
       args:
-        VITE_NAVER_MAP_KEY_ID: ${VITE_NAVER_MAP_KEY_ID:-}
+        VITE_NAVER_MAP_CLIENT_ID: ${VITE_NAVER_MAP_CLIENT_ID:-}
     container_name: dash_frontend
     restart: unless-stopped
     ports:
