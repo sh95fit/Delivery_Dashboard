@@ -146,6 +146,37 @@ def _cache_get(route_key: str) -> dict | None:
         "payload": row.payload or {},
     }
 
+def _latest_cache_for_manager(target: date_type, manager_id: int, state: str) -> dict | None:
+    """서명 무관, 해당 매니저/날짜/상태의 가장 최근 성공 캐시 1건."""
+    prefix = f"{target.isoformat()}:{manager_id}:{state}:"
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT route_key, completed_path_json, remaining_path_json,
+                   distance_m, duration_ms, toll_fare, fuel_price_naver,
+                   completed_stops, remaining_stops
+            FROM route_cache
+            WHERE route_key LIKE :prefix
+            ORDER BY created_at DESC
+            LIMIT 1
+        """), {"prefix": prefix + "%"}).mappings().first()
+
+        if not row:
+            return None
+
+        return {
+            "completed_path": row["completed_path_json"] or [],
+            "remaining_path": row["remaining_path_json"] or [],
+            "distance_m": int(row["distance_m"] or 0),
+            "duration_ms": int(row["duration_ms"] or 0),
+            "completed_stops": int(row["completed_stops"] or 0),
+            "remaining_stops": int(row["remaining_stops"] or 0),
+            "toll_fare": int(row["toll_fare"] or 0),
+            "fuel_price_naver": int(row["fuel_price_naver"] or 0),
+            "fuel_price_opinet": None,
+            "origin_name": None,
+        }
+
 
 def _cache_put(route_key: str, state: str, stop_signature: str, payload: dict) -> None:
     engine = get_dash_engine()
@@ -810,6 +841,30 @@ def _build_manager_route(
                 }
         if job and job.get("status") == "failed_retryable" and job.get("next_retry_at"):
             if datetime.now(KST) < job["next_retry_at"]:
+                # 재시도 대기 중에도 마지막 성공 캐시가 있으면 그 경로를 유지해 내린다
+                stale = _latest_cache_for_manager(target, manager_id, state)
+                if stale:
+                    return {
+                        "manager_id": manager_id,
+                        "manager_name": manager_name,
+                        "manager_color": manager_color,
+                        "mode": state.lower(),
+                        "completed_path": stale["completed_path"],
+                        "remaining_path": stale["remaining_path"],
+                        "distance_m": stale["distance_m"],
+                        "duration_ms": stale["duration_ms"],
+                        "completed_stops": stale["completed_stops"],
+                        "remaining_stops": stale["remaining_stops"],
+                        "toll_fare": stale["toll_fare"],
+                        "fuel_price_naver": stale["fuel_price_naver"],
+                        "fuel_price_opinet": stale["fuel_price_opinet"],
+                        "origin_name": stale["origin_name"],
+                        "source": "cache",
+                        "completed_stop_ids": [],
+                        "remaining_stop_ids": [],
+                        "payload": {"note": "stale cache during retry wait"},
+                        "status": "ready",
+                    }
                 return {
                     "manager_id": manager_id,
                     "manager_name": manager_name,
@@ -831,6 +886,54 @@ def _build_manager_route(
                     "payload": {"status": "retry_wait"},
                     "status": "failed_retryable",
                 }
+
+    if state == "LIVE" and trigger_reason == "api_read" and not force:
+        # 브라우저 요청에서는 NAVER를 동기 호출하지 않는다 (504 방지).
+        # 마지막 성공 캐시가 있으면 그걸 주고, 없으면 worker가 채울 때까지 pending.
+        cached_any = _latest_cache_for_manager(target, manager_id, state)
+        if cached_any and (cached_any["completed_path"] or cached_any["remaining_path"]):
+            return {
+                "manager_id": manager_id,
+                "manager_name": manager_name,
+                "manager_color": manager_color,
+                "mode": state.lower(),
+                "completed_path": cached_any["completed_path"],
+                "remaining_path": cached_any["remaining_path"],
+                "distance_m": cached_any["distance_m"],
+                "duration_ms": cached_any["duration_ms"],
+                "completed_stops": cached_any["completed_stops"],
+                "remaining_stops": cached_any["remaining_stops"],
+                "toll_fare": cached_any["toll_fare"],
+                "fuel_price_naver": cached_any["fuel_price_naver"],
+                "fuel_price_opinet": cached_any["fuel_price_opinet"],
+                "origin_name": cached_any["origin_name"],
+                "source": "cache",
+                "completed_stop_ids": [],
+                "remaining_stop_ids": [],
+                "payload": {"note": "stale cache while worker recalculates"},
+                "status": "ready",
+            }
+        return {
+            "manager_id": manager_id,
+            "manager_name": manager_name,
+            "manager_color": manager_color,
+            "mode": state.lower(),
+            "completed_path": [],
+            "remaining_path": [],
+            "distance_m": 0,
+            "duration_ms": 0,
+            "completed_stops": len(completed),
+            "remaining_stops": len(remaining),
+            "toll_fare": 0,
+            "fuel_price_naver": 0,
+            "fuel_price_opinet": _latest_opinet_fuel_price(),
+            "origin_name": origin["name"],
+            "source": "pending",
+            "completed_stop_ids": [],
+            "remaining_stop_ids": [s["id"] for s in remaining],
+            "payload": {"note": "live route will be calculated by worker"},
+            "status": "pending",
+        }
 
     if state == "PREVIEW" and trigger_reason == "api_read" and not force:
         return {

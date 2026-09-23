@@ -69,7 +69,20 @@ function loadNaverMaps(): Promise<void> {
   });
 }
 
-function buildPopupHtml(group: StopGroup) {
+/** 도착 순서 맵: stop id -> 순번(1부터). completed 먼저, 다음 remaining. */
+function buildOrderMap(routes: RouteSummary[]) {
+  const order = new Map<string, number>();
+  routes.forEach((route) => {
+    const ids = [...(route.completed_stop_ids ?? []), ...(route.remaining_stop_ids ?? [])];
+    ids.forEach((id, idx) => {
+      const key = String(id);
+      if (!order.has(key)) order.set(key, idx + 1);
+    });
+  });
+  return order;
+}
+
+function buildPopupHtml(group: StopGroup, order?: number) {
   const title =
     group.items.length > 1
       ? `동일 위치 배송 ${group.items.length}건`
@@ -96,22 +109,28 @@ function buildPopupHtml(group: StopGroup) {
       const lineup = escapeHtml(lineupText(stop) || "없음");
 
       return `
-        <div style="padding:8px 0; ${idx > 0 ? "border-top:1px solid #eee;" : ""}">
-          <div style="font-weight:700">${name}</div>
-          ${detail ? `<div style="color:#666">${detail}</div>` : ""}
-          <div>매니저: ${manager}</div>
-          <div>희망시간: ${time}</div>
-          <div>식수: ${stop.meals}</div>
-          <div>고객사: ${stop.accounts}</div>
-          <div>라인업: ${lineup}</div>
+        <div style="padding:8px 0; ${idx > 0 ? "border-top:1px solid #f0f0f0;" : ""}">
+          <div style="font-weight:700;font-size:13px;">${name}</div>
+          ${detail ? `<div style="color:#8a8f98;font-size:11px;margin-top:2px;">${detail}</div>` : ""}
+          <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;">
+            <span style="background:#f1f5f9;border-radius:4px;padding:2px 6px;font-size:11px;">매니저: ${manager}</span>
+            <span style="background:#fff7e6;border-radius:4px;padding:2px 6px;font-size:11px;">${time}</span>
+            <span style="background:#eef4ff;border-radius:4px;padding:2px 6px;font-size:11px;">${stop.meals}식</span>
+            <span style="background:#f0fdf4;border-radius:4px;padding:2px 6px;font-size:11px;">${stop.accounts}곳</span>
+          </div>
+          <div style="color:#666;font-size:11px;margin-top:4px;">라인업: ${lineup}</div>
         </div>
       `;
     })
     .join("");
 
   return `
-    <div style="font-size:12px;line-height:1.5;min-width:260px;max-width:320px">
-      <div style="font-weight:700;font-size:13px;margin-bottom:6px">${title}</div>
+    <div style="position:relative;font-size:12px;line-height:1.5;min-width:260px;max-width:320px;font-family:inherit;">
+      <button id="lunchlab-iw-close" style="position:absolute;top:6px;right:6px;width:24px;height:24px;border:none;background:transparent;font-size:16px;color:#98a2b3;cursor:pointer;line-height:1;" aria-label="닫기">✕</button>
+      <div style="font-weight:800;font-size:14px;margin-bottom:6px;padding-right:28px;">
+        ${order ? `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:9999px;background:#2563eb;color:#fff;font-size:11px;font-weight:700;margin-right:6px;">${order}</span>` : ""}
+        ${title}
+      </div>
       ${itemsHtml}
     </div>
   `;
@@ -140,6 +159,29 @@ function groupStops(stops: StopPoint[]): StopGroup[] {
   return Array.from(map.values());
 }
 
+/** 폴링 응답에 경로가 비어버린 매니저는 이전 정상 경로를 유지(스테일 폴백). */
+function mergeWithStaleRoutes(current: RouteSummary[], previous: RouteSummary[]): RouteSummary[] {
+  return current.map((route) => {
+    const hasPath = (route.completed_path?.length ?? 0) >= 2 || (route.remaining_path?.length ?? 0) >= 2;
+    if (hasPath) return route;
+
+    const stale = previous.find((p) => p.manager_id === route.manager_id);
+    const staleHasPath =
+      stale && ((stale.completed_path?.length ?? 0) >= 2 || (stale.remaining_path?.length ?? 0) >= 2);
+
+    if (staleHasPath) {
+      return {
+        ...stale!,
+        completed_stops: route.completed_stops,
+        remaining_stops: route.remaining_stops,
+        source: "cache",
+        payload: { note: "stale route kept while recalculation is in progress" },
+      } as RouteSummary;
+    }
+    return route;
+  });
+}
+
 export default function MapSection({
   stops,
   routes,
@@ -149,17 +191,29 @@ export default function MapSection({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // 지도는 한 번만 만들고 재사용한다
   const mapRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
   const polylinesRef = useRef<any[]>([]);
+  const originMarkerRef = useRef<any>(null);
   const infoWindowRef = useRef<any>(null);
 
-  // 폴링 UX: 사용자가 확대/이동했으면 자동 재정렬 금지
   const hasUserInteractedRef = useRef(false);
   const lastAutoFitKeyRef = useRef<string | null>(null);
+  const lastGoodRoutesRef = useRef<RouteSummary[]>([]);
 
   const groups = useMemo(() => groupStops(stops), [stops]);
+
+  const effectiveRoutes = useMemo(
+    () => mergeWithStaleRoutes(routes, lastGoodRoutesRef.current),
+    [routes],
+  );
+
+  useEffect(() => {
+    const anyPath = routes.some(
+      (r) => (r.completed_path?.length ?? 0) >= 2 || (r.remaining_path?.length ?? 0) >= 2,
+    );
+    if (anyPath) lastGoodRoutesRef.current = routes;
+  }, [routes]);
 
   const routeColor = (route: RouteSummary) => {
     if (selectedManagerId == null) return route.manager_color || "#3367d6";
@@ -171,7 +225,7 @@ export default function MapSection({
     return route.manager_id === selectedManagerId ? 1 : 0.25;
   };
 
-  // 1) 지도 초기화 — 컴포넌트 마운트 시 1회만
+  // 1) 지도 초기화 — 마운트 시 1회
   useEffect(() => {
     let cancelled = false;
 
@@ -189,12 +243,12 @@ export default function MapSection({
           content: "",
           maxWidth: 340,
           backgroundColor: "#fff",
-          borderColor: "#ddd",
+          borderColor: "#e5e7eb",
           borderWidth: 1,
+          borderRadius: 10,
           anchorSize: new naver.maps.Size(12, 14),
         });
 
-        // 사용자가 직접 움직이면 자동 재정렬을 멈춘다
         naver.maps.Event.addListener(mapRef.current, "dragend", () => {
           hasUserInteractedRef.current = true;
         });
@@ -211,13 +265,51 @@ export default function MapSection({
     };
   }, []);
 
-  // 2) 마커/폴리라인 그리기 — 데이터가 바뀔 때 지도 객체는 유지한 채 내용만 교체
+  // 2) 출발지 핀 — 노선 데이터가 하나라도 있으면 표시 (별도 모형 마커)
   useEffect(() => {
     const naver = window.naver;
     const map = mapRef.current;
     if (!naver?.maps || !map) return;
 
-    // 이전 레이어 정리
+    const firstPoint =
+      effectiveRoutes[0]?.completed_path?.[0] ??
+      effectiveRoutes[0]?.remaining_path?.[0] ??
+      null;
+
+    if (!firstPoint || !Number.isFinite(firstPoint.lat) || !Number.isFinite(firstPoint.lng)) {
+      if (originMarkerRef.current) {
+        originMarkerRef.current.setMap(null);
+        originMarkerRef.current = null;
+      }
+      return;
+    }
+
+    if (!originMarkerRef.current) {
+      originMarkerRef.current = new naver.maps.Marker({
+        map,
+        position: new naver.maps.LatLng(firstPoint.lat, firstPoint.lng),
+        icon: {
+          content: `
+            <div style="position:relative;transform:translate(-50%, -100%);">
+              <div style="width:38px;height:38px;border-radius:9999px 9999px 9999px 4px;background:#111827;border:3px solid #fff;box-shadow:0 3px 10px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;font-size:17px;">🏠</div>
+              <div style="position:absolute;left:50%;top:40px;transform:translateX(-50%);background:#111827;color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:4px;white-space:nowrap;">출발</div>
+            </div>
+          `,
+          anchor: new naver.maps.Point(19, 38),
+        },
+        zIndex: 100,
+      });
+    } else {
+      originMarkerRef.current.setPosition(new naver.maps.LatLng(firstPoint.lat, firstPoint.lng));
+    }
+  }, [effectiveRoutes]);
+
+  // 3) 마커/폴리라인 — 데이터 변경 시 내용만 교체
+  useEffect(() => {
+    const naver = window.naver;
+    const map = mapRef.current;
+    if (!naver?.maps || !map) return;
+
     markersRef.current.forEach((m) => m.setMap(null));
     polylinesRef.current.forEach((p) => p.setMap(null));
     markersRef.current = [];
@@ -227,31 +319,50 @@ export default function MapSection({
     // NAVER LatLngBounds에는 isEmpty()가 없다 -> 확장 여부를 직접 기록
     let hasBoundsPoints = false;
 
-    // 마커
+    const orderMap = buildOrderMap(effectiveRoutes);
+
     groups.forEach((group) => {
       const pos = new naver.maps.LatLng(group.latitude, group.longitude);
       const extraCount = Math.max(group.items.length - 1, 0);
       const color = group.managerColor || "#3367d6";
 
+      const representative = group.items[0];
+      const orderNo =
+        representative?.delivery_id != null
+          ? orderMap.get(String(representative.delivery_id))
+          : undefined;
+
+      const size = 26;
       const marker = new naver.maps.Marker({
         map,
         position: pos,
         icon: {
           content: `
             <div style="position:relative;transform:translate(-50%, -50%);">
-              <div style="width:${extraCount > 0 ? 24 : 20}px;height:${extraCount > 0 ? 24 : 20}px;border-radius:9999px;background:${color};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.25);"></div>
-              ${extraCount > 0 ? `<div style="position:absolute;left:50%;top:50%;transform:translate(-50%, -50%);color:#fff;font-size:11px;font-weight:700;">+${extraCount}</div>` : ""}
+              <div style="width:${size}px;height:${size}px;border-radius:9999px;background:${color};border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:800;">
+                ${orderNo ?? ""}
+              </div>
+              ${extraCount > 0 ? `
+                <div style="position:absolute;right:-14px;top:-8px;min-width:20px;height:18px;padding:0 5px;border-radius:9px;background:#111827;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.35);">+${extraCount}</div>
+              ` : ""}
             </div>
           `,
-          anchor: new naver.maps.Point(extraCount > 0 ? 12 : 10, extraCount > 0 ? 12 : 10),
+          anchor: new naver.maps.Point(size / 2, size / 2),
         },
         title: group.items[0]?.address_name || String(group.items[0]?.address_id),
       });
 
-      const html = buildPopupHtml(group);
+      const html = buildPopupHtml(group, orderNo);
       naver.maps.Event.addListener(marker, "click", () => {
         infoWindowRef.current?.setContent(html);
         infoWindowRef.current?.open(map, marker);
+
+        const closeBtn = document.getElementById("lunchlab-iw-close");
+        if (closeBtn) {
+          closeBtn.addEventListener("click", () => {
+            infoWindowRef.current?.close();
+          });
+        }
 
         const managerId = group.items[0]?.manager_id;
         if (onSelectManager && typeof managerId === "number") {
@@ -264,8 +375,7 @@ export default function MapSection({
       hasBoundsPoints = true;
     });
 
-    // 경로선
-    routes.forEach((route) => {
+    effectiveRoutes.forEach((route) => {
       const color = routeColor(route);
       const opacity = routeOpacity(route);
 
@@ -288,7 +398,7 @@ export default function MapSection({
           strokeLineJoin: "round",
         });
         polylinesRef.current.push(line);
-        path.forEach((p) => bounds.extend(new naver.maps.LatLng(p.lat, p.lng)));
+        path.forEach((p) => bounds.extend(p));
         hasBoundsPoints = true;
       }
 
@@ -305,22 +415,19 @@ export default function MapSection({
           strokeLineJoin: "round",
         });
         polylinesRef.current.push(line);
-        path.forEach((p) => bounds.extend(new naver.maps.LatLng(p.lat, p.lng)));
+        path.forEach((p) => bounds.extend(p));
         hasBoundsPoints = true;
       }
     });
 
-    // 자동 재정렬은 autoFitKey가 바뀔 때만.
-    // 폴링은 autoFitKey를 바꾸지 않으므로, 여기서 지도 시점이 초기화되지 않는다.
     if (lastAutoFitKeyRef.current !== autoFitKey && !hasUserInteractedRef.current) {
       if (hasBoundsPoints) {
         map.fitBounds(bounds, { top: 40, right: 40, bottom: 40, left: 40 });
       }
       lastAutoFitKeyRef.current = autoFitKey;
     }
-  }, [groups, routes, selectedManagerId, autoFitKey, onSelectManager]);
+  }, [groups, effectiveRoutes, selectedManagerId, autoFitKey, onSelectManager]);
 
-  // 수동 재정렬 ("전체 보기" 버튼)
   const refitNow = () => {
     const naver = window.naver;
     const map = mapRef.current;
@@ -331,7 +438,7 @@ export default function MapSection({
     groups.forEach((group) => {
       bounds.extend(new naver.maps.LatLng(group.latitude, group.longitude));
     });
-    routes.forEach((route) => {
+    effectiveRoutes.forEach((route) => {
       (route.completed_path ?? []).forEach((p) => {
         if (p && Number.isFinite(p.lat) && Number.isFinite(p.lng)) {
           bounds.extend(new naver.maps.LatLng(p.lat, p.lng));
@@ -344,7 +451,7 @@ export default function MapSection({
       });
     });
 
-    if (groups.length > 0 || routes.length > 0) {
+    if (groups.length > 0 || effectiveRoutes.length > 0) {
       map.fitBounds(bounds, { top: 40, right: 40, bottom: 40, left: 40 });
     } else {
       map.setCenter(new naver.maps.LatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng));
@@ -355,7 +462,7 @@ export default function MapSection({
   const selectedRoute =
     selectedManagerId == null
       ? null
-      : routes.find((r) => r.manager_id === selectedManagerId) ?? null;
+      : effectiveRoutes.find((r) => r.manager_id === selectedManagerId) ?? null;
 
   return (
     <div>
@@ -379,7 +486,7 @@ export default function MapSection({
           전체 보기
         </button>
         <span style={{ fontSize: 12, color: "#888" }}>
-          확대/이동 중에는 갱신돼도 화면이 유지됩니다
+          마커 숫자는 도착 순서 · 확대/이동 중에는 갱신돼도 화면이 유지됩니다
         </span>
       </div>
       <div
@@ -394,7 +501,7 @@ export default function MapSection({
       />
       <div style={{ marginTop: 8, fontSize: 12, color: "#666", display: "grid", gap: 4 }}>
         <div>
-          같은 좌표의 배송지는 마커 1개로 묶어 표시하며, 추가 건수는 <b>+N</b>으로 표시됩니다.
+          같은 좌표 배송지는 마커 1개로 묶어 표시하며, 추가 건수는 마커 옆 <b>+N</b> 칩으로 표시됩니다.
         </div>
         {selectedRoute ? (
           <div>
@@ -404,8 +511,8 @@ export default function MapSection({
             {selectedRoute.origin_name ? ` · 출발지: ${selectedRoute.origin_name}` : ""}
             {` · 완료 ${selectedRoute.completed_stops} / 남은 ${selectedRoute.remaining_stops}`}
             {selectedRoute.toll_fare > 0 && ` · 예상 통행요금 ${selectedRoute.toll_fare.toLocaleString()}원`}
-            {selectedRoute.fuel_price_naver > 0 && ` · NAVER 예상 유류비 ${selectedRoute.fuel_price_naver.toLocaleString()}원`}
-            {selectedRoute.fuel_price_opinet && ` · 오피넷 기준 예상 유류비 ${selectedRoute.fuel_price_opinet.toLocaleString()}원`}
+            {typeof selectedRoute.fuel_price_naver === "number" && selectedRoute.fuel_price_naver > 0 && ` · NAVER 예상 유류비 ${selectedRoute.fuel_price_naver.toLocaleString()}원`}
+            {typeof selectedRoute.fuel_price_opinet === "number" && selectedRoute.fuel_price_opinet > 0 && ` · 오피넷 기준 예상 유류비 ${selectedRoute.fuel_price_opinet.toLocaleString()}원`}
             {selectedRoute.source === "cache"
               ? " · 캐시"
               : selectedRoute.source === "naver"
