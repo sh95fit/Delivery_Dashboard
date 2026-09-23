@@ -296,6 +296,7 @@ def _compute_route_batched(origin: dict, ordered_stops: list[dict]) -> dict:
             "duration_s": 0,
             "stops_count": 0,
             "source": "unavailable",
+            "raw_responses": [],
         }
 
     segments: list[dict] = []
@@ -306,13 +307,8 @@ def _compute_route_batched(origin: dict, ordered_stops: list[dict]) -> dict:
         chunk = remaining[:MAX_STOPS_PER_BATCH]
         remaining = remaining[MAX_STOPS_PER_BATCH:]
 
-        # 마지막 배치가 아니면 마지막 stop을 destination으로 고정
-        if remaining:
-            destination = chunk[-1]
-            intermediates = chunk[:-1]
-        else:
-            destination = chunk[-1]
-            intermediates = chunk[:-1]
+        destination = chunk[-1]
+        intermediates = chunk[:-1]
 
         segment = _compute_segment(current_origin, destination, intermediates)
         segments.append(segment)
@@ -321,16 +317,33 @@ def _compute_route_batched(origin: dict, ordered_stops: list[dict]) -> dict:
     all_points: list[tuple[float, float]] = []
     total_distance = 0
     total_duration = 0
+    raw_responses: list[dict] = []
+    success_count = 0
 
     for i, seg in enumerate(segments):
+        if seg.get("raw_response") is not None:
+            raw_responses.append(seg["raw_response"])
+
         if not seg["polyline"]:
             continue
+
         pts = _decode_polyline(seg["polyline"])
         if i > 0 and pts:
             pts = pts[1:]
         all_points.extend(pts)
         total_distance += seg["distance_m"]
         total_duration += seg["duration_s"]
+        success_count += 1
+
+    if success_count == 0:
+        return {
+            "polyline": "",
+            "distance_m": 0,
+            "duration_s": 0,
+            "stops_count": len(ordered_stops),
+            "source": "unavailable",
+            "raw_responses": raw_responses,
+        }
 
     return {
         "polyline": _encode_polyline(all_points) if all_points else "",
@@ -338,6 +351,7 @@ def _compute_route_batched(origin: dict, ordered_stops: list[dict]) -> dict:
         "duration_s": total_duration,
         "stops_count": len(ordered_stops),
         "source": "routes_api",
+        "raw_responses": raw_responses,
     }
 
 
@@ -527,14 +541,23 @@ def _build_manager_route(target: date_type, state: str, source: str, origin: dic
     distance_m = completed_route["distance_m"] + remaining_route["distance_m"]
     duration_s = completed_route["duration_s"] + remaining_route["duration_s"]
 
+    overall_source = (
+        "unavailable"
+        if completed_route["source"] == "unavailable" and remaining_route["source"] == "unavailable"
+        else "routes_api"
+    )
+
     cache_payload = {
         "polyline": completed_route["polyline"] or remaining_route["polyline"],
         "distance_m": distance_m,
         "duration_s": duration_s,
         "stops_count": len(completed) + len(remaining),
-        "source": "routes_api",
+        "source": overall_source,
     }
-    _cache_put(route_key, cache_payload)
+
+    # 빈 경로는 cache 저장하지 않음
+    if cache_payload["polyline"]:
+        _cache_put(route_key, cache_payload)
 
     return {
         "manager_id": manager_id,
@@ -548,8 +571,13 @@ def _build_manager_route(target: date_type, state: str, source: str, origin: dic
         "completed_stops": len(completed),
         "remaining_stops": len(remaining),
         "origin_name": origin["name"],
-        "source": "routes_api",
+        "source": overall_source,
+        "raw_responses": {
+            "completed": completed_route.get("raw_responses", []),
+            "remaining": remaining_route.get("raw_responses", []),
+        },
     }
+
 
 
 def get_routes(target: date_type, force: bool = False) -> dict:
