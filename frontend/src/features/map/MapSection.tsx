@@ -326,12 +326,15 @@ export default function MapSection({
       const extraCount = Math.max(group.items.length - 1, 0);
       const color = group.managerColor || "#3367d6";
 
-      const representative = group.items[0];
-      const orderNo =
-        representative
-          ? orderMap.get(String(representative.delivery_id)) ??
-            orderMap.get(String(representative.address_id))
-          : undefined;
+      const orderNo = (() => {
+        for (const item of group.items) {
+          const hit =
+            orderMap.get(String(item.delivery_id ?? "")) ??
+            orderMap.get(String(item.address_id ?? ""));
+          if (hit != null) return hit;
+        }
+        return undefined;
+      })();
 
       const size = 26;
       const marker = new naver.maps.Marker({

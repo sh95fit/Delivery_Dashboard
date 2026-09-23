@@ -833,6 +833,45 @@ def _build_manager_route(
     stop_signature = _build_node_signature(_group_route_nodes(completed + remaining))
     route_key = _cache_key(target, manager_id, state, origin_sig, stop_signature)
 
+    if state == "RESULT" and trigger_reason == "api_read" and not force:
+        cached_old = _cache_get(route_key)
+        if cached_old:
+            return {
+                "manager_id": manager_id, "manager_name": manager_name,
+                "manager_color": manager_color, "mode": state.lower(),
+                "completed_path": cached_old["completed_path"],
+                "remaining_path": cached_old["remaining_path"],
+                "distance_m": cached_old["distance_m"],
+                "duration_ms": cached_old["duration_ms"],
+                "completed_stops": cached_old["completed_stops"],
+                "remaining_stops": cached_old["remaining_stops"],
+                "toll_fare": cached_old["toll_fare"],
+                "fuel_price_naver": cached_old["fuel_price_naver"],
+                "fuel_price_opinet": cached_old["fuel_price_opinet"],
+                "origin_name": cached_old["origin_name"],
+                "origin_latitude": cached_old.get("origin_latitude"),
+                "origin_longitude": cached_old.get("origin_longitude"),
+                "source": "cache", "completed_stop_ids": [],
+                "remaining_stop_ids": [], "payload": cached_old.get("payload", {}),
+                "status": "ready",
+            }
+        # 과거 날짜 캐시 없음 -> 동기 계산 금지 (호출 0회). 버튼(force)으로만 수동 계산.
+        return {
+            "manager_id": manager_id, "manager_name": manager_name,
+            "manager_color": manager_color, "mode": state.lower(),
+            "completed_path": [], "remaining_path": [],
+            "distance_m": 0, "duration_ms": 0,
+            "completed_stops": len(completed), "remaining_stops": 0,
+            "toll_fare": 0, "fuel_price_naver": 0,
+            "fuel_price_opinet": _latest_opinet_fuel_price(),
+            "origin_name": origin["name"],
+            "origin_latitude": origin["latitude"],
+            "origin_longitude": origin["longitude"],
+            "source": "pending", "completed_stop_ids": [],
+            "remaining_stop_ids": [], "payload": {"note": "historical route not cached"},
+            "status": "pending",
+        }
+
     if state == "RESULT" and not force:
         cached = _cache_get(route_key)
         if cached:
@@ -1126,11 +1165,7 @@ def _build_manager_route(
                     "payload": {}, "source": completed_route["source"], "status": "ready",
                 })
 
-    rem_origin = origin
-    if completed:
-        last = completed[-1]
-        rem_origin = {"name": "last_completed",
-                      "latitude": last["latitude"], "longitude": last["longitude"]}
+    rem_origin = origin  # 남은 구간도 출발지에서 시작 (요구사항: 모든 노선이 출발지에서 시작)
 
     remaining_route = {
         "path": [], "distance_m": 0, "duration_ms": 0,
@@ -1336,4 +1371,5 @@ def get_route(target: date_type, manager_id: int, force: bool = False) -> dict:
 
 def force_refresh(target: date_type, manager_id: int) -> dict:
     return get_route(target, manager_id, force=True)
+
 

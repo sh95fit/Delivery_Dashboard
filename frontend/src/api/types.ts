@@ -82,8 +82,8 @@ export interface RouteSummary {
   origin_latitude?: number | null;
   origin_longitude?: number | null;
   source: "cache" | "naver" | "pending" | "unavailable";
-  completed_stop_ids?: number[];
-  remaining_stop_ids?: number[];
+  completed_stop_ids?: Array<string | number>;
+  remaining_stop_ids?: Array<string | number>;
   payload?: Record<string, unknown>;
   status?: string;
 }
@@ -99,3 +99,4 @@ export interface MeResp {
   email: string;
   is_admin?: boolean;
 }
+
