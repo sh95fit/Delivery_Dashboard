@@ -15,6 +15,11 @@ KST = timezone(timedelta(hours=9))
 NAVER_DIRECTIONS_URL = "https://maps.apigw.ntruss.com/map-direction-15/v1/driving"
 MAX_STOPS_PER_BATCH = 5
 
+DAILY_NAVER_CALL_BUDGET = 150  # NAVER Directions 15 월 3,000회 무료 - 일일 하드 리밋
+
+_daily_call_count: int = 0
+_daily_call_date = None
+
 def _get_origin(origin_row: dict | None) -> dict:
     return {
         "name": origin_row["name"] if origin_row else "기본 출발지",
@@ -236,6 +241,8 @@ def _cache_put(route_key: str, state: str, stop_signature: str, payload: dict) -
                 "fuel_price_naver": payload["fuel_price_naver"],
                 "fuel_price_opinet": payload["fuel_price_opinet"],
                 "origin_name": payload["origin_name"],
+                "origin_latitude": payload.get("origin_latitude"),
+                "origin_longitude": payload.get("origin_longitude"),
                 "stop_signature": stop_signature,
                 "payload": json.dumps(payload.get("payload", {})),
             },
@@ -270,6 +277,8 @@ def _snapshot_insert(route_date: date_type, manager_id: int, state: str, trigger
                 "state": state,
                 "trigger_reason": trigger_reason,
                 "origin_name": payload["origin_name"],
+                "origin_latitude": payload.get("origin_latitude"),
+                "origin_longitude": payload.get("origin_longitude"),
                 "completed_stop_ids_json": json.dumps(payload["completed_stop_ids"]),
                 "remaining_stop_ids_json": json.dumps(payload["remaining_stop_ids"]),
                 "completed_path_json": json.dumps(payload["completed_path"]),
@@ -457,6 +466,27 @@ def _build_node_signature(nodes: list[dict]) -> str:
     return hashlib.sha1("|".join(src).encode()).hexdigest()[:16]
 
 
+def _completed_signature(completed: list[dict]) -> str:
+    """완료 구간 식별자: 완료된 stop id 집합(순서 무관)."""
+    ids = sorted(str(x["id"]) for x in completed)
+    return hashlib.sha1("|".join(ids).encode()).hexdigest()[:16]
+
+
+def _check_daily_budget() -> bool:
+    """일일 NAVER 호출 리밋 체크. True면 호출 허용."""
+    global _daily_call_count, _daily_call_date
+    today = datetime.now(KST).date()
+    if _daily_call_date != today:
+        _daily_call_date = today
+        _daily_call_count = 0
+    return _daily_call_count < DAILY_NAVER_CALL_BUDGET
+
+
+def _count_daily_call() -> None:
+    global _daily_call_count
+    _daily_call_count += 1
+
+
 def _naver_driving(start: dict, ordered_nodes: list[dict], option: str = "trafast") -> dict:
     if not ordered_nodes:
         return {
@@ -492,6 +522,19 @@ def _naver_driving(start: dict, ordered_nodes: list[dict], option: str = "trafas
     waypoints = ordered_nodes[:-1]
     if waypoints:
         params["waypoints"] = "|".join(_to_lonlat(x) for x in waypoints)
+
+    if not _check_daily_budget():
+        return {
+            "path": [],
+            "distance_m": 0,
+            "duration_ms": 0,
+            "toll_fare": 0,
+            "fuel_price_naver": 0,
+            "payload": {"note": "daily naver call budget exceeded"},
+            "source": "unavailable",
+            "code": -3,
+        }
+    _count_daily_call()
 
     resp = requests.get(
         NAVER_DIRECTIONS_URL,
@@ -808,6 +851,8 @@ def _build_manager_route(
                 "fuel_price_naver": cached["fuel_price_naver"],
                 "fuel_price_opinet": cached["fuel_price_opinet"],
                 "origin_name": cached["origin_name"],
+                "origin_latitude": origin["latitude"],
+                "origin_longitude": origin["longitude"],
                 "source": "cache",
                 "completed_stop_ids": [],
                 "remaining_stop_ids": [],
@@ -841,6 +886,8 @@ def _build_manager_route(
                     "fuel_price_naver": cached["fuel_price_naver"],
                     "fuel_price_opinet": cached["fuel_price_opinet"],
                     "origin_name": cached["origin_name"],
+                    "origin_latitude": origin["latitude"],
+                    "origin_longitude": origin["longitude"],
                     "source": "cache",
                     "completed_stop_ids": [],
                     "remaining_stop_ids": [],
@@ -867,6 +914,8 @@ def _build_manager_route(
                         "fuel_price_naver": stale["fuel_price_naver"],
                         "fuel_price_opinet": stale["fuel_price_opinet"],
                         "origin_name": stale["origin_name"],
+                        "origin_latitude": origin["latitude"],
+                        "origin_longitude": origin["longitude"],
                         "source": "cache",
                         "completed_stop_ids": [],
                         "remaining_stop_ids": [],
@@ -888,6 +937,8 @@ def _build_manager_route(
                     "fuel_price_naver": 0,
                     "fuel_price_opinet": _latest_opinet_fuel_price(),
                     "origin_name": origin["name"],
+                    "origin_latitude": origin["latitude"],
+                    "origin_longitude": origin["longitude"],
                     "source": "unavailable",
                     "completed_stop_ids": [s["id"] for s in completed],
                     "remaining_stop_ids": [s["id"] for s in remaining],
@@ -915,6 +966,8 @@ def _build_manager_route(
                 "fuel_price_naver": cached_any["fuel_price_naver"],
                 "fuel_price_opinet": cached_any["fuel_price_opinet"],
                 "origin_name": cached_any["origin_name"],
+                "origin_latitude": origin["latitude"],
+                "origin_longitude": origin["longitude"],
                 "source": "cache",
                 "completed_stop_ids": [],
                 "remaining_stop_ids": [],
@@ -936,6 +989,8 @@ def _build_manager_route(
             "fuel_price_naver": 0,
             "fuel_price_opinet": _latest_opinet_fuel_price(),
             "origin_name": origin["name"],
+            "origin_latitude": origin["latitude"],
+            "origin_longitude": origin["longitude"],
             "source": "pending",
             "completed_stop_ids": [],
             "remaining_stop_ids": [s["id"] for s in remaining],
@@ -959,6 +1014,8 @@ def _build_manager_route(
             "fuel_price_naver": 0,
             "fuel_price_opinet": _latest_opinet_fuel_price(),
             "origin_name": origin["name"],
+            "origin_latitude": origin["latitude"],
+            "origin_longitude": origin["longitude"],
             "source": "pending",
             "completed_stop_ids": [],
             "remaining_stop_ids": [s["id"] for s in remaining],
@@ -991,20 +1048,127 @@ def _build_manager_route(
         "last_error_payload": {},
     }
 
+    completed_route = {
+        "path": [], "distance_m": 0, "duration_ms": 0,
+        "toll_fare": 0, "fuel_price_naver": 0,
+        "source": "not_needed", "payloads": [],
+        "status": "not_needed", "last_error": None, "last_error_payload": {},
+    }
+
     if completed:
-        completed_route = _compute_route_batched(origin, completed)
+        comp_key = _cache_key(target, manager_id, "COMPLETED_FIXED", origin_sig,
+                              _completed_signature(completed))
+        cached_completed = _cache_get(comp_key)
+
+        if cached_completed and cached_completed["remaining_path"]:
+            # 완료 구간: 캐시 재사용 - NAVER 호출 0회
+            completed_route = {
+                "path": cached_completed["remaining_path"],
+                "distance_m": cached_completed["distance_m"],
+                "duration_ms": cached_completed["duration_ms"],
+                "toll_fare": cached_completed["toll_fare"],
+                "fuel_price_naver": cached_completed["fuel_price_naver"],
+                "source": "cache", "payloads": [], "status": "ready",
+                "last_error": None, "last_error_payload": {},
+            }
+        elif len(completed) > 1:
+            # 증분: 기존 완료 경로 마지막 점에서 새 완료 stop까지 1배치만 계산
+            prev_key = _cache_key(target, manager_id, "COMPLETED_FIXED", origin_sig,
+                                  _completed_signature(completed[:-1]))
+            prev_cached = _cache_get(prev_key)
+            if prev_cached and prev_cached["remaining_path"]:
+                last_point = prev_cached["remaining_path"][-1]
+                new_seg = _compute_route_batched(
+                    {"name": "prev_completed_end",
+                     "latitude": last_point["lat"], "longitude": last_point["lng"]},
+                    [completed[-1]],
+                )
+                merged = prev_cached["remaining_path"] + (
+                    new_seg["path"][1:] if new_seg["path"] else []
+                )
+                completed_route = {
+                    "path": merged,
+                    "distance_m": prev_cached["distance_m"] + new_seg["distance_m"],
+                    "duration_ms": prev_cached["duration_ms"] + new_seg["duration_ms"],
+                    "toll_fare": prev_cached["toll_fare"] + new_seg["toll_fare"],
+                    "fuel_price_naver": prev_cached["fuel_price_naver"] + new_seg["fuel_price_naver"],
+                    "source": "naver" if new_seg["source"] == "naver" else "cache",
+                    "payloads": [], "status": "ready",
+                    "last_error": None, "last_error_payload": {},
+                }
+            else:
+                completed_route = _compute_route_batched(origin, completed)
+
+            _cache_put(comp_key, "COMPLETED_FIXED", _completed_signature(completed), {
+                "completed_path": [],
+                "remaining_path": completed_route["path"],
+                "distance_m": completed_route["distance_m"],
+                "duration_ms": completed_route["duration_ms"],
+                "completed_stops": len(completed), "remaining_stops": 0,
+                "toll_fare": completed_route["toll_fare"],
+                "fuel_price_naver": completed_route["fuel_price_naver"],
+                "fuel_price_opinet": None, "origin_name": origin["name"],
+                "payload": {}, "source": "naver", "status": "ready",
+            })
+        else:
+            # 완료 1건 첫 계산
+            completed_route = _compute_route_batched(origin, completed)
+            if completed_route["source"] in ("naver", "same_point"):
+                _cache_put(comp_key, "COMPLETED_FIXED", _completed_signature(completed), {
+                    "completed_path": [],
+                    "remaining_path": completed_route["path"],
+                    "distance_m": completed_route["distance_m"],
+                    "duration_ms": completed_route["duration_ms"],
+                    "completed_stops": len(completed), "remaining_stops": 0,
+                    "toll_fare": completed_route["toll_fare"],
+                    "fuel_price_naver": completed_route["fuel_price_naver"],
+                    "fuel_price_opinet": None, "origin_name": origin["name"],
+                    "payload": {}, "source": completed_route["source"], "status": "ready",
+                })
 
     rem_origin = origin
     if completed:
         last = completed[-1]
-        rem_origin = {
-            "name": "last_completed",
-            "latitude": last["latitude"],
-            "longitude": last["longitude"],
-        }
+        rem_origin = {"name": "last_completed",
+                      "latitude": last["latitude"], "longitude": last["longitude"]}
+
+    remaining_route = {
+        "path": [], "distance_m": 0, "duration_ms": 0,
+        "toll_fare": 0, "fuel_price_naver": 0,
+        "source": "not_needed", "payloads": [],
+        "status": "not_needed", "last_error": None, "last_error_payload": {},
+    }
 
     if remaining:
-        remaining_route = _compute_route_batched(rem_origin, remaining)
+        rem_sig = _build_node_signature(_group_route_nodes(remaining))
+        rem_key = _cache_key(target, manager_id, "REMAINING", origin_sig, rem_sig)
+        cached_remaining = _cache_get(rem_key)
+
+        if cached_remaining and cached_remaining["remaining_path"]:
+            # 배송지 집합 불변 - 재계산 없이 재사용 (호출 0회)
+            remaining_route = {
+                "path": cached_remaining["remaining_path"],
+                "distance_m": cached_remaining["distance_m"],
+                "duration_ms": cached_remaining["duration_ms"],
+                "toll_fare": cached_remaining["toll_fare"],
+                "fuel_price_naver": cached_remaining["fuel_price_naver"],
+                "source": "cache", "payloads": [], "status": "ready",
+                "last_error": None, "last_error_payload": {},
+            }
+        else:
+            remaining_route = _compute_route_batched(rem_origin, remaining)
+            if remaining_route["source"] in ("naver", "same_point"):
+                _cache_put(rem_key, "REMAINING", rem_sig, {
+                    "completed_path": [],
+                    "remaining_path": remaining_route["path"],
+                    "distance_m": remaining_route["distance_m"],
+                    "duration_ms": remaining_route["duration_ms"],
+                    "completed_stops": 0, "remaining_stops": len(remaining),
+                    "toll_fare": remaining_route["toll_fare"],
+                    "fuel_price_naver": remaining_route["fuel_price_naver"],
+                    "fuel_price_opinet": None, "origin_name": rem_origin["name"],
+                    "payload": {}, "source": remaining_route["source"], "status": "ready",
+                })
 
     fuel_price_opinet = _latest_opinet_fuel_price()
     overall_distance = completed_route["distance_m"] + remaining_route["distance_m"]
@@ -1030,6 +1194,8 @@ def _build_manager_route(
         "fuel_price_naver": overall_fuel_naver,
         "fuel_price_opinet": fuel_price_opinet,
         "origin_name": origin["name"],
+        "origin_latitude": origin["latitude"],
+        "origin_longitude": origin["longitude"],
         "source": overall_source,
         "completed_stop_ids": [s["id"] for s in completed],
         "remaining_stop_ids": [s["id"] for s in remaining],
@@ -1118,6 +1284,8 @@ def collect_routes_for_date(target: date_type, force: bool = False, trigger_reas
                 "fuel_price_naver": 0,
                 "fuel_price_opinet": _latest_opinet_fuel_price(),
                 "origin_name": origin["name"],
+                "origin_latitude": origin["latitude"],
+                "origin_longitude": origin["longitude"],
                 "source": "unavailable",
                 "completed_stop_ids": [],
                 "remaining_stop_ids": [s["id"] for s in payload["items"]],
@@ -1168,3 +1336,4 @@ def get_route(target: date_type, manager_id: int, force: bool = False) -> dict:
 
 def force_refresh(target: date_type, manager_id: int) -> dict:
     return get_route(target, manager_id, force=True)
+
