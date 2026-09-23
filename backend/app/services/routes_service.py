@@ -81,7 +81,7 @@ def _active_origin() -> tuple[dict, str]:
             "latitude": float(row.latitude),
             "longitude": float(row.longitude),
         }
-        origin_sig = f"db-{row.id}"
+        origin_sig = f"db-{row.latitude:.6f},{row.longitude:.6f}"
         return origin, origin_sig
 
     lat = os.environ.get("DEPOT_LAT")

@@ -271,9 +271,16 @@ export default function MapSection({
     const map = mapRef.current;
     if (!naver?.maps || !map) return;
 
-    const firstRoute = effectiveRoutes[0];
-    const origin = firstRoute
-      ? { lat: firstRoute.origin_latitude, lng: firstRoute.origin_longitude }
+    const withOrigin = effectiveRoutes.find(
+      (r) =>
+        typeof r.origin_latitude === "number" &&
+        Number.isFinite(r.origin_latitude) &&
+        typeof r.origin_longitude === "number" &&
+        Number.isFinite(r.origin_longitude),
+    );
+
+    const origin = withOrigin
+      ? { lat: withOrigin.origin_latitude as number, lng: withOrigin.origin_longitude as number }
       : null;
 
     if (!origin || !Number.isFinite(origin.lat) || !Number.isFinite(origin.lng)) {
