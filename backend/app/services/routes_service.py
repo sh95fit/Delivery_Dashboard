@@ -547,6 +547,9 @@ def _compute_route_batched(origin: dict, ordered_stops: list[dict]) -> dict:
         while batch and _same_point(current_origin, batch[0]):
             batch = batch[1:]
 
+        while batch and _same_point(current_origin, batch[-1]):
+            batch = batch[:-1]
+
         if not batch:
             continue
 
@@ -973,20 +976,44 @@ def collect_routes_for_date(target: date_type, force: bool = False, trigger_reas
 
     routes = []
     for manager_id, payload in groups.items():
-        routes.append(
-            _build_manager_route(
-                target=target,
-                state=state,
-                origin=origin,
-                origin_sig=origin_sig,
-                manager_id=manager_id,
-                manager_name=payload["manager_name"],
-                manager_color=payload["manager_color"],
-                manager_stops=payload["items"],
-                force=force,
-                trigger_reason=trigger_reason,
+        try:
+            routes.append(
+                _build_manager_route(
+                    target=target,
+                    state=state,
+                    origin=origin,
+                    origin_sig=origin_sig,
+                    manager_id=manager_id,
+                    manager_name=payload["manager_name"],
+                    manager_color=payload["manager_color"],
+                    manager_stops=payload["items"],
+                    force=force,
+                    trigger_reason=trigger_reason,
+                )
             )
-        )
+        except Exception as exc:
+            routes.append({
+                "manager_id": manager_id,
+                "manager_name": payload["manager_name"],
+                "manager_color": payload["manager_color"],
+                "mode": state.lower(),
+                "completed_path": [],
+                "remaining_path": [],
+                "distance_m": 0,
+                "duration_ms": 0,
+                "completed_stops": 0,
+                "remaining_stops": len(payload["items"]),
+                "toll_fare": 0,
+                "fuel_price_naver": 0,
+                "fuel_price_opinet": _latest_opinet_fuel_price(),
+                "origin_name": origin["name"],
+                "source": "unavailable",
+                "completed_stop_ids": [],
+                "remaining_stop_ids": [s["id"] for s in payload["items"]],
+                "payload": {"error": str(exc)},
+                "status": "failed_final",
+            })
+
 
     return {
         "date": target.isoformat(),
