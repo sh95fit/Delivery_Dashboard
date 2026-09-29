@@ -1,7 +1,9 @@
 name: Deploy
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -11,55 +13,72 @@ concurrency:
 
 jobs:
   deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          envs: TARGET_SHA
+          command_timeout: 15m
           script: |
             set -e
             cd /opt/lunchlab/Delivery_Dashboard
 
-            echo "== 0) 권한 보정 (deploy가 읽을 수 있도록) =="
+            echo "== 0) 권한 보정 =="
             sudo chown deploy:deploy /opt/lunchlab/Delivery_Dashboard/.env 2>/dev/null || true
             sudo chown -R deploy:deploy /opt/lunchlab 2>/dev/null || true
 
-            echo "== 1) 최신 코드 반영 =="
-            git checkout -- . 2>/dev/null || true
-            git pull origin main
+            PREV_SHA=$(git rev-parse HEAD)
+            echo "== 이전 버전: $PREV_SHA → 배포 버전: $TARGET_SHA =="
 
-            echo "== 2) 이미지 빌드 + 컨테이너 교체 (볼륨 유지) =="
+            echo "== 1) CI 통과한 커밋으로 코드 맞춤 =="
+            git fetch origin main
+            git reset --hard "$TARGET_SHA"
+
+            echo "== 2) 이미지 빌드 (아직 교체 안 함) =="
             docker compose build
+
+            echo "== 3) DB 기동 + 준비 대기 =="
+            docker compose up -d db redis
+            ready=0
+            for i in $(seq 1 30); do
+              if docker compose exec -T db pg_isready >/dev/null 2>&1; then ready=1; break; fi
+              echo "db waiting... ($i)"; sleep 2
+            done
+            [ "$ready" = "1" ] || { echo "!! DB 준비 실패"; exit 1; }
+
+            echo "== 4) 마이그레이션 (컨테이너 교체 전에 먼저) =="
+            docker compose run --rm --no-deps backend python -m app.db_migrate
+
+            echo "== 5) 컨테이너 교체 (DB 볼륨 유지) =="
             docker compose up -d --remove-orphans
 
-            echo "== 3) DB 볼륨 확인 =="
-            docker volume ls | grep dash_db_data || echo "WARN: dash_db_data 볼륨 없음"
-
-            echo "== 3.4) backend 기동 대기 =="
+            echo "== 6) 헬스체크 =="
+            ok=0
             for i in $(seq 1 20); do
-              if docker compose ps backend | grep -q "Up"; then
-                echo "backend is up"; break
-              fi
-              echo "backend not ready yet... ($i)"
-              sleep 3
+              if curl -sf http://127.0.0.1:8100/health >/dev/null; then ok=1; echo "health OK"; break; fi
+              echo "health waiting... ($i)"; sleep 3
             done
 
-            echo "== 3.5) dash DB 마이그레이션 =="
-            docker compose exec -T backend python -m app.db_migrate
+            if [ "$ok" != "1" ]; then
+              echo "!! 헬스체크 실패 → 이전 버전($PREV_SHA)으로 자동 복구"
+              docker compose logs --tail=80 backend || true
+              git reset --hard "$PREV_SHA"
+              docker compose build
+              docker compose up -d --remove-orphans
+              exit 1
+            fi
 
-            echo "== 4) 헬스체크 =="
-            for i in $(seq 1 5); do
-              if curl -sf http://127.0.0.1:8100/health >/dev/null; then
-                echo "health OK"; break
-              fi
-              echo "waiting... ($i)"; sleep 3
-            done
-
-            echo "== 5) 오래된 이미지 정리 =="
+            echo "== 7) 오래된 이미지 정리 =="
             docker image prune -f || true
+            echo "DEPLOY OK: $TARGET_SHA"

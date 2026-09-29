@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend (문법 + 마이그레이션 2회)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: delivery_dashboard
+          POSTGRES_USER: dash_user
+          POSTGRES_PASSWORD: ci_check_pass
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U dash_user -d delivery_dashboard"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      POSTGRES_PASSWORD: ci_check_pass
+      DASH_DB_HOST: 127.0.0.1
+      BASTION_HOST: localhost
+      BASTION_USER: ci
+      BASTION_SSH_PORT: "22"
+      RDS_HOST: localhost
+      RDS_USER: ci
+      RDS_PASS: ci
+      RDS_DB: ci
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Syntax check (모든 .py 파일 문법 검사)
+        run: python -m compileall -q app
+
+      - name: Migrate twice (두 번 실행해도 오류 없는지)
+        run: |
+          python -m app.db_migrate
+          python -m app.db_migrate
+
+      - name: Verify migration history
+        run: |
+          python - <<'PY'
+          from sqlalchemy import text
+          from app.database import get_dash_engine
+          with get_dash_engine().connect() as conn:
+              rows = conn.execute(text("SELECT version FROM schema_migrations ORDER BY version")).fetchall()
+          print("applied:", [r[0] for r in rows])
+          assert rows, "schema_migrations가 비어 있습니다"
+          PY
+
+  frontend:
+    name: frontend (빌드)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deps (서버 Dockerfile과 같은 방식)
+        run: npm install
+
+      - name: Build
+        run: npm run build
