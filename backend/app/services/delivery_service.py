@@ -268,7 +268,7 @@ def _get_preview_mode(conn, target: date_type) -> dict:
         SELECT a.manager_id,
                m.name  AS manager_name,
                m.color AS manager_color,
-               COUNT(DISTINCT s.address_id)                   AS stops,
+               COUNT(DISTINCT o.address_id)                   AS stops,
                COALESCE(SUM(od.quantity), 0)                  AS meals,
                COUNT(DISTINCT o.account_id)                   AS accounts,
                COALESCE(ROUND(SUM(od.total_amount) / 1.1), 0) AS net_revenue,
@@ -289,9 +289,10 @@ def _get_preview_mode(conn, target: date_type) -> dict:
 
         UNION ALL
 
-        SELECT op.address_id IS NOT NULL AND addr.manager_id AS manager_id,
-               NULL AS manager_name, NULL AS manager_color,
-               COUNT(DISTINCT CASE WHEN addr.id IS NOT NULL THEN op.address_id END) AS stops,
+        SELECT addr.manager_id AS manager_id,
+               m.name  AS manager_name,
+               m.color AS manager_color,
+               COUNT(DISTINCT op.address_id) AS stops,
                COUNT(sm.id) AS meals,
                COUNT(DISTINCT op.company_id) AS accounts,
                0 AS net_revenue,
