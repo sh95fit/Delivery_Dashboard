@@ -22,7 +22,7 @@ export default function LoginPage() {
             세션이 없거나 만료되었습니다. 허용된 회사 계정으로 다시 로그인하세요.
           </p>
           <a
-            href="/admin"
+            href="/api/auth/login"
             style={{
               display: "inline-block",
               padding: "12px 24px",
