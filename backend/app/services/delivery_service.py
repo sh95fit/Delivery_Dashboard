@@ -431,7 +431,7 @@ def _get_preview_mode(conn, target: date_type) -> dict:
                 "latitude": float(r.latitude) if r.latitude is not None else None,
                 "longitude": float(r.longitude) if r.longitude is not None else None,
                 "delivery_hour_raw": r.delivery_hour,
-                "delivery_time": _normalize_delivery_hour(r.delivery_hour),
+                "delivery_time": normalize_delivery_hour(r.delivery_hour),
                 "manager_id": r.manager_id,
                 "manager_name": r.manager_name,
                 "manager_color": r.manager_color,
