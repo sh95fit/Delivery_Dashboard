@@ -424,7 +424,8 @@ def _get_preview_mode(conn, target: date_type) -> dict:
         key = str(r.address_id)
         if key not in stop_map:
             stop_map[key] = {
-                "delivery_id": None,
+                # 미리보기에는 delivery 행이 없으므로 address_id 기반 가상 ID 사용
+                "delivery_id": f"preview-{r.address_id}",
                 "address_id": r.address_id,
                 "address_name": r.address_name,
                 "detail_address": r.detail_address,
