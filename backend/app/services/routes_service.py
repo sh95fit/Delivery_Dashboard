@@ -197,10 +197,11 @@ def _latest_cache_for_manager(target: date_type, manager_id: int, state: str) ->
     prefix = f"{target.isoformat()}:{manager_id}:{state}:"
     engine = get_dash_engine()
     with engine.connect() as conn:
+        # [S0-P1] 실제 컬럼명은 duration_s (duration_ms 컬럼은 route_cache에 없음)
         row = conn.execute(text("""
             SELECT route_key, completed_path_json, remaining_path_json,
                    completed_stop_ids_json, remaining_stop_ids_json,
-                   distance_m, duration_ms, toll_fare, fuel_price_naver,
+                   distance_m, duration_s, toll_fare, fuel_price_naver,
                    completed_stops, remaining_stops
             FROM route_cache
             WHERE route_key LIKE :prefix
@@ -215,7 +216,7 @@ def _latest_cache_for_manager(target: date_type, manager_id: int, state: str) ->
             "completed_path": row["completed_path_json"] or [],
             "remaining_path": row["remaining_path_json"] or [],
             "distance_m": int(row["distance_m"] or 0),
-            "duration_ms": int(row["duration_ms"] or 0),
+            "duration_ms": int(row["duration_s"] or 0),
             "completed_stops": int(row["completed_stops"] or 0),
             "remaining_stops": int(row["remaining_stops"] or 0),
             "toll_fare": int(row["toll_fare"] or 0),
@@ -560,6 +561,15 @@ def _naver_driving(start: dict, ordered_nodes: list[dict], option: str = "trafas
     waypoints = ordered_nodes[:-1]
     if waypoints:
         params["waypoints"] = "|".join(_to_lonlat(x) for x in waypoints)
+
+    # [S0-P1] v1 호출 차단: NAVER_MODE=live 일 때만 실제 호출 (T단계에서 해제)
+    if os.environ.get("NAVER_MODE", "off") != "live":
+        return {
+            "path": [], "distance_m": 0, "duration_ms": 0,
+            "toll_fare": 0, "fuel_price_naver": 0,
+            "payload": {"note": "NAVER_MODE is not live (calls blocked)"},
+            "source": "unavailable", "code": -4,
+        }
 
     if not _check_daily_budget():
         return {
