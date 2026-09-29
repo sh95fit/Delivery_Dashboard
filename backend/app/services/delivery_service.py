@@ -364,8 +364,6 @@ def _get_preview_mode(conn, target: date_type) -> dict:
           ON m.id = a.manager_id
         WHERE o.delivery_date = :d
           AND o.deleted_at IS NULL
-          AND a.latitude IS NOT NULL
-          AND a.longitude IS NOT NULL
         GROUP BY a.id, a.manager_id, m.name, m.color,
                  a.name, a.detail_address, a.latitude, a.longitude, a.delivery_hour,
                  od.product_id, p.name
@@ -403,8 +401,6 @@ def _get_preview_mode(conn, target: date_type) -> dict:
         WHERE sm.order_id IS NULL
           AND sm.is_skipped = 0
           AND op.deleted_at IS NULL
-          AND addr.latitude IS NOT NULL
-          AND addr.longitude IS NOT NULL
           AND smp.product_id IN :lineups
         GROUP BY addr.id, addr.manager_id, m.name, m.color,
                  addr.name, addr.detail_address, addr.latitude, addr.longitude, addr.delivery_hour,
@@ -587,3 +583,4 @@ def get_delivery_day(target: date_type) -> dict:
         if _delivery_exists(conn, target):
             return _get_actual_mode(conn, target)
         return _get_preview_mode(conn, target)
+
