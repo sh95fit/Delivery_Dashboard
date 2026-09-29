@@ -21,10 +21,9 @@ def get_cutoff_at(target: date_type) -> datetime:
 
 
 def _fetch_all(target: date_type) -> dict:
-    """쿼리 3종을 '하나의 연결 안에서' 모두 실행 (스코프 버그 제거)."""
+    """쿼리 3종을 '하나의 연결 안에서' 모두 실행."""
     engine = get_engine()
     with engine.connect() as conn:
-        # 1) delivery 기반 집계 (+ orders 존재 여부)
         main_row = conn.execute(text(
             """
             SELECT COUNT(DISTINCT d.id)                                                       AS total,
@@ -38,23 +37,45 @@ def _fetch_all(target: date_type) -> dict:
             """
         ), {"d": target}).fetchone()
 
-        # 2) delivery가 없을 때만 — 주문 기반 예상 집계
         estimate_row = None
-        if int(main_row[0] or 0) == 0:
+        if datetime.now(KST) < get_cutoff_at(target):
+            # 마감 전: 웹(orders) + 앱 개별 선택(selected_menus, 미전환) 합산
             estimate_row = conn.execute(text(
                 """
-                SELECT COUNT(DISTINCT o.address_id)                   AS stops,
-                       COALESCE(SUM(od.quantity), 0)                  AS meals,
-                       COUNT(DISTINCT o.account_id)                   AS accounts,
-                       COALESCE(ROUND(SUM(od.total_amount) / 1.1), 0) AS net_revenue
-                FROM orders o
-                JOIN `order-details` od
-                  ON od.order_id = o.id
-                 AND od.is_refund = 0
-                 AND od.deleted_at IS NULL
-                 AND od.product_id IN :lineups
-                WHERE o.delivery_date = :d
-                  AND o.deleted_at IS NULL
+                SELECT
+                  (SELECT COUNT(DISTINCT addr.id) FROM orders o
+                     JOIN addresses addr ON addr.id = o.address_id
+                     WHERE o.delivery_date = :d AND o.deleted_at IS NULL
+                   UNION
+                   SELECT COUNT(DISTINCT addr2.id) FROM selected_menus sm
+                     JOIN schedules sc ON sc.id = sm.schedule_id AND sc.delivery_on = :d
+                     JOIN order_profiles op ON op.id = sm.order_profile_id
+                     JOIN addresses addr2 ON addr2.id = op.address_id
+                     WHERE sm.order_id IS NULL AND sm.is_skipped = 0 AND op.deleted_at IS NULL) AS total,
+                  (SELECT COALESCE(SUM(od.quantity),0) FROM orders o
+                     JOIN `order-details` od ON od.order_id = o.id
+                       AND od.is_refund = 0 AND od.deleted_at IS NULL
+                       AND od.product_id IN :lineups
+                     WHERE o.delivery_date = :d AND o.deleted_at IS NULL) AS web_qty,
+                  (SELECT COUNT(sm.id) FROM selected_menus sm
+                     JOIN schedules sc ON sc.id = sm.schedule_id AND sc.delivery_on = :d
+                     JOIN scheduled_menus smp ON smp.id = sm.scheduled_menu_id
+                     WHERE sm.order_id IS NULL AND sm.is_skipped = 0
+                       AND smp.product_id IN :lineups) AS app_qty,
+                  (SELECT COUNT(DISTINCT acc) FROM (
+                     SELECT o.account_id AS acc FROM orders o
+                       WHERE o.delivery_date = :d AND o.deleted_at IS NULL
+                     UNION
+                     SELECT op.company_id AS acc FROM selected_menus sm
+                       JOIN schedules sc ON sc.id = sm.schedule_id AND sc.delivery_on = :d
+                       JOIN order_profiles op ON op.id = sm.order_profile_id
+                       WHERE sm.order_id IS NULL AND sm.is_skipped = 0 AND op.deleted_at IS NULL
+                       AND op.company_id IS NOT NULL) t) AS accounts,
+                  (SELECT COALESCE(ROUND(SUM(od.total_amount)/1.1),0) FROM orders o
+                     JOIN `order-details` od ON od.order_id = o.id
+                       AND od.is_refund = 0 AND od.deleted_at IS NULL
+                       AND od.product_id IN :lineups
+                     WHERE o.delivery_date = :d AND o.deleted_at IS NULL) AS net_revenue
                 """
             ).bindparams(bindparam("lineups", expanding=True)),
               {"d": target, "lineups": list(LINEUP_IDS)}).fetchone()
@@ -115,9 +136,11 @@ def get_status(target: date_type) -> dict:
             e = data["estimate"]
             estimate = {
                 "total": int(e[0] or 0),
-                "estimated_meals": int(e[1] or 0),
-                "estimated_accounts": int(e[2] or 0),
-                "estimated_net_revenue": int(e[3] or 0),
+                "estimated_meals": int(e[1] or 0) + int(e[2] or 0),
+                "estimated_accounts": int(e[3] or 0),
+                "estimated_net_revenue": int(e[4] or 0),
+                "web_qty": int(e[1] or 0),
+                "app_qty": int(e[2] or 0),
             }
             progress = {"completed": 0, "total": estimate["total"], "unassigned": 0}
 
