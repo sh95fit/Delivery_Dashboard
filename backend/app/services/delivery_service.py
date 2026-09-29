@@ -512,6 +512,7 @@ def _get_preview_mode(conn, target: date_type) -> dict:
             "manager_id": e["manager_id"],
             "manager_name": e["manager_name"],
             "manager_color": e["manager_color"],
+            "color": e["manager_color"],
             "stops": len(own),
             "meals": sum(sk["meals"] for sk in own),
             "accounts": max((sk["accounts"] for sk in own), default=0),
