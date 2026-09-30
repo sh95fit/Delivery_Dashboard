@@ -356,7 +356,7 @@ def status_view(agg: dict, now: datetime) -> dict:
     progress = {"completed": completed, "total": show_total, "unassigned": t["unassigned_stops"]}
 
     estimate = None
-    if not has_delivery and state == "PREVIEW":
+    if state == "PREVIEW":
         estimate = {
             "total": t["stops"],
             "estimated_meals": t["meals"],

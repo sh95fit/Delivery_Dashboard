@@ -186,3 +186,17 @@ def test_cancelled_summary():
     assert s["cancelled_orders"] == 2 and s["cancelled_qty"] == 5
     assert s["cancelled_stops"] == 1
     assert s["cancelled_by_source"]["app"] == {"orders": 1, "qty": 3}
+
+def test_past_date_incomplete_is_result():
+    agg = _agg([_dlv(1, 1, 1, delivered=datetime(2026, 10, 1, 11, 0)), _dlv(2, 2, 1)],
+               [_line("web", 1, 10, 4, 1, 8800), _line("web", 2, 20, 4, 1, 8800)],
+               mode=da.MODE_DELIVERY)
+    sv = da.status_view(agg, datetime(2026, 10, 2, 9, 0, tzinfo=KST))
+    assert sv["state"] == "RESULT" and sv["incomplete"] == 1
+
+
+def test_future_delivery_preview_has_estimate():
+    agg = _agg([_dlv(1, 1, 1)], [_line("web", 1, 10, 4, 3, 26400)], mode=da.MODE_DELIVERY)
+    sv = da.status_view(agg, datetime(2026, 9, 30, 20, 0, tzinfo=KST))
+    assert sv["state"] == "PREVIEW"
+    assert sv["estimate"] is not None and sv["estimate"]["estimated_meals"] == 3

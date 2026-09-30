@@ -732,10 +732,11 @@ def _fetch_state_and_groups(target: date_type) -> tuple[str, str, list[dict]]:
     with engine.connect() as conn:
         agg = day_aggregate.build_day(conn, target)
 
-    t = agg["totals"]
+    # 상단 카드와 같은 판정 사용 (과거 날짜 = RESULT, 미래 날짜 = PREVIEW)
+    card_state = day_aggregate.status_view(agg, datetime.now(KST))["state"]
     if agg["mode"] == day_aggregate.MODE_DELIVERY:
         source = "delivery"
-        state = "RESULT" if t["stops"] > 0 and t["completed_stops"] >= t["stops"] else "LIVE"
+        state = card_state if card_state in ("LIVE", "RESULT") else "PREVIEW"
     else:
         state = "PREVIEW"
         source = "orders_estimate"  # 프론트 표기 호환 유지 (4.7에서 정리)
