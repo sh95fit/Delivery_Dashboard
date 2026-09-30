@@ -23,6 +23,10 @@ class ManagerDelivery(BaseModel):
     admin_qty: int = 0
     app_qty: int = 0
     app_pending_qty: int = 0
+    work_stops: int = 0
+    work_meals: int = 0
+    internal_stops: int = 0
+    internal_meals: int = 0    
     lineups: dict[str, LineupQty]
 
 
@@ -46,6 +50,7 @@ class StopPoint(BaseModel):
     app_qty: int = 0
     app_pending_qty: int = 0
     net_revenue: int = 0
+    is_internal: bool = False    
     lineups: dict[str, LineupQty]
 
 
@@ -63,3 +68,4 @@ class DeliveryDayResponse(BaseModel):
     warnings: dict = {}
     internal: dict = {}
     production: dict = {}
+    work: dict = {}    

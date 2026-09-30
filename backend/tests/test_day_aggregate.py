@@ -242,3 +242,27 @@ def test_no_route_env_parse(monkeypatch):
     assert da.internal_no_route_address_ids() == {2, 102, 2595}
     monkeypatch.setenv("INTERNAL_NO_ROUTE_ADDRESS_IDS", "2, 102")
     assert da.internal_no_route_address_ids() == {2, 102}
+
+def test_workload_includes_delivered_internal():
+    stops = [_dlv(1, 1, 7), _dlv(2, 380, 9, delivered=datetime(2026, 10, 1, 11, 0)), _dlv(3, 102, 7)]
+    stops[0]["account_id"], stops[1]["account_id"], stops[2]["account_id"] = 10, 1, 1
+    lines = da.prepare_lines([
+        _line("web", 1, 10, 4, 3, 26400),
+        _line("web", 380, 1, 4, 11, 0),
+        _line("web", 102, 1, 4, 14, 0),
+    ])
+    ci, cl, ii, il = da.split_internal(stops, lines, {1})
+    for s in ii:
+        s["is_internal"] = True
+    agg = da.assemble(T, da.MODE_DELIVERY, CUTOFF, "schedule", ci, cl)
+    ri, rl = da.split_pickup(ii, il, {102})
+    wagg = da.assemble(T, da.MODE_DELIVERY, CUTOFF, "schedule", ci + ri, cl + rl)
+    ms = {m["manager_id"]: m for m in da.merge_manager_workload(agg["managers"], wagg["managers"])}
+    assert ms[9]["stops"] == 0 and ms[9]["net_revenue"] == 0
+    assert ms[9]["work_stops"] == 1 and ms[9]["internal_meals"] == 11
+    assert ms[7]["work_stops"] == 1 and ms[7]["internal_stops"] == 0
+    assert sum(m["stops"] for m in ms.values()) == agg["totals"]["stops"]
+    agg["work"] = da.workload_view(wagg)
+    sv = da.status_view(agg, datetime(2026, 10, 2, 9, 0, tzinfo=KST))
+    assert sv["progress"]["total"] == 2 and sv["incomplete"] == 1
+    assert [s["is_internal"] for s in wagg["stops"]].count(True) == 1

@@ -200,6 +200,56 @@ def route_stops_of(cust_stops: list[dict], int_stops: list[dict], no_route: set)
     """경로 = 고객 배송지 + (현장 수령 제외) 직원식 배송지."""
     return cust_stops + [s for s in int_stops if s.get("address_id") not in no_route]
 
+def split_pickup(int_infos: list[dict], int_lines: list[dict], no_route: set):
+    """직원식 중 배송하는 곳(현장 수령 제외)만 골라낸다 → 매니저 일감·경로용."""
+    r_infos = [s for s in int_infos if s.get("address_id") not in no_route]
+    r_addr = {s["address_id"] for s in r_infos if s.get("address_id") is not None}
+    r_lines = [ln for ln in int_lines if ln["address_id"] in r_addr]
+    return r_infos, r_lines
+
+
+def workload_view(wagg: dict) -> dict:
+    t = wagg["totals"]
+    ints = [s for s in wagg["stops"] if s["is_internal"]]
+    return {
+        "stops": t["stops"],
+        "meals": t["meals"],
+        "completed_stops": t["completed_stops"],
+        "unassigned_stops": t["unassigned_stops"],
+        "internal_stops": len(ints),
+        "internal_meals": sum(s["meals"] for s in ints),
+    }
+
+
+def _empty_manager(w: dict) -> dict:
+    row = {k: 0 for k in _finish(_bucket())}
+    row.update({
+        "manager_id": w["manager_id"], "manager_name": w["manager_name"],
+        "color": w["color"], "manager_color": w["color"],
+        "stops": 0, "accounts": 0, "lineups": {},
+    })
+    return row
+
+
+def merge_manager_workload(cust_managers: list[dict], work_managers: list[dict]) -> list[dict]:
+    """매니저 행 = 고객 실적 + 일감(work_*) + 직원식 몫(internal_*)."""
+    by_id = {m["manager_id"]: m for m in cust_managers}
+    out = []
+    for w in work_managers:
+        c = by_id.pop(w["manager_id"], None)
+        row = dict(c) if c else _empty_manager(w)
+        row["work_stops"] = w["stops"]
+        row["work_meals"] = w["meals"]
+        row["internal_stops"] = w["stops"] - row["stops"]
+        row["internal_meals"] = w["meals"] - row["meals"]
+        out.append(row)
+    for c in by_id.values():  # 방어용: 정상이면 비어 있음
+        row = dict(c)
+        row.update(work_stops=c["stops"], work_meals=c["meals"], internal_stops=0, internal_meals=0)
+        out.append(row)
+    out.sort(key=lambda x: (-x["work_stops"], x["manager_id"] is None, x["manager_id"] or 0))
+    return out
+
 
 def split_internal(stop_infos: list[dict], lines: list[dict], internal_ids: set):
     """직원식 분리: 배송지는 addresses.account_id, 주문 행은 배송지 또는 고객사로 판정."""
@@ -325,6 +375,7 @@ def assemble(target: date_type, mode: str, cutoff_at: datetime, cutoff_source: s
             "manager_name": info.get("manager_name"),
             "manager_color": info.get("manager_color"),
             "delivered_at": info.get("delivered_at"),
+            "is_internal": bool(info.get("is_internal")),            
             "accounts": len(s["accounts"]),
             "lineups": s["lineups"],
             "_key": key,
@@ -406,10 +457,15 @@ def status_view(agg: dict, now: datetime) -> dict:
     today = now.astimezone(KST).date()
     cutoff_at = datetime.fromisoformat(agg["cutoff_at"])
     t = agg["totals"]
+    # 진행률·미완료는 일감(고객 + 배송하는 직원식) 기준
+    w = agg.get("work") or {
+        "stops": t["stops"], "completed_stops": t["completed_stops"],
+        "unassigned_stops": t["unassigned_stops"],
+    }
     has_delivery = agg["mode"] == MODE_DELIVERY
-    delivery_total = t["stops"] if has_delivery else 0
-    completed = t["completed_stops"] if has_delivery else 0
-    has_orders = t["stops"] > 0
+    delivery_total = w["stops"] if has_delivery else 0
+    completed = w["completed_stops"] if has_delivery else 0
+    has_orders = t["stops"] > 0 or w["stops"] > 0
 
     if now < cutoff_at:
         state = "PREVIEW"
@@ -429,8 +485,8 @@ def status_view(agg: dict, now: datetime) -> dict:
     else:
         state = "PREVIEW"
 
-    show_total = t["stops"] if (has_delivery or state == "PREVIEW") else 0
-    progress = {"completed": completed, "total": show_total, "unassigned": t["unassigned_stops"]}
+    show_total = w["stops"] if (has_delivery or state == "PREVIEW") else 0
+    progress = {"completed": completed, "total": show_total, "unassigned": w["unassigned_stops"]}
 
     estimate = None
     if state == "PREVIEW":
@@ -466,6 +522,7 @@ def status_view(agg: dict, now: datetime) -> dict:
         "warnings": agg["warnings"],
         "internal": agg.get("internal"),
         "production": agg.get("production"),        
+        "work": agg.get("work"),        
     }
 
 
@@ -485,11 +542,12 @@ def delivery_view(agg: dict) -> dict:
         "summary": summary,
         "managers": agg["managers"],
         "unassigned": {"stops": t["unassigned_stops"]},
-        "stops": agg["stops"],
+        "stops": agg.get("route_stops", agg["stops"]),
         "by_lineup": agg["by_lineup"],
         "warnings": w,
         "internal": agg.get("internal"),
         "production": agg.get("production"),        
+        "work": agg.get("work"),        
     }
 
 
@@ -758,12 +816,20 @@ def build_day(conn, target: date_type, now: datetime | None = None) -> dict:
 
     cust_infos, cust_lines, int_infos, int_lines = split_internal(
         stop_infos, lines, internal_account_ids())
+    for s in int_infos:
+        s["is_internal"] = True
 
     agg = assemble(target, mode, cutoff_at, cutoff_source, cust_infos, cust_lines, warnings)
     iagg = assemble(target, mode, cutoff_at, cutoff_source, int_infos, int_lines, {})
+    r_infos, r_lines = split_pickup(int_infos, int_lines, internal_no_route_address_ids())
+    wagg = assemble(target, mode, cutoff_at, cutoff_source,
+                    cust_infos + r_infos, cust_lines + r_lines, {})
+
     agg["internal"] = internal_view(iagg)
     agg["production"] = production_view(agg, iagg)
-    agg["route_stops"] = route_stops_of(agg["stops"], iagg["stops"], internal_no_route_address_ids())    
+    agg["work"] = workload_view(wagg)
+    agg["managers"] = merge_manager_workload(agg["managers"], wagg["managers"])
+    agg["route_stops"] = wagg["stops"]
 
     live = {s["address_id"] for s in agg["stops"] + iagg["stops"] if s["address_id"] is not None}
     agg["warnings"].update(summarize_cancelled(fetch_cancelled(conn, target), live))

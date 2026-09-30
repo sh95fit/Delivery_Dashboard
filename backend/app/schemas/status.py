@@ -39,3 +39,4 @@ class DeliveryStatusResponse(BaseModel):
     warnings: dict | None = None
     internal: dict | None = None
     production: dict | None = None
+    work: dict | None = None    
