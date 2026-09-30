@@ -178,12 +178,27 @@ def _merge_lineups(dst: dict, src: dict) -> None:
         d["qty"] += v["qty"]
         d["amount"] += v["amount"]
 
-DEFAULT_INTERNAL_ACCOUNT_IDS = "1,2484"  # 런치랩, 런치랩_직원 (2026-09-30 확인)
+DEFAULT_INTERNAL_ACCOUNT_IDS = "1,2484"      # 런치랩, 런치랩_직원
+DEFAULT_INTERNAL_NO_ROUTE = "2,102,2595"     # 물류팀 식사, 장안동공장 x2 (현장 수령)
+
+
+def _parse_ids(env_name: str, default: str) -> set:
+    raw = os.environ.get(env_name, default)
+    return {int(x) for x in raw.split(",") if x.strip().isdigit()}
 
 
 def internal_account_ids() -> set:
-    raw = os.environ.get("INTERNAL_ACCOUNT_IDS", DEFAULT_INTERNAL_ACCOUNT_IDS)
-    return {int(x) for x in raw.split(",") if x.strip().isdigit()}
+    return _parse_ids("INTERNAL_ACCOUNT_IDS", DEFAULT_INTERNAL_ACCOUNT_IDS)
+
+
+def internal_no_route_address_ids() -> set:
+    """직원식 중 배송 없이 현장 수령하는 주소 → 경로에서도 제외."""
+    return _parse_ids("INTERNAL_NO_ROUTE_ADDRESS_IDS", DEFAULT_INTERNAL_NO_ROUTE)
+
+
+def route_stops_of(cust_stops: list[dict], int_stops: list[dict], no_route: set) -> list[dict]:
+    """경로 = 고객 배송지 + (현장 수령 제외) 직원식 배송지."""
+    return cust_stops + [s for s in int_stops if s.get("address_id") not in no_route]
 
 
 def split_internal(stop_infos: list[dict], lines: list[dict], internal_ids: set):
@@ -748,6 +763,7 @@ def build_day(conn, target: date_type, now: datetime | None = None) -> dict:
     iagg = assemble(target, mode, cutoff_at, cutoff_source, int_infos, int_lines, {})
     agg["internal"] = internal_view(iagg)
     agg["production"] = production_view(agg, iagg)
+    agg["route_stops"] = route_stops_of(agg["stops"], iagg["stops"], internal_no_route_address_ids())    
 
     live = {s["address_id"] for s in agg["stops"] + iagg["stops"] if s["address_id"] is not None}
     agg["warnings"].update(summarize_cancelled(fetch_cancelled(conn, target), live))

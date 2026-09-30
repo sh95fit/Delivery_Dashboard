@@ -742,7 +742,7 @@ def _fetch_state_and_groups(target: date_type) -> tuple[str, str, list[dict]]:
         source = "orders_estimate"  # 프론트 표기 호환 유지 (4.7에서 정리)
 
     items = []
-    for s in agg["stops"]:
+    for s in agg.get("route_stops", agg["stops"]):
         if not s["has_coord"]:
             continue
         items.append({

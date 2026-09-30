@@ -228,3 +228,17 @@ def test_internal_env_parse(monkeypatch):
     assert da.internal_account_ids() == {1, 2484}
     monkeypatch.delenv("INTERNAL_ACCOUNT_IDS")
     assert da.internal_account_ids() == {1, 2484}
+
+
+def test_route_keeps_delivered_internal_stops():
+    cust = [{"address_id": 1}]
+    internal = [{"address_id": 380}, {"address_id": 2733}, {"address_id": 102}, {"address_id": 2}]
+    out = da.route_stops_of(cust, internal, {2, 102, 2595})
+    assert [s["address_id"] for s in out] == [1, 380, 2733]
+
+
+def test_no_route_env_parse(monkeypatch):
+    monkeypatch.delenv("INTERNAL_NO_ROUTE_ADDRESS_IDS", raising=False)
+    assert da.internal_no_route_address_ids() == {2, 102, 2595}
+    monkeypatch.setenv("INTERNAL_NO_ROUTE_ADDRESS_IDS", "2, 102")
+    assert da.internal_no_route_address_ids() == {2, 102}
