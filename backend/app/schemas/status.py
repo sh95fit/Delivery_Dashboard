@@ -37,3 +37,5 @@ class DeliveryStatusResponse(BaseModel):
     estimated: bool = False
     totals: dict | None = None
     warnings: dict | None = None
+    internal: dict | None = None
+    production: dict | None = None

@@ -21,6 +21,7 @@
 """
 from __future__ import annotations
 
+import os
 import re
 from datetime import date as date_type, datetime, time, timedelta, timezone
 
@@ -177,6 +178,67 @@ def _merge_lineups(dst: dict, src: dict) -> None:
         d["qty"] += v["qty"]
         d["amount"] += v["amount"]
 
+DEFAULT_INTERNAL_ACCOUNT_IDS = "1,2484"  # 런치랩, 런치랩_직원 (2026-09-30 확인)
+
+
+def internal_account_ids() -> set:
+    raw = os.environ.get("INTERNAL_ACCOUNT_IDS", DEFAULT_INTERNAL_ACCOUNT_IDS)
+    return {int(x) for x in raw.split(",") if x.strip().isdigit()}
+
+
+def split_internal(stop_infos: list[dict], lines: list[dict], internal_ids: set):
+    """직원식 분리: 배송지는 addresses.account_id, 주문 행은 배송지 또는 고객사로 판정."""
+    if not internal_ids:
+        return stop_infos, lines, [], []
+    int_infos = [s for s in stop_infos if s.get("account_id") in internal_ids]
+    cust_infos = [s for s in stop_infos if s.get("account_id") not in internal_ids]
+    int_addr = {s["address_id"] for s in int_infos if s.get("address_id") is not None}
+
+    def is_int(ln):
+        return ln["address_id"] in int_addr or ln["account_key"] in internal_ids
+
+    int_lines = [ln for ln in lines if is_int(ln)]
+    cust_lines = [ln for ln in lines if not is_int(ln)]
+    return cust_infos, cust_lines, int_infos, int_lines
+
+
+def internal_view(iagg: dict) -> dict:
+    t = iagg["totals"]
+    return {
+        "stops": t["stops"],
+        "meals": t["meals"],
+        "lunch_meals": t["lunch_meals"],
+        "dinner_meals": t["dinner_meals"],
+        "gross_revenue": t["gross_revenue"],
+        "refund_amount": t["refund_amount"],
+        "net_revenue": t["net_revenue"],
+        "by_lineup": iagg["by_lineup"],
+        "places": [{
+            "address_id": s["address_id"],
+            "address_name": s["address_name"],
+            "manager_name": s["manager_name"],
+            "meals": s["meals"],
+            "net_revenue": s["net_revenue"],
+            "delivered": s["delivered_at"] is not None,
+        } for s in iagg["stops"]],
+        "unplaced_qty": iagg["warnings"].get("unplaced_qty", 0),
+    }
+
+
+def production_view(cust: dict, internal: dict) -> dict:
+    """주방 생산 기준 = 고객 + 직원식."""
+    merged: dict = {}
+    for src in (cust["by_lineup"], internal["by_lineup"]):
+        for pid, v in src.items():
+            d = merged.setdefault(pid, {"name": v["name"], "meal": v["meal"], "qty": 0})
+            d["qty"] += v["qty"]
+    ct, it = cust["totals"], internal["totals"]
+    return {
+        "meals": ct["meals"] + it["meals"],
+        "lunch_meals": ct["lunch_meals"] + it["lunch_meals"],
+        "dinner_meals": ct["dinner_meals"] + it["dinner_meals"],
+        "by_lineup": {k: merged[k] for k in [str(p) for p in LINEUP_ORDER] if k in merged},
+    }
 
 def assemble(target: date_type, mode: str, cutoff_at: datetime, cutoff_source: str,
              stop_infos: list[dict], lines: list[dict], warnings: dict | None = None) -> dict:
@@ -387,6 +449,8 @@ def status_view(agg: dict, now: datetime) -> dict:
         "estimated": agg["estimated"],
         "totals": t,
         "warnings": agg["warnings"],
+        "internal": agg.get("internal"),
+        "production": agg.get("production"),        
     }
 
 
@@ -409,6 +473,8 @@ def delivery_view(agg: dict) -> dict:
         "stops": agg["stops"],
         "by_lineup": agg["by_lineup"],
         "warnings": w,
+        "internal": agg.get("internal"),
+        "production": agg.get("production"),        
     }
 
 
@@ -418,7 +484,7 @@ def delivery_view(agg: dict) -> dict:
 SQL_CUTOFF = "SELECT MAX(order_completed_at) FROM schedules WHERE delivery_on = :d"
 
 SQL_DELIVERY_STOPS = """
-SELECT d.id AS delivery_id, d.address_id, d.manager_id, d.delivered_at,
+SELECT d.id AS delivery_id, d.address_id, d.manager_id, d.delivered_at, a.account_id,
        m.name AS manager_name, m.color AS manager_color,
        a.name AS address_name, a.detail_address, a.latitude, a.longitude, a.delivery_hour
 FROM delivery d
@@ -429,7 +495,7 @@ ORDER BY d.id
 """
 
 SQL_ADDRESS_STOPS = """
-SELECT a.id AS address_id, a.manager_id, m.name AS manager_name, m.color AS manager_color,
+SELECT a.id AS address_id, a.account_id, a.manager_id, m.name AS manager_name, m.color AS manager_color,
        a.name AS address_name, a.detail_address, a.latitude, a.longitude, a.delivery_hour
 FROM addresses a
 LEFT JOIN manager m ON m.id = a.manager_id
@@ -534,6 +600,7 @@ def delivery_row_to_info(r) -> dict:
         "delivery_id": str(r["delivery_id"]),
         "route_item_id": r["delivery_id"],
         "address_id": r["address_id"],
+        "account_id": r.get("account_id"),        
         "address_name": r["address_name"],
         "detail_address": r["detail_address"],
         "latitude": r["latitude"],
@@ -563,6 +630,7 @@ def fetch_address_stops(conn, address_ids: list[int]) -> list[dict]:
         "delivery_id": f"preview-{r['address_id']}",
         "route_item_id": int(r["address_id"]),
         "address_id": int(r["address_id"]),
+        "account_id": r["account_id"],        
         "address_name": r["address_name"],
         "detail_address": r["detail_address"],
         "latitude": r["latitude"],
@@ -673,8 +741,15 @@ def build_day(conn, target: date_type, now: datetime | None = None) -> dict:
         ids = sorted({ln["address_id"] for ln in lines if ln["address_id"] is not None})
         stop_infos = fetch_address_stops(conn, ids)
 
-    agg = assemble(target, mode, cutoff_at, cutoff_source, stop_infos, lines, warnings)
-    live = {s["address_id"] for s in agg["stops"] if s["address_id"] is not None}
+    cust_infos, cust_lines, int_infos, int_lines = split_internal(
+        stop_infos, lines, internal_account_ids())
+
+    agg = assemble(target, mode, cutoff_at, cutoff_source, cust_infos, cust_lines, warnings)
+    iagg = assemble(target, mode, cutoff_at, cutoff_source, int_infos, int_lines, {})
+    agg["internal"] = internal_view(iagg)
+    agg["production"] = production_view(agg, iagg)
+
+    live = {s["address_id"] for s in agg["stops"] + iagg["stops"] if s["address_id"] is not None}
     agg["warnings"].update(summarize_cancelled(fetch_cancelled(conn, target), live))
     return agg
 

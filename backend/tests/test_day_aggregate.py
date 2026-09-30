@@ -200,3 +200,31 @@ def test_future_delivery_preview_has_estimate():
     sv = da.status_view(agg, datetime(2026, 9, 30, 20, 0, tzinfo=KST))
     assert sv["state"] == "PREVIEW"
     assert sv["estimate"] is not None and sv["estimate"]["estimated_meals"] == 3
+
+def test_internal_split_excluded_from_customer():
+    stops = [_dlv(1, 1, 1, delivered=datetime(2026, 10, 1, 11, 0)), _dlv(2, 102, 1)]
+    stops[0]["account_id"] = 10
+    stops[1]["account_id"] = 1
+    lines = da.prepare_lines([
+        _line("web", 1, 10, 4, 3, 26400),
+        _line("web", 102, 1, 4, 5, 0),
+        _line("web", 102, 1, 23, 2, 4000),
+    ])
+    ci, cl, ii, il = da.split_internal(stops, lines, {1, 2484})
+    agg = da.assemble(T, da.MODE_DELIVERY, CUTOFF, "schedule", ci, cl)
+    iagg = da.assemble(T, da.MODE_DELIVERY, CUTOFF, "schedule", ii, il)
+    assert agg["totals"]["stops"] == 1 and agg["totals"]["meals"] == 3
+    assert agg["totals"]["completed_stops"] == 1
+    iv = da.internal_view(iagg)
+    assert iv["stops"] == 1 and iv["meals"] == 7 and iv["net_revenue"] == 3636
+    pv = da.production_view(agg, iagg)
+    assert pv["meals"] == 10 and pv["by_lineup"]["4"]["qty"] == 8
+    sv = da.status_view(agg, datetime(2026, 10, 2, 9, 0, tzinfo=KST))
+    assert sv["state"] == "RESULT" and sv["incomplete"] == 0
+
+
+def test_internal_env_parse(monkeypatch):
+    monkeypatch.setenv("INTERNAL_ACCOUNT_IDS", "1, 2484,abc")
+    assert da.internal_account_ids() == {1, 2484}
+    monkeypatch.delenv("INTERNAL_ACCOUNT_IDS")
+    assert da.internal_account_ids() == {1, 2484}

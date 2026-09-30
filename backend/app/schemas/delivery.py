@@ -61,3 +61,5 @@ class DeliveryDayResponse(BaseModel):
     stops: list[StopPoint]
     by_lineup: dict = {}
     warnings: dict = {}
+    internal: dict = {}
+    production: dict = {}
