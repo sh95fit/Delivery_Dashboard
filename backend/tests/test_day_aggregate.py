@@ -7,6 +7,7 @@ from app.services import day_aggregate as da
 KST = da.KST
 T = date(2026, 10, 1)
 CUTOFF = datetime(2026, 9, 30, 14, 30, tzinfo=KST)
+UUID = "01336133-90d0-4a02-899b-dbe15a06afd7"
 
 
 def _addr(aid, mgr=1, lat=37.5, lng=127.0):
@@ -50,7 +51,7 @@ def _mixed():
 def _check_invariants(agg):
     t = agg["totals"]
     fields = ("meals", "lunch_meals", "dinner_meals", "web_qty", "admin_qty", "app_qty",
-              "gross_revenue", "refund_amount", "net_revenue")
+              "gross_revenue", "refund_amount", "net_revenue", "internal_meals", "internal_net")
     for f in fields:
         assert sum(s[f] for s in agg["stops"]) == t[f], f
         assert sum(m[f] for m in agg["managers"]) == t[f], f
@@ -59,6 +60,7 @@ def _check_invariants(agg):
     assert t["meals"] == t["web_qty"] + t["admin_qty"] + t["app_qty"]
     assert sum(v["qty"] for v in agg["by_lineup"].values()) == t["meals"]
     assert sum(v["net_revenue"] for v in agg["by_lineup"].values()) == t["net_revenue"]
+    assert sum(v["internal_net"] for v in agg["by_lineup"].values()) == t["internal_net"]
 
 
 def test_ex_vat():
@@ -162,13 +164,11 @@ def test_closed_future_preview_not_zero(hour):
     assert sv["state"] == "PREVIEW"
     assert sv["progress"]["total"] == 1 and sv["estimate"]["estimated_meals"] == 3
 
-UUID = "01336133-90d0-4a02-899b-dbe15a06afd7"
-
 
 def test_delivery_row_uuid_id():
-    r = {"delivery_id": UUID, "address_id": 1, "address_name": "A", "detail_address": None,
-         "latitude": 37.5, "longitude": 127.0, "delivery_hour": "11:30", "manager_id": 1,
-         "manager_name": "M1", "manager_color": "#111", "delivered_at": None}
+    r = {"delivery_id": UUID, "address_id": 1, "account_id": 10, "address_name": "A",
+         "detail_address": None, "latitude": 37.5, "longitude": 127.0, "delivery_hour": "11:30",
+         "manager_id": 1, "manager_name": "M1", "manager_color": "#111", "delivered_at": None}
     info = da.delivery_row_to_info(r)
     assert info["delivery_id"] == UUID and info["route_item_id"] == UUID
     agg = da.assemble(T, da.MODE_DELIVERY, CUTOFF, "schedule", [info],
@@ -187,6 +187,7 @@ def test_cancelled_summary():
     assert s["cancelled_stops"] == 1
     assert s["cancelled_by_source"]["app"] == {"orders": 1, "qty": 3}
 
+
 def test_past_date_incomplete_is_result():
     agg = _agg([_dlv(1, 1, 1, delivered=datetime(2026, 10, 1, 11, 0)), _dlv(2, 2, 1)],
                [_line("web", 1, 10, 4, 1, 8800), _line("web", 2, 20, 4, 1, 8800)],
@@ -201,68 +202,60 @@ def test_future_delivery_preview_has_estimate():
     assert sv["state"] == "PREVIEW"
     assert sv["estimate"] is not None and sv["estimate"]["estimated_meals"] == 3
 
-def test_internal_split_excluded_from_customer():
-    stops = [_dlv(1, 1, 1, delivered=datetime(2026, 10, 1, 11, 0)), _dlv(2, 102, 1)]
-    stops[0]["account_id"] = 10
-    stops[1]["account_id"] = 1
+
+# ---- 직원식: 일감·실적 수량은 포함, 매출에서만 제외 ----
+def _internal_case(targets):
+    done = datetime(2026, 10, 1, 11, 0)
+    stops = [_dlv(1, 1, 1, delivered=done), _dlv(2, 102, 1), _dlv(3, 380, 9, delivered=done)]
+    stops[0]["account_id"], stops[1]["account_id"], stops[2]["account_id"] = 10, 1, 1
     lines = da.prepare_lines([
         _line("web", 1, 10, 4, 3, 26400),
         _line("web", 102, 1, 4, 5, 0),
         _line("web", 102, 1, 23, 2, 4000),
-    ])
-    ci, cl, ii, il = da.split_internal(stops, lines, {1, 2484})
-    agg = da.assemble(T, da.MODE_DELIVERY, CUTOFF, "schedule", ci, cl)
-    iagg = da.assemble(T, da.MODE_DELIVERY, CUTOFF, "schedule", ii, il)
-    assert agg["totals"]["stops"] == 1 and agg["totals"]["meals"] == 3
-    assert agg["totals"]["completed_stops"] == 1
-    iv = da.internal_view(iagg)
-    assert iv["stops"] == 1 and iv["meals"] == 7 and iv["net_revenue"] == 3636
-    pv = da.production_view(agg, iagg)
-    assert pv["meals"] == 10 and pv["by_lineup"]["4"]["qty"] == 8
-    sv = da.status_view(agg, datetime(2026, 10, 2, 9, 0, tzinfo=KST))
-    assert sv["state"] == "RESULT" and sv["incomplete"] == 0
-
-
-def test_internal_env_parse(monkeypatch):
-    monkeypatch.setenv("INTERNAL_ACCOUNT_IDS", "1, 2484,abc")
-    assert da.internal_account_ids() == {1, 2484}
-    monkeypatch.delenv("INTERNAL_ACCOUNT_IDS")
-    assert da.internal_account_ids() == {1, 2484}
-
-
-def test_route_keeps_delivered_internal_stops():
-    cust = [{"address_id": 1}]
-    internal = [{"address_id": 380}, {"address_id": 2733}, {"address_id": 102}, {"address_id": 2}]
-    out = da.route_stops_of(cust, internal, {2, 102, 2595})
-    assert [s["address_id"] for s in out] == [1, 380, 2733]
-
-
-def test_no_route_env_parse(monkeypatch):
-    monkeypatch.delenv("INTERNAL_NO_ROUTE_ADDRESS_IDS", raising=False)
-    assert da.internal_no_route_address_ids() == {2, 102, 2595}
-    monkeypatch.setenv("INTERNAL_NO_ROUTE_ADDRESS_IDS", "2, 102")
-    assert da.internal_no_route_address_ids() == {2, 102}
-
-def test_workload_includes_delivered_internal():
-    stops = [_dlv(1, 1, 7), _dlv(2, 380, 9, delivered=datetime(2026, 10, 1, 11, 0)), _dlv(3, 102, 7)]
-    stops[0]["account_id"], stops[1]["account_id"], stops[2]["account_id"] = 10, 1, 1
-    lines = da.prepare_lines([
-        _line("web", 1, 10, 4, 3, 26400),
         _line("web", 380, 1, 4, 11, 0),
-        _line("web", 102, 1, 4, 14, 0),
     ])
-    ci, cl, ii, il = da.split_internal(stops, lines, {1})
-    for s in ii:
-        s["is_internal"] = True
-    agg = da.assemble(T, da.MODE_DELIVERY, CUTOFF, "schedule", ci, cl)
-    ri, rl = da.split_pickup(ii, il, {102})
-    wagg = da.assemble(T, da.MODE_DELIVERY, CUTOFF, "schedule", ci + ri, cl + rl)
-    ms = {m["manager_id"]: m for m in da.merge_manager_workload(agg["managers"], wagg["managers"])}
-    assert ms[9]["stops"] == 0 and ms[9]["net_revenue"] == 0
-    assert ms[9]["work_stops"] == 1 and ms[9]["internal_meals"] == 11
-    assert ms[7]["work_stops"] == 1 and ms[7]["internal_stops"] == 0
-    assert sum(m["stops"] for m in ms.values()) == agg["totals"]["stops"]
-    agg["work"] = da.workload_view(wagg)
+    da.mark_internal(stops, lines, targets)
+    return da.assemble(T, da.MODE_DELIVERY, CUTOFF, "schedule", stops, lines)
+
+
+def test_no_targets_everything_is_revenue():
+    agg = _internal_case({"address_ids": set(), "account_ids": set()})
+    t = agg["totals"]
+    assert t["stops"] == 3 and t["meals"] == 21
+    assert t["net_revenue"] == 24000 + 3636 and t["internal_meals"] == 0
+    assert da.internal_view(agg, enabled=False)["places"] == []
+    _check_invariants(agg)
+
+
+def test_internal_address_excluded_from_revenue_only():
+    agg = _internal_case({"address_ids": {102}, "account_ids": set()})
+    t = agg["totals"]
+    assert t["stops"] == 3 and t["meals"] == 21 and t["completed_stops"] == 2
+    assert t["net_revenue"] == 24000
+    assert t["internal_stops"] == 1 and t["internal_meals"] == 7 and t["internal_net"] == 3636
+    ms = {m["manager_id"]: m for m in agg["managers"]}
+    assert ms[1]["stops"] == 2 and ms[1]["meals"] == 10 and ms[1]["internal_meals"] == 7
+    assert ms[9]["stops"] == 1 and ms[9]["meals"] == 11 and ms[9]["internal_meals"] == 0
+    iv = da.internal_view(agg)
+    assert iv["stops"] == 1 and iv["meals"] == 7 and iv["net_revenue"] == 3636
+    assert iv["by_lineup"]["23"] == {"name": "23", "meal": "lunch", "qty": 2, "net_revenue": 3636}
+    assert agg["by_lineup"]["23"]["qty"] == 2 and agg["by_lineup"]["23"]["net_revenue"] == 0
     sv = da.status_view(agg, datetime(2026, 10, 2, 9, 0, tzinfo=KST))
-    assert sv["progress"]["total"] == 2 and sv["incomplete"] == 1
-    assert [s["is_internal"] for s in wagg["stops"]].count(True) == 1
+    assert sv["progress"]["total"] == 3 and sv["incomplete"] == 1
+    _check_invariants(agg)
+
+
+def test_internal_by_account():
+    agg = _internal_case({"address_ids": set(), "account_ids": {1}})
+    t = agg["totals"]
+    assert t["internal_stops"] == 2 and t["internal_meals"] == 18 and t["net_revenue"] == 24000
+    _check_invariants(agg)
+
+
+def test_internal_targets_env(monkeypatch):
+    monkeypatch.delenv("INTERNAL_ADDRESS_IDS", raising=False)
+    monkeypatch.delenv("INTERNAL_ACCOUNT_IDS", raising=False)
+    assert da.internal_targets() == {"address_ids": set(), "account_ids": set()}
+    monkeypatch.setenv("INTERNAL_ADDRESS_IDS", "2, 102,abc")
+    monkeypatch.setenv("INTERNAL_ACCOUNT_IDS", "2484")
+    assert da.internal_targets() == {"address_ids": {2, 102}, "account_ids": {2484}}

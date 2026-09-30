@@ -11,9 +11,9 @@ class StatusEstimate(BaseModel):
     total: int
     estimated_meals: int
     estimated_accounts: int
-    estimated_net_revenue: int          # VAT 제외, 총매출 - 환불
-    estimated_gross_revenue: int = 0    # VAT 제외
-    estimated_refund_amount: int = 0    # VAT 제외
+    estimated_net_revenue: int          # VAT 제외, 총매출 - 환불 (직원식 제외)
+    estimated_gross_revenue: int = 0
+    estimated_refund_amount: int = 0
     lunch_meals: int = 0
     dinner_meals: int = 0
     web_qty: int = 0
@@ -21,6 +21,8 @@ class StatusEstimate(BaseModel):
     app_qty: int = 0
     app_converted_qty: int = 0
     app_pending_qty: int = 0
+    internal_meals: int = 0
+    internal_net_revenue: int = 0
 
 
 class DeliveryStatusResponse(BaseModel):
@@ -38,5 +40,3 @@ class DeliveryStatusResponse(BaseModel):
     totals: dict | None = None
     warnings: dict | None = None
     internal: dict | None = None
-    production: dict | None = None
-    work: dict | None = None    
