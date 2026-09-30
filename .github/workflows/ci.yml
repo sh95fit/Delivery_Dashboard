@@ -56,6 +56,11 @@ jobs:
       - name: Syntax check (모든 .py 파일 문법 검사)
         run: python -m compileall -q app
 
+      - name: Unit tests (집계 정합성 - 카드=지도=표)
+        run: |
+          pip install pytest==8.3.3
+          python -m pytest -q tests
+
       - name: Migrate twice (두 번 실행해도 오류 없는지)
         run: |
           python -m app.db_migrate

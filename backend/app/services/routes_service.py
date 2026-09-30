@@ -722,84 +722,40 @@ def _compute_route_batched(origin: dict, ordered_stops: list[dict]) -> dict:
 
 
 def _fetch_state_and_groups(target: date_type) -> tuple[str, str, list[dict]]:
+    """[S0-P4.6] 배송지 목록을 day_aggregate 단일 집계에서 가져온다.
+    - delivery 있음: delivery 행 기준 (기존과 동일, 좌표 없는 행만 경로 제외)
+    - delivery 없음: 주문 + (마감 전) 앱 미전환 배송지 → 앱 전용 배송지 누락 해결
+    """
+    from app.services import day_aggregate
+
     engine = get_engine()
     with engine.connect() as conn:
-        status_row = conn.execute(text("""
-            SELECT COUNT(*) AS delivery_count,
-                   COUNT(CASE WHEN delivered_at IS NOT NULL THEN 1 END) AS delivered_count
-            FROM delivery
-            WHERE date = :d
-              AND deleted_at IS NULL
-        """), {"d": target}).fetchone()
+        agg = day_aggregate.build_day(conn, target)
 
-        delivery_count = int(status_row[0] or 0)
-        delivered_count = int(status_row[1] or 0)
-
-        if delivery_count == 0:
-            state = "PREVIEW"
-            source = "orders_estimate"
-        elif delivered_count >= delivery_count:
-            state = "RESULT"
-            source = "delivery"
-        else:
-            state = "LIVE"
-            source = "delivery"
-
-        if source == "delivery":
-            rows = conn.execute(text("""
-                SELECT d.id AS item_id,
-                       d.manager_id,
-                       m.name AS manager_name,
-                       m.color AS manager_color,
-                       a.latitude,
-                       a.longitude,
-                       a.delivery_hour,
-                       a.name AS address_name,
-                       a.detail_address,
-                       d.delivered_at
-                FROM delivery d
-                JOIN addresses a ON a.id = d.address_id
-                LEFT JOIN manager m ON m.id = d.manager_id
-                WHERE d.date = :d
-                  AND d.deleted_at IS NULL
-                  AND a.latitude IS NOT NULL
-                  AND a.longitude IS NOT NULL
-            """), {"d": target}).fetchall()
-        else:
-            rows = conn.execute(text("""
-                SELECT DISTINCT a.id AS item_id,
-                       a.manager_id,
-                       m.name AS manager_name,
-                       m.color AS manager_color,
-                       a.latitude,
-                       a.longitude,
-                       a.delivery_hour,
-                       a.name AS address_name,
-                       a.detail_address,
-                       NULL AS delivered_at
-                FROM orders o
-                JOIN addresses a ON a.id = o.address_id
-                LEFT JOIN manager m ON m.id = a.manager_id
-                WHERE o.delivery_date = :d
-                  AND o.deleted_at IS NULL
-                  AND a.latitude IS NOT NULL
-                  AND a.longitude IS NOT NULL
-            """), {"d": target}).fetchall()
+    t = agg["totals"]
+    if agg["mode"] == day_aggregate.MODE_DELIVERY:
+        source = "delivery"
+        state = "RESULT" if t["stops"] > 0 and t["completed_stops"] >= t["stops"] else "LIVE"
+    else:
+        state = "PREVIEW"
+        source = "orders_estimate"  # 프론트 표기 호환 유지 (4.7에서 정리)
 
     items = []
-    for r in rows:
+    for s in agg["stops"]:
+        if not s["has_coord"]:
+            continue
         items.append({
-            "id": r.item_id,
-            "manager_id": r.manager_id,
-            "manager_name": r.manager_name,
-            "manager_color": r.manager_color,
-            "latitude": float(r.latitude),
-            "longitude": float(r.longitude),
-            "delivery_hour": r.delivery_hour,
-            "delivery_time": _normalize_delivery_hour(r.delivery_hour),
-            "address_name": r.address_name,
-            "detail_address": r.detail_address,
-            "delivered_at": r.delivered_at,
+            "id": s["route_item_id"],
+            "manager_id": s["manager_id"],
+            "manager_name": s["manager_name"],
+            "manager_color": s["manager_color"],
+            "latitude": float(s["latitude"]),
+            "longitude": float(s["longitude"]),
+            "delivery_hour": s["delivery_hour_raw"],
+            "delivery_time": _normalize_delivery_hour(s["delivery_hour_raw"]),
+            "address_name": s["address_name"],
+            "detail_address": s["detail_address"],
+            "delivered_at": s["delivered_at"],
         })
 
     return state, source, items
