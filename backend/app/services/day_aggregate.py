@@ -474,18 +474,65 @@ GROUP BY a.id, acc.id, op.company_id, p.id, p.name, p.price, app.price, app.bloc
 
 SQL_INSUFFICIENT = "SELECT COUNT(*) FROM insufficient_selected_menus WHERE delivery_on = :d"
 
+SQL_CANCELLED = """
+SELECT o.id AS order_id, o.source, o.address_id,
+       COALESCE(SUM(CASE WHEN od.is_refund = 0 AND od.product_id IN :lineups
+                         THEN od.quantity ELSE 0 END), 0) AS qty
+FROM orders o
+LEFT JOIN `order-details` od ON od.order_id = o.id
+WHERE o.delivery_date = :d
+  AND o.deleted_at IS NOT NULL
+GROUP BY o.id, o.source, o.address_id
+"""
+
+
+def summarize_cancelled(rows, live_address_ids: set) -> dict:
+    """삭제된 주문(=취소) 요약. 라인업 수량이 없는 삭제 주문은 제외.
+    cancelled_stops = 취소로 남은 주문이 하나도 없게 된 배송지 수."""
+    by_source: dict = {}
+    lost: set = set()
+    orders = qty = 0
+    live = {str(a) for a in live_address_ids}
+    for r in rows:
+        q = int(r.get("qty") or 0)
+        if q <= 0:
+            continue
+        src = r.get("source") or "web"
+        b = by_source.setdefault(src, {"orders": 0, "qty": 0})
+        b["orders"] += 1
+        b["qty"] += q
+        orders += 1
+        qty += q
+        aid = r.get("address_id")
+        if aid is not None and str(aid) not in live:
+            lost.add(str(aid))
+    return {
+        "cancelled_orders": orders,
+        "cancelled_qty": qty,
+        "cancelled_stops": len(lost),
+        "cancelled_by_source": by_source,
+    }
+
+
+def fetch_cancelled(conn, target: date_type) -> list[dict]:
+    rows = conn.execute(
+        text(SQL_CANCELLED).bindparams(bindparam("lineups", expanding=True)),
+        {"d": target, "lineups": list(LINEUP_IDS)},
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
 
 def resolve_cutoff(conn, target: date_type) -> tuple[datetime, str]:
     row = conn.execute(text(SQL_CUTOFF), {"d": target}).fetchone()
     return cutoff_from_schedule(row[0] if row else None, target)
 
 
-def fetch_delivery_stops(conn, target: date_type) -> list[dict]:
-    rows = conn.execute(text(SQL_DELIVERY_STOPS), {"d": target}).mappings().all()
-    return [{
+def delivery_row_to_info(r) -> dict:
+    """delivery 행 → 배송지 정보. delivery.id는 UUID 문자열이므로 형 변환하지 않는다."""
+    return {
         "key": f"d{r['delivery_id']}",
         "delivery_id": str(r["delivery_id"]),
-        "route_item_id": int(r["delivery_id"]),
+        "route_item_id": r["delivery_id"],
         "address_id": r["address_id"],
         "address_name": r["address_name"],
         "detail_address": r["detail_address"],
@@ -496,7 +543,12 @@ def fetch_delivery_stops(conn, target: date_type) -> list[dict]:
         "manager_name": r["manager_name"],
         "manager_color": r["manager_color"],
         "delivered_at": r["delivered_at"],
-    } for r in rows]
+    }
+
+
+def fetch_delivery_stops(conn, target: date_type) -> list[dict]:
+    rows = conn.execute(text(SQL_DELIVERY_STOPS), {"d": target}).mappings().all()
+    return [delivery_row_to_info(r) for r in rows]
 
 
 def fetch_address_stops(conn, address_ids: list[int]) -> list[dict]:
@@ -621,4 +673,8 @@ def build_day(conn, target: date_type, now: datetime | None = None) -> dict:
         ids = sorted({ln["address_id"] for ln in lines if ln["address_id"] is not None})
         stop_infos = fetch_address_stops(conn, ids)
 
-    return assemble(target, mode, cutoff_at, cutoff_source, stop_infos, lines, warnings)
+    agg = assemble(target, mode, cutoff_at, cutoff_source, stop_infos, lines, warnings)
+    live = {s["address_id"] for s in agg["stops"] if s["address_id"] is not None}
+    agg["warnings"].update(summarize_cancelled(fetch_cancelled(conn, target), live))
+    return agg
+

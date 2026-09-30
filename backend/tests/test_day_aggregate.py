@@ -161,3 +161,28 @@ def test_closed_future_preview_not_zero(hour):
     sv = da.status_view(agg, datetime(2026, 9, 30, hour, 0, tzinfo=KST))
     assert sv["state"] == "PREVIEW"
     assert sv["progress"]["total"] == 1 and sv["estimate"]["estimated_meals"] == 3
+
+UUID = "01336133-90d0-4a02-899b-dbe15a06afd7"
+
+
+def test_delivery_row_uuid_id():
+    r = {"delivery_id": UUID, "address_id": 1, "address_name": "A", "detail_address": None,
+         "latitude": 37.5, "longitude": 127.0, "delivery_hour": "11:30", "manager_id": 1,
+         "manager_name": "M1", "manager_color": "#111", "delivered_at": None}
+    info = da.delivery_row_to_info(r)
+    assert info["delivery_id"] == UUID and info["route_item_id"] == UUID
+    agg = da.assemble(T, da.MODE_DELIVERY, CUTOFF, "schedule", [info],
+                      da.prepare_lines([_line("web", 1, 10, 4, 2, 17600)]))
+    assert agg["stops"][0]["delivery_id"] == UUID and agg["totals"]["meals"] == 2
+
+
+def test_cancelled_summary():
+    rows = [
+        {"order_id": 1, "source": "app", "address_id": 5, "qty": 3},
+        {"order_id": 2, "source": "web", "address_id": 1, "qty": 2},
+        {"order_id": 3, "source": "web", "address_id": 9, "qty": 0},
+    ]
+    s = da.summarize_cancelled(rows, {1})
+    assert s["cancelled_orders"] == 2 and s["cancelled_qty"] == 5
+    assert s["cancelled_stops"] == 1
+    assert s["cancelled_by_source"]["app"] == {"orders": 1, "qty": 3}
