@@ -252,10 +252,28 @@ def test_internal_by_account():
     _check_invariants(agg)
 
 
-def test_internal_targets_env(monkeypatch):
+def test_internal_targets_env_and_db(monkeypatch):
+    from app.services import internal_target_service as its
+    monkeypatch.setattr(its, "active_targets", lambda: {"address_ids": set(), "account_ids": set()})
     monkeypatch.delenv("INTERNAL_ADDRESS_IDS", raising=False)
     monkeypatch.delenv("INTERNAL_ACCOUNT_IDS", raising=False)
     assert da.internal_targets() == {"address_ids": set(), "account_ids": set()}
+
     monkeypatch.setenv("INTERNAL_ADDRESS_IDS", "2, 102,abc")
     monkeypatch.setenv("INTERNAL_ACCOUNT_IDS", "2484")
     assert da.internal_targets() == {"address_ids": {2, 102}, "account_ids": {2484}}
+
+    monkeypatch.setattr(its, "active_targets", lambda: {"address_ids": {2595}, "account_ids": {1}})
+    assert da.internal_targets() == {"address_ids": {2, 102, 2595}, "account_ids": {1, 2484}}
+
+
+def test_internal_targets_db_failure_falls_back_to_env(monkeypatch):
+    from app.services import internal_target_service as its
+
+    def boom():
+        raise RuntimeError("dash db down")
+
+    monkeypatch.setattr(its, "active_targets", boom)
+    monkeypatch.setenv("INTERNAL_ADDRESS_IDS", "2")
+    monkeypatch.delenv("INTERNAL_ACCOUNT_IDS", raising=False)
+    assert da.internal_targets() == {"address_ids": {2}, "account_ids": set()}

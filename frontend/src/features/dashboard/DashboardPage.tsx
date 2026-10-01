@@ -19,6 +19,7 @@ import { useAsync } from "@/hooks/useAsync";
 import { usePolling } from "@/hooks/usePolling";
 import { todayISO } from "@/lib/date";
 import { kstDateTime } from "@/lib/format";
+import { Link } from "react-router-dom";
 
 type AssignedManager = ManagerRow & { manager_id: number };
 
@@ -109,6 +110,9 @@ export default function DashboardPage() {
           {shouldPoll && (
             <span style={{ fontSize: 12, color: "#c62828", fontWeight: 700 }}>30초 갱신 중</span>
           )}
+          <Link to="/settings/internal" style={{ fontSize: 12, color: "#7c3aed", fontWeight: 600 }}>
+            직원식 설정
+          </Link>          
           <span style={{ marginLeft: "auto", fontSize: 12, color: "#666" }}>
             {st
               ? `주문 마감: ${kstDateTime(st.cutoff_at)} KST${st.cutoff_source === "default" ? " (기본값)" : ""}`

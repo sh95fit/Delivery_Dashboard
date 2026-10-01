@@ -197,11 +197,19 @@ def _parse_ids(env_name: str) -> set:
 
 
 def internal_targets() -> dict:
-    """직원식 대상. 주소 단위 또는 고객사 단위. 비어 있으면 모든 주문이 일반 매출."""
-    return {
+    """직원식 대상 = 설정 페이지(dash_db) ∪ .env(비상용). 비어 있으면 모든 주문이 일반 매출."""
+    out = {
         "address_ids": _parse_ids("INTERNAL_ADDRESS_IDS"),
         "account_ids": _parse_ids("INTERNAL_ACCOUNT_IDS"),
     }
+    try:
+        from app.services import internal_target_service as its   # 지연 import (순환 방지)
+        db = its.active_targets()
+        out["address_ids"] |= set(db.get("address_ids") or ())
+        out["account_ids"] |= set(db.get("account_ids") or ())
+    except Exception:  # noqa: BLE001 - 설정 조회 실패가 집계를 막지 않게
+        pass
+    return out
 
 
 def mark_internal(stop_infos: list[dict], lines: list[dict], targets: dict) -> None:
