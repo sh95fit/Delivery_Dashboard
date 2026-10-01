@@ -17,5 +17,7 @@ def get_revenue_summary(
 ):
     try:
         return revenue_service.get_revenue_summary(from_date, to_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"매출 조회 실패: {exc}") from exc

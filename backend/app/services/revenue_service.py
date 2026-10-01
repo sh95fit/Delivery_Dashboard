@@ -1,122 +1,137 @@
-from datetime import date as date_type
+"""S0-P4.8 기간 매출 — 하루 집계(day_aggregate)를 날짜별로 실행해 합산한다.
 
-from collections import defaultdict
+별도 SQL을 두지 않으므로 기간 합계 = 하루 카드 합계가 항상 성립한다.
+(환불 차감 · 취소 제외 · VAT 제외 · 고객사 정책 단가 · 직원식 분리 규칙이 모두 같음)
+"""
+from __future__ import annotations
 
-from sqlalchemy import bindparam, text
+from datetime import date as date_type, datetime, timedelta
 
-from app.database import get_engine
+from app.services import day_aggregate
+from app.services.day_aggregate import KST
 
-LINEUP_IDS = (2, 4, 23, 29)
+MAX_DAYS = 62
+
+_TOTAL_FIELDS = (
+    "stops", "accounts", "meals", "lunch_meals", "dinner_meals",
+    "web_qty", "admin_qty", "app_qty", "refund_qty",
+    "gross_revenue", "refund_amount", "net_revenue", "estimated_revenue",
+    "internal_meals", "internal_net",
+)
+_MGR_FIELDS = (
+    "stops", "meals", "accounts", "lunch_meals", "dinner_meals",
+    "gross_revenue", "refund_amount", "net_revenue", "internal_meals", "internal_net",
+)
+_LU_FIELDS = (
+    "qty", "refund_qty", "gross_revenue", "refund_amount", "net_revenue",
+    "internal_qty", "internal_net",
+)
+
+
+def _i(v) -> int:
+    return int(v or 0)
+
+
+def combine_days(views: list[dict]) -> dict:
+    """delivery_view 결과 여러 날을 합산 (순수 함수 → 단위 테스트 대상).
+
+    stops·accounts는 '일자별 합(연인원)'이다. 기간 중 같은 고객사는 날마다 1번씩 센다.
+    """
+    total = {k: 0 for k in _TOTAL_FIELDS}
+    managers: dict = {}
+    lineups: dict = {}
+    by_day: list[dict] = []
+
+    for v in views:
+        s = v.get("summary") or {}
+        for k in _TOTAL_FIELDS:
+            total[k] += _i(s.get(k))
+
+        for m in v.get("managers") or []:
+            key = m.get("manager_id")
+            acc = managers.setdefault(key, {
+                "manager_id": key,
+                "manager_name": m.get("manager_name"),
+                **{f: 0 for f in _MGR_FIELDS},
+                "lineups": {},
+            })
+            acc["manager_name"] = m.get("manager_name") or acc["manager_name"]
+            for f in _MGR_FIELDS:
+                acc[f] += _i(m.get(f))
+            for pid, lu in (m.get("lineups") or {}).items():
+                d = acc["lineups"].setdefault(str(pid), {"name": lu.get("name") or str(pid), "qty": 0, "amount": 0})
+                d["qty"] += _i(lu.get("qty"))
+                d["amount"] += _i(lu.get("amount"))
+
+        for pid, lu in (v.get("by_lineup") or {}).items():
+            d = lineups.setdefault(str(pid), {
+                "name": lu.get("name") or str(pid),
+                "meal": lu.get("meal") or "lunch",
+                **{f: 0 for f in _LU_FIELDS},
+            })
+            for f in _LU_FIELDS:
+                d[f] += _i(lu.get(f))
+
+        by_day.append({
+            "date": v.get("date"),
+            "estimated": bool(v.get("estimated")),
+            "stops": _i(s.get("stops")),
+            "meals": _i(s.get("meals")),
+            "gross_revenue": _i(s.get("gross_revenue")),
+            "refund_amount": _i(s.get("refund_amount")),
+            "net_revenue": _i(s.get("net_revenue")),
+            "internal_net": _i(s.get("internal_net")),
+        })
+
+    for d in lineups.values():
+        d["amount"] = d["net_revenue"]          # 하위 호환: 기존 amount = 순매출(VAT 제외)
+
+    by_manager = sorted(
+        managers.values(),
+        key=lambda x: (x["manager_id"] is None, -x["net_revenue"]),   # 미배정은 맨 아래
+    )
+    return {
+        "total": total,
+        "by_manager": by_manager,
+        "by_lineup": lineups,
+        "by_day": by_day,
+        "days": len(views),
+        "estimated_days": sum(1 for d in by_day if d["estimated"]),
+    }
+
+
+def _views(start: date_type, end: date_type, now: datetime) -> list[dict]:
+    from app.database import get_engine   # 지연 import → 단위 테스트에서 DB 설정 불필요
+
+    out = []
+    with get_engine().connect() as conn:
+        d = start
+        while d <= end:
+            agg = day_aggregate.build_day(conn, d, now=now)
+            out.append(day_aggregate.delivery_view(agg))
+            d += timedelta(days=1)
+    return out
 
 
 def get_revenue_summary(start: date_type, end: date_type) -> dict:
-    """기간 순매출 집계. JOIN 1회 + 가벼운 보조 쿼리. SELECT만."""
-    engine = get_engine()
-    with engine.connect() as conn:
-        # 1) 기본 집계: 매니저 × 라인업 (무거운 JOIN 1회)
-        rows = conn.execute(text(
-            """
-            SELECT d.manager_id,
-                   m.name                         AS manager_name,
-                   od.product_id,
-                   p.name                         AS product_name,
-                   od.quantity                    AS qty,
-                   ROUND(od.total_amount / 1.1)   AS amount
-            FROM delivery d
-            JOIN orders o
-              ON o.delivery_date = d.date
-             AND o.address_id    = d.address_id
-             AND o.deleted_at IS NULL
-            JOIN `order-details` od
-              ON od.order_id = o.id
-             AND od.is_refund = 0
-             AND od.deleted_at IS NULL
-             AND od.product_id IN :lineups
-            LEFT JOIN manager m
-              ON m.id = d.manager_id
-            LEFT JOIN products p
-              ON p.id = od.product_id
-            WHERE d.date BETWEEN :start AND :end
-              AND d.deleted_at IS NULL
-            """
-        ).bindparams(bindparam("lineups", expanding=True)),
-          {"start": start, "end": end, "lineups": list(LINEUP_IDS)}).fetchall()
+    if end < start:
+        raise ValueError("시작일이 종료일보다 늦습니다")
+    if (end - start).days + 1 > MAX_DAYS:
+        raise ValueError(f"조회 기간은 최대 {MAX_DAYS}일입니다")
 
-        # 2) 매니저별 Stops (가벼운 쿼리 — delivery만)
-        stops_rows = conn.execute(text(
-            """
-            SELECT d.manager_id, COUNT(DISTINCT d.id) AS stops
-            FROM delivery d
-            WHERE d.date BETWEEN :start AND :end
-              AND d.deleted_at IS NULL
-            GROUP BY d.manager_id
-            """
-        ), {"start": start, "end": end}).fetchall()
+    now = datetime.now(KST)
+    try:
+        views = _views(start, end, now)
+    except Exception:
+        import app.database as db
+        try:
+            db._get_tunnel()
+        except Exception:
+            pass
+        db._engine = None
+        views = _views(start, end, now)
 
-        # 3) 매니저별 고객사 수 (가벼운 쿼리 — delivery+addresses)
-        account_rows = conn.execute(text(
-            """
-            SELECT d.manager_id, COUNT(DISTINCT a.account_id) AS accounts
-            FROM delivery d
-            LEFT JOIN addresses a ON a.id = d.address_id
-            WHERE d.date BETWEEN :start AND :end
-              AND d.deleted_at IS NULL
-            GROUP BY d.manager_id
-            """
-        ), {"start": start, "end": end}).fetchall()
-
-    # ---- 모든 쿼리가 끝난 뒤 파이썬 집계 (연결은 이미 정상 반환됨) ----
-    stops_map = {r[0]: int(r[1]) for r in stops_rows}
-    accounts_map = {r[0]: int(r[1]) for r in account_rows}
-
-    by_manager_acc: dict = defaultdict(lambda: {
-        "manager_name": None, "meals": 0, "net_revenue": 0,
-        "lineups": defaultdict(lambda: {"name": "", "qty": 0, "amount": 0}),
-    })
-    lineup_acc: dict = defaultdict(lambda: {"name": "", "qty": 0, "amount": 0})
-    total_meals = 0
-    total_net = 0
-
-    for manager_id, mname, pid, pname, qty, amount in rows:
-        acc = by_manager_acc[manager_id]
-        acc["manager_name"] = mname
-        qty_i, amount_i = int(qty or 0), int(amount or 0)
-        acc["meals"] += qty_i
-        acc["net_revenue"] += amount_i
-        lu = acc["lineups"][str(pid)]
-        lu["name"] = pname or str(pid)
-        lu["qty"] += qty_i
-        lu["amount"] += amount_i
-
-        lu_all = lineup_acc[str(pid)]
-        lu_all["name"] = pname or str(pid)
-        lu_all["qty"] += qty_i
-        lu_all["amount"] += amount_i
-        total_meals += qty_i
-        total_net += amount_i
-
-    by_manager = []
-    for manager_id, acc in by_manager_acc.items():
-        by_manager.append({
-            "manager_id": manager_id,
-            "manager_name": acc["manager_name"],
-            "stops": stops_map.get(manager_id, 0),
-            "meals": acc["meals"],
-            "accounts": accounts_map.get(manager_id, 0),
-            "net_revenue": acc["net_revenue"],
-            "lineups": {k: dict(v) for k, v in acc["lineups"].items()},
-        })
-    by_manager.sort(key=lambda x: x["net_revenue"], reverse=True)
-
-    return {
-        "from_date": start.isoformat(),
-        "to_date": end.isoformat(),
-        "total": {
-            "net_revenue": total_net,
-            "meals": total_meals,
-            "stops": sum(stops_map.values()),
-            "accounts": sum(accounts_map.values()),
-        },
-        "by_manager": by_manager,
-        "by_lineup": {k: dict(v) for k, v in lineup_acc.items()},
-    }
+    out = combine_days(views)
+    out["from_date"] = start.isoformat()
+    out["to_date"] = end.isoformat()
+    return out
