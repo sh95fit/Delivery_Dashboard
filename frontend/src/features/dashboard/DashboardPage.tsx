@@ -7,14 +7,20 @@ import EmptyState from "@/components/ui/EmptyState";
 import RetryButton from "@/components/ui/RetryButton";
 import StatusCards from "./components/StatusCards";
 import ManagerTable from "./components/ManagerTable";
+import WarningsBar from "./components/WarningsBar";
+import LineupTable from "./components/LineupTable";
+import InternalBlock from "./components/InternalBlock";
 import MapSection from "@/features/map/MapSection";
 import { getStatus } from "@/api/status";
 import { getDeliveries } from "@/api/deliveries";
 import { getAllRoutes } from "@/api/routes";
-import type { AllRoutesResp } from "@/api/types";
+import type { AllRoutesResp, ManagerRow } from "@/api/types";
 import { useAsync } from "@/hooks/useAsync";
 import { usePolling } from "@/hooks/usePolling";
 import { todayISO } from "@/lib/date";
+import { kstDateTime } from "@/lib/format";
+
+type AssignedManager = ManagerRow & { manager_id: number };
 
 export default function DashboardPage() {
   const [date, setDate] = useState(todayISO());
@@ -26,15 +32,19 @@ export default function DashboardPage() {
   const status = useAsync(() => getStatus(date), [date]);
   const delivery = useAsync(() => getDeliveries(date), [date]);
 
-  const shouldPoll = status.data?.state === "PREVIEW" || status.data?.state === "LIVE";
+  const st = status.data;
+  const shouldPoll = st?.state === "PREVIEW" || st?.state === "LIVE";
+  const est = st ? st.state === "PREVIEW" || Boolean(st.estimated) : false;
+  const showProgress = st?.state === "LIVE" || st?.state === "RESULT";
+  const internalOn = Boolean(st?.internal?.enabled);
 
   const rows = delivery.data?.managers ?? [];
   const stops = delivery.data?.stops ?? [];
+  const byLineup = delivery.data?.by_lineup ?? {};
   const noData = !status.loading && !delivery.loading && !status.error && !delivery.error && rows.length === 0;
-  const source = delivery.data?.source;
 
   const managerOptions = useMemo(
-    () => rows.filter((x) => x.manager_id != null),
+    () => rows.filter((x): x is AssignedManager => x.manager_id != null),
     [rows],
   );
 
@@ -44,8 +54,6 @@ export default function DashboardPage() {
     return routesData.routes.filter((r) => r.manager_id === selectedManagerId);
   }, [routesData, selectedManagerId]);
 
-  // 폴링과 무관하게, 날짜/담당자 선택이 바뀔 때만 값이 바뀌는 키.
-  // MapSection은 이 키가 바뀔 때만 자동으로 fitBounds 한다.
   const autoFitKey = `${date}:${selectedManagerId ?? "all"}`;
 
   async function loadRoutes() {
@@ -69,11 +77,10 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    setSelectedManagerId(null); // 날짜가 바뀔 때만 선택 초기화
+    setSelectedManagerId(null);
     loadRoutes().catch(() => {});
   }, [date]);
 
-  // 폴링 중 선택한 매니저가 데이터에서 사라졌을 때만 선택 해제
   useEffect(() => {
     if (selectedManagerId == null) return;
     const exists = rows.some((m) => m.manager_id === selectedManagerId);
@@ -95,19 +102,17 @@ export default function DashboardPage() {
       right={
         <>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          {status.data && <Badge state={status.data.state} />}
-          {source === "orders_estimate" && (
-            <span style={{ fontSize: 12, color: "#8b8b00", fontWeight: 700 }}>
-              예상치 기준
-            </span>
+          {st && <Badge state={st.state} />}
+          {est && (
+            <span style={{ fontSize: 12, color: "#8b8b00", fontWeight: 700 }}>예상치 기준</span>
           )}
           {shouldPoll && (
-            <span style={{ fontSize: 12, color: "#c62828", fontWeight: 700 }}>
-              30초 갱신 중
-            </span>
+            <span style={{ fontSize: 12, color: "#c62828", fontWeight: 700 }}>30초 갱신 중</span>
           )}
           <span style={{ marginLeft: "auto", fontSize: 12, color: "#666" }}>
-            마감: 배송일 전날 14:30 KST
+            {st
+              ? `주문 마감: ${kstDateTime(st.cutoff_at)} KST${st.cutoff_source === "default" ? " (기본값)" : ""}`
+              : ""}
           </span>
         </>
       }
@@ -123,13 +128,16 @@ export default function DashboardPage() {
 
       {isLoading && <Spinner />}
 
-      {!error && status.data && <StatusCards status={status.data} />}
+      {!error && st && (
+        <>
+          <StatusCards status={st} />
+          <WarningsBar warnings={st.warnings} />
+        </>
+      )}
 
       {!error && managerOptions.length > 0 && (
         <div style={{ marginTop: 16, marginBottom: 8, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <label htmlFor="manager-select" style={{ fontSize: 14, fontWeight: 600 }}>
-            노선 강조 매니저
-          </label>
+          <label htmlFor="manager-select" style={{ fontSize: 14, fontWeight: 600 }}>노선 강조 매니저</label>
           <select
             id="manager-select"
             value={selectedManagerId ?? ""}
@@ -167,12 +175,21 @@ export default function DashboardPage() {
 
       {!error && rows.length > 0 && (
         <>
-          <h2 style={{ fontSize: 16, margin: "24px 0 8px" }}>
-            매니저별 현황 {source === "orders_estimate" ? "(예상)" : ""}
-          </h2>
-          <ManagerTable rows={rows} />
+          <h2 style={{ fontSize: 16, margin: "24px 0 8px" }}>매니저별 현황 {est ? "(예상)" : ""}</h2>
+          <ManagerTable rows={rows} stops={stops} showProgress={showProgress} />
         </>
       )}
+
+      {!error && Object.keys(byLineup).length > 0 && (
+        <>
+          <h2 style={{ fontSize: 16, margin: "24px 0 8px" }}>
+            라인업별 {est ? "(예상)" : ""} <span style={{ fontSize: 12, color: "#888", fontWeight: 400 }}>VAT 제외</span>
+          </h2>
+          <LineupTable byLineup={byLineup} internalOn={internalOn} />
+        </>
+      )}
+
+      {!error && <InternalBlock internal={st?.internal} est={est} />}
     </PageLayout>
   );
 }

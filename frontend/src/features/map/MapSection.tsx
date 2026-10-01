@@ -107,16 +107,31 @@ function buildPopupHtml(group: StopGroup, order?: number) {
       const manager = escapeHtml(stop.manager_name ?? "미배정");
       const time = escapeHtml(stop.delivery_time ?? "없음");
       const lineup = escapeHtml(lineupText(stop) || "없음");
+      const isPreview = String(stop.delivery_id).startsWith("preview-");
+      const chip = (bg: string, fg: string, t: string) =>
+        `<span style="background:${bg};color:${fg};border-radius:4px;padding:2px 6px;font-size:11px;">${t}</span>`;
+      const meals =
+        (stop.dinner_meals ?? 0) > 0
+          ? `중식 ${stop.lunch_meals ?? 0} · 석식 ${stop.dinner_meals}`
+          : `${stop.meals}식`;
+      const doneChip = isPreview
+        ? ""
+        : stop.delivered_at
+          ? chip("#dcfce7", "#166534", "완료")
+          : chip("#fee2e2", "#991b1b", "미완료");
+      const internalChip = stop.is_internal ? chip("#ede9fe", "#5b21b6", "직원식") : "";
 
       return `
         <div style="padding:8px 0; ${idx > 0 ? "border-top:1px solid #f0f0f0;" : ""}">
           <div style="font-weight:700;font-size:13px;">${name}</div>
           ${detail ? `<div style="color:#8a8f98;font-size:11px;margin-top:2px;">${detail}</div>` : ""}
           <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;">
-            <span style="background:#f1f5f9;border-radius:4px;padding:2px 6px;font-size:11px;">매니저: ${manager}</span>
-            <span style="background:#fff7e6;border-radius:4px;padding:2px 6px;font-size:11px;">${time}</span>
-            <span style="background:#eef4ff;border-radius:4px;padding:2px 6px;font-size:11px;">${stop.meals}식</span>
-            <span style="background:#f0fdf4;border-radius:4px;padding:2px 6px;font-size:11px;">${stop.accounts}곳</span>
+            ${doneChip}${internalChip}
+            ${chip("#f1f5f9", "#111", `매니저: ${manager}`)}
+            ${chip("#fff7e6", "#111", time)}
+            ${chip("#eef4ff", "#111", meals)}
+            ${chip("#f0fdf4", "#111", `${stop.accounts}곳`)}
+            ${chip("#f8fafc", "#111", `${(stop.net_revenue ?? 0).toLocaleString("ko-KR")}원`)}
           </div>
           <div style="color:#666;font-size:11px;margin-top:4px;">라인업: ${lineup}</div>
         </div>

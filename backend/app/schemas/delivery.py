@@ -1,3 +1,4 @@
+from datetime import datetime
 from pydantic import BaseModel
 
 
@@ -45,6 +46,7 @@ class StopPoint(BaseModel):
     manager_id: int | None
     manager_name: str | None
     manager_color: str | None
+    delivered_at: datetime | None = None    
     accounts: int
     meals: int
     lunch_meals: int = 0
