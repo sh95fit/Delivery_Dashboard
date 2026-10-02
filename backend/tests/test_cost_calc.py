@@ -1,4 +1,7 @@
-from datetime import date, timedelta, time, paid_minutes, hourly_daily_cost
+from datetime import date, time, timedelta
+
+from app.services import cost_calc as cc
+from app.services.cost_calc import hourly_daily_cost, paid_minutes
 
 from app.services import cost_calc as cc
 

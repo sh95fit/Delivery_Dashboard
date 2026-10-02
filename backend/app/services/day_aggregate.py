@@ -705,7 +705,7 @@ def fetch_address_stops(conn, address_ids: list[int]) -> list[dict]:
         "delivery_hour": r["delivery_hour"],
         "manager_id": r["manager_id"],
         "manager_name": r["manager_name"],
-        "manager_color": r["manager_color"],
+        "manager_color": manager_color(r["manager_id"], r["manager_color"]),
         "delivered_at": None,
     } for r in sorted(rows, key=lambda x: x["address_id"])]
 
