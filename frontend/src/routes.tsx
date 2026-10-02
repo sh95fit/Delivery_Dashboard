@@ -1,11 +1,17 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
-import DashboardRoute from "./pages/DashboardRoute";
-import InternalTargetsRoute from "./pages/InternalTargetsRoute";
+import AppShell from "./layouts/AppShell";
+import DashboardPage from "./features/dashboard/DashboardPage";
+import InternalTargetsPage from "./features/settings/InternalTargetsPage";
 
 export const router = createBrowserRouter([
   { path: "/login", element: <LoginPage /> },
-  { path: "/", element: <DashboardRoute /> },
-  { path: "/settings/internal", element: <InternalTargetsRoute /> },
+  {
+    element: <AppShell />, // 인증 확인 1회 + 사이드바
+    children: [
+      { path: "/", element: <DashboardPage /> },
+      { path: "/settings/internal", element: <InternalTargetsPage /> },
+    ],
+  },
   { path: "*", element: <Navigate to="/" replace /> },
 ]);

@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import Icon from "./Icon";
+import { useShell } from "./shell";
 
 export default function PageLayout({
   title,
@@ -9,29 +11,19 @@ export default function PageLayout({
   children: ReactNode;
   right?: ReactNode;
 }) {
+  const { inShell, openMobile } = useShell();
   return (
-    <div
-      style={{
-        width: "100%",
-        maxWidth: "none",
-        padding: "16px 20px 28px",
-        fontFamily: "system-ui, sans-serif",
-        boxSizing: "border-box",
-      }}
-    >
-      <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          marginBottom: 16,
-          flexWrap: "wrap",
-        }}
-      >
-        <h1 style={{ fontSize: 20, margin: 0 }}>{title}</h1>
+    <>
+      <header className="topbar">
+        {inShell && (
+          <button className="burger" onClick={openMobile} aria-label="메뉴 열기">
+            <Icon name="menu" size={20} />
+          </button>
+        )}
+        <h1>{title}</h1>
         {right}
       </header>
-      {children}
-    </div>
+      <div className="page">{children}</div>
+    </>
   );
 }

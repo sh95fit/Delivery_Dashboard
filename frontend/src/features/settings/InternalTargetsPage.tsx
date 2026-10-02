@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
-import { Link } from "react-router-dom";
 import PageLayout from "@/layouts/PageLayout";
 import DataTable from "@/components/ui/DataTable";
 import ErrorBox from "@/components/ui/ErrorBox";
 import Spinner from "@/components/ui/Spinner";
-import { getMe } from "@/api/auth";
+import { useMe } from "@/layouts/shell";
 import {
   addInternalTarget,
   deleteInternalTarget,
@@ -31,7 +30,7 @@ function targetName(t: InternalTarget) {
 }
 
 export default function InternalTargetsPage() {
-  const [isAdmin, setIsAdmin] = useState(false);
+  const isAdmin = Boolean(useMe()?.is_admin);
   const [items, setItems] = useState<InternalTarget[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -54,7 +53,6 @@ export default function InternalTargetsPage() {
   }
 
   useEffect(() => {
-    getMe().then((m) => setIsAdmin(Boolean(m.is_admin))).catch(() => {});
     reload().catch(() => {});
   }, []);
 
@@ -111,7 +109,7 @@ export default function InternalTargetsPage() {
   const listColumns = ["구분", "ID", "이름", "소속 고객사", "메모", "등록", ...(isAdmin ? ["관리"] : [])];
 
   return (
-    <PageLayout title="직원식 설정" right={<Link to="/" style={{ fontSize: 13 }}>← 대시보드</Link>}>
+    <PageLayout title="직원식 설정">
       <div style={{ ...box, marginTop: 0, background: "#faf5ff", borderColor: "#ddd6fe", fontSize: 13, lineHeight: 1.7 }}>
         여기 지정한 배송지·고객사의 주문은 <b>배송 일감·식수에는 그대로 포함</b>되고,{" "}
         <b>매출(총금액·환불·순매출)에서만 빠져</b> 대시보드 하단 '직원식' 블록에 수량·금액으로 따로 표시됩니다.
