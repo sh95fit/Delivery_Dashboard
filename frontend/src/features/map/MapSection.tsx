@@ -170,21 +170,33 @@ function mergeWithStaleRoutes(current: RouteSummary[], previous: RouteSummary[])
 }
 
 /* ---------- 마커 ---------- */
+type MkState = "done" | "todo" | "miss" | "plan";
+
+/** 바탕 = 매니저 색(노선), 링 = 상태. 같은 위치 여러 건은 하나라도 미배송이면 링 표시 */
+function markerState(vis: StopPoint[], phase: Phase): MkState {
+  if (phase === "preview" || vis.every(isPreviewStop)) return "plan";
+  if (vis.every((x) => x.delivered_at)) return "done";
+  return phase === "live" ? "todo" : "miss";
+}
+
 function markerStyle(naver: any, g: StopGroup, order: Map<string, number>, sel: number | null, phase: Phase) {
   const focus = sel != null && g.items.some((x) => x.manager_id === sel);
   const dim = sel != null && !focus;
   const vis = visibleItems(g, sel);
   const nums = dim ? [] : groupNos(g, order, sel);
   const color = groupColor(g, sel);
-  // 배송전/미완료 = 흰 바탕 + 색 테두리 (투명도 대신 모양으로 구분)
-  const todo = !dim && phase !== "preview" && vis.some((x) => !x.delivered_at && !isPreviewStop(x));
+  const st: MkState | null = dim ? null : markerState(vis, phase);
+  const open = st === "todo" || st === "miss";
   const extra = !dim && nums.length <= 1 && vis.length > 1 ? vis.length - 1 : 0;
-  const style = dim ? "" : todo ? `background:#fff;color:${color};border-color:${color}` : `background:${color}`;
   const cls = ["mk", focus && "focus", dim && "dim"].filter(Boolean).join(" ");
+  const numCls = st ? `mk-num st-${st}` : "mk-num";
+  const style = dim ? "" : `background:${color}`;
   const content =
-    `<div class="${cls}"><span class="mk-num" style="${style}">${dim ? "" : esc(noLabel(nums))}` +
-    `${extra > 0 ? `<span class="mk-more">+${extra}</span>` : ""}</span></div>`;
-  return { icon: { content, anchor: new naver.maps.Point(16, 16) }, zIndex: focus ? 300 : dim ? 10 : 100 };
+    `<div class="${cls}"><span class="${numCls}" style="${style}">${dim ? "" : esc(noLabel(nums))}` +
+    `${extra > 0 ? `<span class="mk-more">+${extra}</span>` : ""}` +
+    `${st === "miss" ? `<span class="mk-flag">!</span>` : ""}</span></div>`;
+  const zIndex = dim ? 10 : (focus ? 300 : 100) + (open ? 20 : 0);
+  return { icon: { content, anchor: new naver.maps.Point(16, 16) }, zIndex };
 }
 
 /* ---------- 정보창 ---------- */
@@ -270,6 +282,7 @@ export default function MapSection({
   stops, routes, state, selectedManagerId, onSelectManager, autoFitKey, loading = false, routesLoading = false,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const infoRef = useRef<any>(null);
@@ -439,15 +452,31 @@ export default function MapSection({
   }, []);
 
   // 1-1) 크기 변화(사이드바·목록 접기) 시 지도 크기 재계산
+  //  - 바깥 상자(boxRef)만 감시: 지도가 안쪽 상자 크기를 바꿔도 다시 감지되지 않음
+  //  - 크기가 실제로 달라졌을 때만, 한 프레임에 한 번만 setSize
   useEffect(() => {
-    const el = containerRef.current;
-    if (!ready || !el || typeof ResizeObserver === "undefined") return;
+    const box = boxRef.current;
+    if (!ready || !box || typeof ResizeObserver === "undefined") return;
+    let raf = 0;
     const ro = new ResizeObserver(() => {
-      const naver = window.naver;
-      if (mapRef.current && naver?.maps) mapRef.current.setSize(new naver.maps.Size(el.clientWidth, el.clientHeight));
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const naver = window.naver;
+        const map = mapRef.current;
+        if (!map || !naver?.maps) return;
+        const w = box.clientWidth;
+        const h = box.clientHeight;
+        if (w < 10 || h < 10) return;
+        const cur = map.getSize?.();
+        if (cur && Math.round(cur.width) === w && Math.round(cur.height) === h) return;
+        map.setSize(new naver.maps.Size(w, h));
+      });
     });
-    ro.observe(el);
-    return () => ro.disconnect();
+    ro.observe(box);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
   }, [ready]);
 
   // 2) 마커 생성 — 배송 데이터 변경 시
@@ -652,7 +681,9 @@ export default function MapSection({
             </div>
           </aside>
         )}
-        <div ref={containerRef} className="map-box" />
+        <div ref={boxRef} className="map-box">
+          <div ref={containerRef} className="map-canvas" />
+        </div>        
       </div>
 
       <div className="map-foot">
@@ -679,9 +710,18 @@ export default function MapSection({
             {sr && <span className="muted small">· {srcLabel[sr.source] ?? sr.source}</span>}
           </>
         ) : (
-          <span className="muted small">
-            숫자 = 노선별 도착 순서 · 채운 원 완료 / 테두리 원 배송전 · 같은 위치는 5-6처럼 묶어 표시 · 실선 완료 / 점선 배송전 경로
-          </span>
+          <div className="map-legend">
+            {phase === "preview" ? (
+              <span className="lg"><i className="lg-mk st-plan" />예상 배송지</span>
+            ) : (
+              <>
+                <span className="lg"><i className="lg-mk st-done" />완료</span>
+                {phase === "live" && <span className="lg"><i className="lg-mk st-todo" />배송전</span>}
+                <span className="lg"><i className="lg-mk st-miss" />미완료</span>
+              </>
+            )}
+            <span className="muted small">숫자 = 도착 순서 · 같은 위치는 5-6 · 실선 완료 / 점선 배송전 경로</span>
+          </div>
         )}
       </div>
     </Panel>
