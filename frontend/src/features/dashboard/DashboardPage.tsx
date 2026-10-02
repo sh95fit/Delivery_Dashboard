@@ -131,6 +131,7 @@ export default function DashboardPage() {
         <MapSection
           stops={stops}
           routes={routesData?.routes ?? []}
+          state={st?.state}          
           selectedManagerId={selectedManagerId}
           onSelectManager={setSelectedManagerId}
           autoFitKey={`${date}:${selectedManagerId ?? "all"}`}

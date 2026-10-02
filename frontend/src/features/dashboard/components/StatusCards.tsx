@@ -18,7 +18,7 @@ export default function StatusCards({ status }: { status: StatusResp }) {
         </Card>
         {status.state !== "PREVIEW" && <Card title="완료" sub={`${pct}%`}>{num(p.completed)}</Card>}
         <Card title="미배정">{num(p.unassigned)}</Card>
-        {status.state === "LIVE" && <Card title="남은 배송지">{num(p.total - p.completed)}</Card>}
+        {status.state === "LIVE" && <Card title="배송전">{num(p.total - p.completed)}</Card>}
         {status.state === "RESULT" && <Card title="미완료">{num(status.incomplete)}</Card>}
         {t && <Card title={`고객사${tag}`}>{num(t.accounts)}</Card>}
       </div>
