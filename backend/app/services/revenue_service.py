@@ -10,7 +10,12 @@ from datetime import date as date_type, datetime, timedelta
 from app.services import day_aggregate
 from app.services.day_aggregate import KST
 
+from concurrent.futures import ThreadPoolExecutor
+
+from app.services import day_cache
+
 MAX_DAYS = 62
+PARALLEL = 4
 
 _TOTAL_FIELDS = (
     "stops", "accounts", "meals", "lunch_meals", "dinner_meals",
@@ -101,16 +106,10 @@ def combine_days(views: list[dict]) -> dict:
 
 
 def _views(start: date_type, end: date_type, now: datetime) -> list[dict]:
-    from app.database import get_engine   # 지연 import → 단위 테스트에서 DB 설정 불필요
-
-    out = []
-    with get_engine().connect() as conn:
-        d = start
-        while d <= end:
-            agg = day_aggregate.build_day(conn, d, now=now)
-            out.append(day_aggregate.delivery_view(agg))
-            d += timedelta(days=1)
-    return out
+    days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+    with ThreadPoolExecutor(max_workers=PARALLEL) as ex:
+        aggs = list(ex.map(lambda d: day_cache.get_day(d, now), days))
+    return [day_aggregate.delivery_view(a) for a in aggs]
 
 
 def get_revenue_summary(start: date_type, end: date_type) -> dict:
@@ -119,19 +118,7 @@ def get_revenue_summary(start: date_type, end: date_type) -> dict:
     if (end - start).days + 1 > MAX_DAYS:
         raise ValueError(f"조회 기간은 최대 {MAX_DAYS}일입니다")
 
-    now = datetime.now(KST)
-    try:
-        views = _views(start, end, now)
-    except Exception:
-        import app.database as db
-        try:
-            db._get_tunnel()
-        except Exception:
-            pass
-        db._engine = None
-        views = _views(start, end, now)
-
-    out = combine_days(views)
+    out = combine_days(_views(start, end, datetime.now(KST)))
     out["from_date"] = start.isoformat()
     out["to_date"] = end.isoformat()
     return out

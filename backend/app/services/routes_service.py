@@ -726,11 +726,9 @@ def _fetch_state_and_groups(target: date_type) -> tuple[str, str, list[dict]]:
     - delivery 있음: delivery 행 기준 (기존과 동일, 좌표 없는 행만 경로 제외)
     - delivery 없음: 주문 + (마감 전) 앱 미전환 배송지 → 앱 전용 배송지 누락 해결
     """
-    from app.services import day_aggregate
+    from app.services import day_aggregate, day_cache
 
-    engine = get_engine()
-    with engine.connect() as conn:
-        agg = day_aggregate.build_day(conn, target)
+    agg = day_cache.get_day(target)
 
     # 상단 카드와 같은 판정 사용 (과거 날짜 = RESULT, 미래 날짜 = PREVIEW)
     card_state = day_aggregate.status_view(agg, datetime.now(KST))["state"]
