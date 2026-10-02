@@ -271,3 +271,31 @@ body {
   .map-layout { grid-template-columns: minmax(0, 1fr); }
   .rl { height: auto; max-height: 240px; }
 }
+
+/* ---------- 입력 폼 (S1-P1) ---------- */
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px 12px; align-items: end; }
+.field { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-sm); color: var(--muted); }
+.field .input { width: 100%; }
+.field-wide { grid-column: span 2; }
+.form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; grid-column: 1 / -1; }
+.sub-title { margin: 18px 0 8px; font-size: var(--fs); font-weight: 700; display: flex; align-items: baseline; gap: 8px; }
+.sub-title:first-of-type { margin-top: 4px; }
+.check { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--text); cursor: pointer; white-space: nowrap; }
+.row-actions { display: flex; gap: 4px; }
+.tbl tr.off td { color: var(--faint); }
+
+/* 세그먼트 탭 */
+.seg { margin-left: auto; display: inline-flex; border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; background: var(--panel); }
+.seg button { border: 0; background: transparent; padding: 6px 12px; font-size: var(--fs-sm); color: var(--muted); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button.on { background: var(--brand); color: #fff; font-weight: 600; }
+
+/* 비용 탭 보조 */
+.row-gap { display: flex; gap: 8px; align-items: center; }
+.form-error { margin: 0 0 8px; font-size: var(--fs-sm); color: #dc2626; }
+.tbl-total td { font-weight: 700; border-top: 2px solid var(--line); }
+
+@media (max-width: 900px) {
+  .field-wide { grid-column: auto; }
+  .seg { margin-left: 0; }
+}

@@ -6,8 +6,8 @@ from fastapi.openapi.utils import get_openapi
 
 from app.routers import (
     allowlist_routes, auth_routes, delivery_routes, health_routes,
-    incentive_routes, internal_target_routes, me_routes, revenue_routes,
-    routes_routes, status_routes,
+    incentive_routes, internal_target_routes, manager_routes, me_routes, revenue_routes,
+    routes_routes, status_routes, vehicle_routes,
 )
 
 app = FastAPI(title="Delivery Dashboard API", version="0.4.0")
@@ -27,6 +27,8 @@ app.include_router(status_routes.router)
 app.include_router(incentive_routes.router)
 app.include_router(routes_routes.router)
 app.include_router(internal_target_routes.router)
+app.include_router(manager_routes.router)
+app.include_router(vehicle_routes.router)
 
 def _custom_openapi():
     if app.openapi_schema:
