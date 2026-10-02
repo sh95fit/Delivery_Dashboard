@@ -46,6 +46,7 @@ export default function DashboardPage() {
   const rows = delivery.data?.managers ?? [];
   const stops = delivery.data?.stops ?? [];
   const byLineup = delivery.data?.by_lineup ?? {};
+  const lineupMeta = delivery.data?.lineup_meta ?? [];
   const noData = !status.loading && !delivery.loading && !status.error && !delivery.error && rows.length === 0;
 
   async function loadRoutes() {
@@ -148,14 +149,17 @@ export default function DashboardPage() {
       )}
 
       {!error && rows.length > 0 && (
-        <Panel title={`매니저별 현황${est ? " (예상)" : ""}`}>
-          <ManagerTable rows={rows} stops={stops} showProgress={showProgress} />
+        <Panel
+          title={`매니저별 현황${est ? " (예상)" : ""}`}
+          right={<span className="muted small">금액 VAT 제외{internalOn ? " · 직원식 금액 제외" : ""}</span>}
+        >
+          <ManagerTable rows={rows} stops={stops} showProgress={showProgress} meta={lineupMeta} />
         </Panel>
       )}
 
       {!error && Object.keys(byLineup).length > 0 && (
         <Panel title={`라인업별${est ? " (예상)" : ""}`} right={<span className="muted small">VAT 제외</span>}>
-          <LineupTable byLineup={byLineup} internalOn={internalOn} />
+          <LineupTable byLineup={byLineup} internalOn={internalOn} order={lineupMeta.map((m) => m.id)} />
         </Panel>
       )}
 

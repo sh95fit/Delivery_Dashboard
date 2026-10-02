@@ -151,6 +151,12 @@ export interface StopPoint {
   lineups: Record<string, StopLineup>;
 }
 
+export interface LineupMeta {
+  id: string;
+  meal: "lunch" | "dinner" | string;
+  label: string;
+}
+
 export interface DeliveryResp {
   date: string;
   source: string;
@@ -162,6 +168,7 @@ export interface DeliveryResp {
   unassigned?: { stops: number };
   stops: StopPoint[];
   by_lineup?: Record<string, LineupSummary>;
+  lineup_meta?: LineupMeta[]  
   warnings?: DayWarnings;
   internal?: InternalView;
 }

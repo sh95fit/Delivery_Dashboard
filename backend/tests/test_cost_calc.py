@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, timedelta, time, paid_minutes, hourly_daily_cost
 
 from app.services import cost_calc as cc
 
@@ -42,3 +42,14 @@ def test_effective_on_and_latest_by():
     assert cc.effective_on(rows[:3], date(2025, 12, 31), "d") is None
     got = cc.latest_by(rows, "m", "d", date(2026, 10, 2))
     assert got[1]["v"] == "b" and 2 not in got
+
+def test_paid_minutes():
+    assert paid_minutes(time(9), time(15), 30, False) == 330
+    assert paid_minutes(time(9), time(15), 30, True) == 360
+    assert paid_minutes(time(15), time(9), 0, False) == 0
+    assert paid_minutes(None, time(9), 0, False) == 0
+
+
+def test_hourly_daily_cost():
+    assert hourly_daily_cost(12000, 330) == 66000
+    assert hourly_daily_cost(10030, 25) == 4179

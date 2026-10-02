@@ -298,3 +298,24 @@ body {
   .field-wide { grid-column: auto; }
   .seg { margin-left: 0; }
 }
+
+/* ---------- 모달 (S1-P1.2) ---------- */
+.modal-back { position: fixed; inset: 0; z-index: 1000; background: rgba(17, 24, 39, .45); display: flex; align-items: flex-start; justify-content: center; padding: 6vh 16px; overflow-y: auto; }
+.modal { width: 100%; max-width: 560px; max-height: 88vh; display: flex; flex-direction: column; background: var(--panel); border-radius: var(--r); box-shadow: 0 20px 50px rgba(0, 0, 0, .25); }
+.modal-lg { max-width: 880px; }
+.modal-head { display: flex; align-items: center; gap: 8px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.modal-title { flex: 1; min-width: 0; margin: 0; display: flex; align-items: center; gap: 6px; font-size: var(--fs-lg); font-weight: 700; }
+.modal-x { border: 0; background: transparent; padding: 4px 8px; border-radius: var(--r-sm); font-size: var(--fs-lg); color: var(--muted); cursor: pointer; }
+.modal-x:hover { background: var(--line-soft); }
+.modal-body { padding: 16px 18px; overflow-y: auto; }
+.modal-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--line); }
+.modal-foot .grow { margin-right: auto; }
+
+/* ---------- 매니저별 현황 그룹 헤더 ---------- */
+.tbl-group th { white-space: nowrap; }
+.tbl-group thead th[rowspan] { vertical-align: bottom; }
+.tbl-group th.grp { text-align: center; border-bottom: 1px solid var(--line); }
+.tbl-group .bl { border-left: 1px solid var(--line); }
+.tbl-group .sub { font-weight: 600; }
+.zero { color: var(--faint); }
+.neg { color: var(--danger); }

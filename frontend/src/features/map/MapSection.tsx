@@ -303,6 +303,12 @@ export default function MapSection({
   const groups = useMemo(() => groupStops(stops), [stops]);
   const effectiveRoutes = useMemo(() => mergeWithStaleRoutes(routes, lastGoodRoutesRef.current), [routes]);
   const order = useMemo(() => buildOrderMap(effectiveRoutes), [effectiveRoutes]);
+  const colorById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const s of stops) if (s.manager_id != null && !m.has(s.manager_id)) m.set(s.manager_id, safeColor(s.manager_color));
+    return m;
+  }, [stops]);
+
 
   useEffect(() => {
     if (routes.some(hasLine)) lastGoodRoutesRef.current = routes;
@@ -545,7 +551,7 @@ export default function MapSection({
         const line = new naver.maps.Polyline({
           map,
           path: pts.map((p) => new naver.maps.LatLng(p.lat, p.lng)),
-          strokeColor: dim ? DIM_LINE : safeColor(r.manager_color),
+          strokeColor: dim ? DIM_LINE : colorById.get(r.manager_id) ?? safeColor(r.manager_color),
           strokeOpacity: opacity,
           strokeWeight: focus ? 6 : dim ? 3 : 4,
           strokeLineCap: "round",
@@ -561,7 +567,7 @@ export default function MapSection({
         linesRef.current.push(line);
       }
     }
-  }, [ready, effectiveRoutes, selectedManagerId]);
+  }, [ready, effectiveRoutes, selectedManagerId, colorById]);
 
   // 5) 출발지
   useEffect(() => {

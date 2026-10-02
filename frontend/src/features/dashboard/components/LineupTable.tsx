@@ -3,10 +3,10 @@ import type { Col } from "@/components/ui/DataTable";
 import type { LineupSummary } from "@/api/types";
 import { num, orderedLineups, won } from "@/lib/format";
 
-type Props = { byLineup: Record<string, LineupSummary>; internalOn: boolean };
+type Props = { byLineup: Record<string, LineupSummary>; internalOn: boolean; order?: string[] };
 
-export default function LineupTable({ byLineup, internalOn }: Props) {
-  const rows = orderedLineups(byLineup);
+export default function LineupTable({ byLineup, internalOn, order }: Props) {
+  const rows = orderedLineups(byLineup, order);
   const sum = (f: (v: LineupSummary) => number) => rows.reduce((a, [, v]) => a + f(v), 0);
   const columns: Col[] = [
     "라인업", "구분",

@@ -1,4 +1,5 @@
 import { del, http, post, put } from "./client";
+import { won } from "@/lib/format";
 
 export type PayType = "monthly" | "hourly" | "none";
 export type FuelType = "gasoline" | "diesel" | "lpg" | "ev";
@@ -14,6 +15,8 @@ export const EXPENSE_CATS: Record<string, string> = {
 export interface PayRate {
   id: number; pay_type: PayType; amount: number; effective_from: string;
   memo?: string | null; created_by?: string | null;
+  work_start: string | null; work_end: string | null; break_min: number; break_paid: boolean;
+  paid_min: number; daily_cost: number | null;
 }
 export interface Assignment {
   id: number; vehicle_id: number | null; plate_no?: string | null; model?: string | null;
@@ -21,7 +24,6 @@ export interface Assignment {
 }
 export interface ManagerRow {
   manager_id: number; name: string | null; color: string | null;
-  recent_stops: number; last_date: string | null;
   active: boolean; memo: string | null;
   pay: PayRate | null;
   vehicle: { vehicle_id: number; plate_no: string; model?: string | null } | null;
@@ -58,8 +60,11 @@ export const listManagers = () => http<{ items: ManagerRow[] }>("/api/managers")
 export const getManager = (id: number) => http<ManagerDetail>(`/api/managers/${id}`);
 export const saveManagerProfile = (id: number, body: { active: boolean; memo: string | null }) =>
   put<Ok>(`/api/managers/${id}/profile`, body);
-export const addPayRate = (id: number, body: { pay_type: PayType; amount: number; effective_from: string; memo: string | null }) =>
-  post<Ok>(`/api/managers/${id}/rates`, body);
+export type PayRateInput = {
+  pay_type: PayType; amount: number; effective_from: string; memo: string | null;
+  work_start?: string; work_end?: string; break_min?: number; break_paid?: boolean;
+};
+export const addPayRate = (id: number, body: PayRateInput) => post<Ok>(`/api/managers/${id}/rates`, body);
 export const deletePayRate = (rateId: number) => del<Ok>(`/api/managers/rates/${rateId}`);
 export const assignVehicle = (id: number, body: { vehicle_id: number | null; start_date: string }) =>
   post<Ok>(`/api/managers/${id}/vehicle`, body);
@@ -87,3 +92,12 @@ export const deleteExpense = (id: number) => del<Ok>(`/api/vehicles/expenses/${i
 
 export const getCostSummary = (from: string, to: string) =>
   http<CostSummary>(`/api/vehicles/cost-summary?from=${from}&to=${to}`);
+
+export const payText = (p: PayRate) =>
+  p.pay_type === "none" ? PAY_LABEL.none : `${PAY_LABEL[p.pay_type]} ${won(p.amount)}`;
+
+export const scheduleText = (p: PayRate) => {
+  if (p.pay_type !== "hourly" || !p.work_start || !p.work_end) return "-";
+  const brk = p.break_min ? ` · 휴게 ${p.break_min}분 ${p.break_paid ? "유급" : "무급"}` : " · 휴게 없음";
+  return `${p.work_start}–${p.work_end}${brk}`;
+};

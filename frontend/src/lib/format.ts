@@ -20,11 +20,12 @@ export function kstDateTime(iso?: string | null): string {
   });
 }
 
-/** JS 객체는 "2","4","23" 같은 숫자 키를 오름차순으로 재정렬하므로 라인업 순서를 직접 고정한다. */
-const LINEUP_ORDER = ["4", "23", "29", "2"];
-export function orderedLineups<T>(obj: Record<string, T>): Array<[string, T]> {
+/** JS 객체는 숫자 키를 오름차순으로 재정렬하므로 라인업 순서를 직접 고정한다. order는 API의 lineup_meta 순서 */
+const LINEUP_ORDER = ["4", "23", "29", "2", "31", "30"];
+export function orderedLineups<T>(obj: Record<string, T>, order?: string[]): Array<[string, T]> {
+  const ord = order && order.length ? order : LINEUP_ORDER;
   const rank = (k: string) => {
-    const i = LINEUP_ORDER.indexOf(k);
+    const i = ord.indexOf(k);
     return i < 0 ? 99 : i;
   };
   return Object.entries(obj).sort(([a], [b]) => rank(a) - rank(b));
@@ -42,3 +43,10 @@ export function monthRange(ym: string): [string, string] {
   return [`${ym}-01`, `${ym}-${String(last).padStart(2, "0")}`];
 }
   
+/** 분 → "5시간 30분" */
+export function hm(min: number): string {
+  const m = Math.max(0, Math.round(min));
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+  return h ? (r ? `${h}시간 ${r}분` : `${h}시간`) : `${r}분`;
+}

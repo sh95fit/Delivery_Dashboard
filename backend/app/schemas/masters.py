@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, time
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -14,6 +14,10 @@ class PayRateIn(BaseModel):
     amount: int = Field(default=0, ge=0, le=100_000_000)
     effective_from: date
     memo: str | None = Field(default=None, max_length=200)
+    work_start: time | None = None
+    work_end: time | None = None
+    break_min: int = Field(default=0, ge=0, le=600)
+    break_paid: bool = False    
 
 
 class AssignIn(BaseModel):

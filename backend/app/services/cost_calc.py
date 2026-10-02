@@ -1,7 +1,7 @@
 """S1-P1 비용 계산 순수 함수 (DB 없음 → 단위 테스트 대상)."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, time
 
 
 def days_incl(start: date, end: date) -> int:
@@ -45,3 +45,18 @@ def latest_by(rows: list[dict], key: str, field: str, day: date) -> dict:
         if r is not None:
             out[k] = r
     return out
+
+
+def paid_minutes(work_start: time | None, work_end: time | None, break_min: int, break_paid: bool) -> int:
+    """하루 유급 근무 분. 무급 휴게는 뺀다. 시각이 없거나 종료 ≤ 시작이면 0 (자정 넘김 미지원)."""
+    if work_start is None or work_end is None:
+        return 0
+    span = (work_end.hour * 60 + work_end.minute) - (work_start.hour * 60 + work_start.minute)
+    if span <= 0:
+        return 0
+    return span if break_paid else max(0, span - int(break_min or 0))
+
+
+def hourly_daily_cost(rate: int, minutes: int) -> int:
+    """시급 × 유급 분 ÷ 60, 원 단위 반올림."""
+    return (int(rate or 0) * int(minutes or 0) + 30) // 60

@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 import pytest
 
@@ -278,10 +278,6 @@ def test_internal_targets_db_failure_falls_back_to_env(monkeypatch):
     monkeypatch.delenv("INTERNAL_ACCOUNT_IDS", raising=False)
     assert da.internal_targets() == {"address_ids": {2}, "account_ids": set()}
 
-from datetime import datetime, timezone
-
-from app.services import day_aggregate as da
-
 
 def test_to_kst_naive_is_utc():
     assert da.to_kst(datetime(2026, 10, 1, 1, 29)).strftime("%H:%M") == "10:29"
@@ -299,3 +295,29 @@ def test_to_kst_none():
 def test_cutoff_still_utc():
     v, src = da.cutoff_from_schedule(datetime(2026, 9, 30, 5, 30), datetime(2026, 10, 1).date())
     assert (v.strftime("%H:%M"), src) == ("14:30", "schedule")
+
+
+def test_lineups_include_dinner_fresh_light():
+    assert da.meal_of(31) == "dinner" and da.meal_of(30) == "dinner"
+    assert [m["id"] for m in da.LINEUP_META] == ["4", "23", "29", "2", "31", "30"]
+
+
+def test_dinner_lineup_counts():
+    agg = _agg([_addr(1)], [
+        _line("web", 1, 10, 2, 2, 17600),
+        _line("web", 1, 10, 31, 1, 8800),
+        _line("web", 1, 10, 30, 3, 26400),
+    ])
+    t = agg["totals"]
+    assert t["dinner_meals"] == 6 and t["lunch_meals"] == 0
+    assert list(agg["by_lineup"]) == ["2", "31", "30"]
+    assert agg["managers"][0]["lineups"]["30"]["qty"] == 3
+    _check_invariants(agg)
+
+
+def test_manager_color_fallback():
+    assert da.manager_color(5, "#123abc") == "#123abc"
+    assert da.manager_color(5, "123abc") == "#123abc"
+    assert da.manager_color(5, None) == da.manager_color(5, "  ")
+    assert da.manager_color(5, "red").startswith("#")
+    assert da.manager_color(None, None) is None

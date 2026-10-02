@@ -27,8 +27,14 @@ def save_profile(mid: int, body: ProfileIn, email: str = Depends(require_admin))
 
 @router.post("/{mid}/rates")
 def add_rate(mid: int, body: PayRateIn, email: str = Depends(require_admin)):
-    new_id = guard(svc.add_rate, mid, body.pay_type, body.amount, body.effective_from, memo(body.memo), email,
-                   fail="급여 저장 실패")
+    new_id = guard(
+        lambda: svc.add_rate(
+            mid, body.pay_type, body.amount, body.effective_from, memo(body.memo), email,
+            work_start=body.work_start, work_end=body.work_end,
+            break_min=body.break_min, break_paid=body.break_paid,
+        ),
+        fail="급여 저장 실패",
+    )
     return {"ok": True, "id": new_id}
 
 

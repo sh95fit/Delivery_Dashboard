@@ -7,6 +7,7 @@ import { PERIOD_CATS, EXPENSE_CATS } from "../../api/masters";
 import type { Vehicle, PeriodCost, Expense, CostSummary } from "../../api/masters";
 import { won, todayKst } from "../../lib/format";
 import { errText, parseAmount, daysIncl, yearEnd } from "../../lib/form";
+import Modal from "../../components/ui/Modal";
 
 
 type Vid = number | "";
@@ -84,6 +85,7 @@ export function PeriodCostTab({ vehicles, isAdmin }: Props) {
   const [end, setEnd] = useState(yearEnd(todayKst()));
   const [amount, setAmount] = useState("");
   const [memo, setMemo] = useState("");
+  const [adding, setAdding] = useState(false);
 
   const amt = parseAmount(amount);
   const days = start && end && start <= end ? daysIncl(start, end) : 0;
@@ -98,14 +100,19 @@ export function PeriodCostTab({ vehicles, isAdmin }: Props) {
         amount: amt, memo: memo || null,
       }),
     );
-    if (ok) { setAmount(""); setMemo(""); }
+    if (ok) { setAmount(""); setMemo(""); setAdding(false); }
   };
 
   return (
     <>
       <Panel
         title="기간 비용"
-        right={<VehicleSelect vehicles={vehicles} value={filter} onChange={setFilter} all />}
+        right={
+          <div className="row-gap">
+            <VehicleSelect vehicles={vehicles} value={filter} onChange={setFilter} all />
+            {isAdmin && <Button size="sm" variant="primary" onClick={() => { setError(null); setAdding(true); }}>기간 비용 추가</Button>}
+          </div>
+        }
       >
         <ErrorLine error={error} />
         {!items ? (
@@ -151,43 +158,44 @@ export function PeriodCostTab({ vehicles, isAdmin }: Props) {
         )}
       </Panel>
 
-      {isAdmin && (
-        <Panel title="기간 비용 추가" desc="보험·리스처럼 기간 단위로 내는 비용은 일 단위로 나눠 집계됩니다.">
-          <div className="form-grid">
-            <label className="field">차량
-              <VehicleSelect vehicles={vehicles} value={vid} onChange={setVid} />
-            </label>
-            <label className="field">항목
-              <select className="input" value={cat} onChange={(e) => setCat(e.target.value)}>
-                {Object.entries(PERIOD_CATS).map(([k, l]) => (
-                  <option key={k} value={k}>{l}</option>
-                ))}
-              </select>
-            </label>
-            <label className="field">시작일
-              <input type="date" className="input" value={start}
-                onChange={(e) => { setStart(e.target.value); setEnd(yearEnd(e.target.value)); }} />
-            </label>
-            <label className="field">종료일
-              <input type="date" className="input" value={end} onChange={(e) => setEnd(e.target.value)} />
-            </label>
-            <label className="field">금액(원)
-              <input className="input" inputMode="numeric" value={amount}
-                onChange={(e) => setAmount(e.target.value)} />
-            </label>
-            <label className="field field-wide">메모
-              <input className="input" value={memo} maxLength={200}
-                onChange={(e) => setMemo(e.target.value)} />
-            </label>
-            <div className="form-actions">
-              {amt && days ? (
-                <span className="muted">{days}일 · 일 {won(Math.floor(amt / days))}</span>
-              ) : null}
-              <Button variant="primary" disabled={busy} onClick={add}>추가</Button>
-            </div>
-          </div>
-        </Panel>
-      )}
+      <Modal
+        open={isAdmin && adding}
+        title="기간 비용 추가"
+        onClose={() => setAdding(false)}
+        footer={
+          <>
+            {amt && days ? <span className="muted small grow">{days}일 · 일 {won(Math.floor(amt / days))}</span> : null}
+            <Button onClick={() => setAdding(false)}>취소</Button>
+            <Button variant="primary" disabled={busy} onClick={add}>추가</Button>
+          </>
+        }
+      >
+        <ErrorLine error={error} />
+        <p className="muted small">보험·자동차세처럼 기간 단위로 내는 비용은 일 단위로 나눠 집계됩니다.</p>
+        <div className="form-grid">
+          <label className="field">차량
+            <VehicleSelect vehicles={vehicles} value={vid} onChange={setVid} />
+          </label>
+          <label className="field">항목
+            <select className="input" value={cat} onChange={(e) => setCat(e.target.value)}>
+              {Object.entries(PERIOD_CATS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </select>
+          </label>
+          <label className="field">시작일
+            <input type="date" className="input" value={start}
+              onChange={(e) => { setStart(e.target.value); setEnd(yearEnd(e.target.value)); }} />
+          </label>
+          <label className="field">종료일
+            <input type="date" className="input" value={end} onChange={(e) => setEnd(e.target.value)} />
+          </label>
+          <label className="field">금액(원)
+            <input className="input" inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </label>
+          <label className="field field-wide">메모
+            <input className="input" value={memo} maxLength={200} onChange={(e) => setMemo(e.target.value)} />
+          </label>
+        </div>
+      </Modal>
     </>
   );
 }
@@ -197,6 +205,7 @@ export function ExpenseTab({ vehicles, isAdmin }: Props) {
   const [month, setMonth] = useState(thisMonth());
   const [filter, setFilter] = useState<Vid>("");
   const [items, setItems] = useState<Expense[] | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const load = useCallback(async () => {
     const { from, to } = monthBounds(month);
@@ -227,7 +236,7 @@ export function ExpenseTab({ vehicles, isAdmin }: Props) {
         amount: amt, memo: memo || null,
       }),
     );
-    if (ok) { setAmount(""); setMemo(""); }
+    if (ok) { setAmount(""); setMemo(""); setAdding(false); }
   };
 
   return (
@@ -238,6 +247,7 @@ export function ExpenseTab({ vehicles, isAdmin }: Props) {
           <div className="row-gap">
             <input type="month" className="input" value={month} onChange={(e) => setMonth(e.target.value)} />
             <VehicleSelect vehicles={vehicles} value={filter} onChange={setFilter} all />
+            {isAdmin && <Button size="sm" variant="primary" onClick={() => { setError(null); setAdding(true); }}>지출 추가</Button>}
           </div>
         }
       >
@@ -285,36 +295,38 @@ export function ExpenseTab({ vehicles, isAdmin }: Props) {
         )}
       </Panel>
 
-      {isAdmin && (
-        <Panel title="지출 추가">
-          <div className="form-grid">
-            <label className="field">차량
-              <VehicleSelect vehicles={vehicles} value={vid} onChange={setVid} />
-            </label>
-            <label className="field">일자
-              <input type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
-            </label>
-            <label className="field">항목
-              <select className="input" value={cat} onChange={(e) => setCat(e.target.value)}>
-                {Object.entries(EXPENSE_CATS).map(([k, l]) => (
-                  <option key={k} value={k}>{l}</option>
-                ))}
-              </select>
-            </label>
-            <label className="field">금액(원)
-              <input className="input" inputMode="numeric" value={amount}
-                onChange={(e) => setAmount(e.target.value)} />
-            </label>
-            <label className="field field-wide">메모
-              <input className="input" value={memo} maxLength={200}
-                onChange={(e) => setMemo(e.target.value)} />
-            </label>
-            <div className="form-actions">
-              <Button variant="primary" disabled={busy} onClick={add}>추가</Button>
-            </div>
-          </div>
-        </Panel>
-      )}
+      <Modal
+        open={isAdmin && adding}
+        title="지출 추가"
+        onClose={() => setAdding(false)}
+        footer={
+          <>
+            <Button onClick={() => setAdding(false)}>취소</Button>
+            <Button variant="primary" disabled={busy} onClick={add}>추가</Button>
+          </>
+        }
+      >
+        <ErrorLine error={error} />
+        <div className="form-grid">
+          <label className="field">차량
+            <VehicleSelect vehicles={vehicles} value={vid} onChange={setVid} />
+          </label>
+          <label className="field">일자
+            <input type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
+          </label>
+          <label className="field">항목
+            <select className="input" value={cat} onChange={(e) => setCat(e.target.value)}>
+              {Object.entries(EXPENSE_CATS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </select>
+          </label>
+          <label className="field">금액(원)
+            <input className="input" inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </label>
+          <label className="field field-wide">메모
+            <input className="input" value={memo} maxLength={200} onChange={(e) => setMemo(e.target.value)} />
+          </label>
+        </div>
+      </Modal>
     </>
   );
 }

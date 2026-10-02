@@ -13,6 +13,7 @@ import type { FuelType, ManagerRow, Vehicle, VehicleInput } from "@/api/masters"
 import { errText, parseAmount } from "@/lib/form";
 import { won } from "@/lib/format";
 import { CostSummaryTab, ExpenseTab, PeriodCostTab } from "./VehicleCostTabs";
+import Modal from "@/components/ui/Modal";
 
 type Tab = "list" | "period" | "expense" | "summary";
 const TABS: Array<[Tab, string]> = [["list", "차량"], ["period", "기간 비용"], ["expense", "지출 내역"], ["summary", "비용 요약"]];
@@ -151,30 +152,37 @@ function VehicleListTab({ vehicles, managers, isAdmin, onChanged }: {
         )}
       </Panel>
 
-      {isAdmin && editing != null && (
-        <Panel title={editing === "new" ? "차량 추가" : "차량 수정"} right={<Button size="sm" variant="ghost" onClick={() => setEditing(null)}>닫기</Button>}>
-          {error && <div className="stack"><ErrorBox message={error} /></div>}
-          <div className="form-grid">
-            <label className="field">차량번호 *<input className="input" value={f.plate_no} maxLength={20} onChange={(e) => set("plate_no", e.target.value)} placeholder="12가 3456" /></label>
-            <label className="field">차종<input className="input" value={f.model} maxLength={100} onChange={(e) => set("model", e.target.value)} placeholder="포터2" /></label>
-            <label className="field">연료
-              <select className="input" value={f.fuel_type} onChange={(e) => set("fuel_type", e.target.value as FuelType)}>
-                {(Object.keys(FUEL_LABEL) as FuelType[]).map((k) => <option key={k} value={k}>{FUEL_LABEL[k]}</option>)}
-              </select>
-            </label>
-            <label className="field">공인연비 ({f.fuel_type === "ev" ? "km/kWh" : "km/L"})<input className="input" inputMode="decimal" value={f.eff} onChange={(e) => set("eff", e.target.value)} placeholder="9.5" /></label>
-            <label className="field">구매일<input type="date" className="input" value={f.pdate} onChange={(e) => set("pdate", e.target.value)} /></label>
-            <label className="field">구매가(원)<input className="input" inputMode="numeric" value={f.price} onChange={(e) => set("price", e.target.value)} /></label>
-            <label className="field">상태
-              <select className="input" value={f.active ? "1" : "0"} onChange={(e) => set("active", e.target.value === "1")}>
-                <option value="1">사용</option><option value="0">중지</option>
-              </select>
-            </label>
-            <label className="field field-wide">메모<input className="input" value={f.memo} maxLength={500} onChange={(e) => set("memo", e.target.value)} /></label>
-            <div className="form-actions"><Button variant="primary" disabled={busy} onClick={save}>저장</Button></div>
-          </div>
-        </Panel>
-      )}
+      <Modal
+        open={isAdmin && editing != null}
+        title={editing === "new" ? "차량 추가" : "차량 수정"}
+        onClose={() => setEditing(null)}
+        footer={
+          <>
+            <Button onClick={() => setEditing(null)}>취소</Button>
+            <Button variant="primary" disabled={busy} onClick={save}>저장</Button>
+          </>
+        }
+      >
+        {error && <div className="stack"><ErrorBox message={error} /></div>}
+        <div className="form-grid">
+          <label className="field">차량번호 *<input className="input" value={f.plate_no} maxLength={20} onChange={(e) => set("plate_no", e.target.value)} placeholder="12가 3456" /></label>
+          <label className="field">차종<input className="input" value={f.model} maxLength={100} onChange={(e) => set("model", e.target.value)} placeholder="포터2" /></label>
+          <label className="field">연료
+            <select className="input" value={f.fuel_type} onChange={(e) => set("fuel_type", e.target.value as FuelType)}>
+              {(Object.keys(FUEL_LABEL) as FuelType[]).map((k) => <option key={k} value={k}>{FUEL_LABEL[k]}</option>)}
+            </select>
+          </label>
+          <label className="field">공인연비 ({f.fuel_type === "ev" ? "km/kWh" : "km/L"})<input className="input" inputMode="decimal" value={f.eff} onChange={(e) => set("eff", e.target.value)} placeholder="9.5" /></label>
+          <label className="field">구매일<input type="date" className="input" value={f.pdate} onChange={(e) => set("pdate", e.target.value)} /></label>
+          <label className="field">구매가(원)<input className="input" inputMode="numeric" value={f.price} onChange={(e) => set("price", e.target.value)} /></label>
+          <label className="field">상태
+            <select className="input" value={f.active ? "1" : "0"} onChange={(e) => set("active", e.target.value === "1")}>
+              <option value="1">사용</option><option value="0">중지</option>
+            </select>
+          </label>
+          <label className="field field-wide">메모<input className="input" value={f.memo} maxLength={500} onChange={(e) => set("memo", e.target.value)} /></label>
+        </div>
+      </Modal>
     </>
   );
 }

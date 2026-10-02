@@ -4,7 +4,7 @@
 모두 build_day() 결과 하나만 사용한다. 운영 DB에는 SELECT만 실행한다.
 
 [확정 규칙 - 2026-09-30 검증]
-- 라인업: 중식 4(가정식)·23(프레시밀)·29(라이트밀), 석식 2
+- 라인업: 중식 4(가정식)·23(프레시밀)·29(라이트밀), 석식 2(가정식)·31(프레시밀)·30(라이트밀) → LINEUPS
 - 주문(웹·어드민·앱전환): orders.deleted_at IS NULL + order-details.deleted_at IS NULL
   · is_refund=0 = 판매, is_refund=1 = 환불(금액 양수 기록 → 차감)
   · 매출은 VAT 제외(÷1.1). 순매출 = 총매출 - 환불
@@ -29,10 +29,23 @@ from sqlalchemy import bindparam, text
 
 KST = timezone(timedelta(hours=9))
 
-LUNCH_PRODUCT_IDS = (4, 23, 29)
-DINNER_PRODUCT_IDS = (2,)
-LINEUP_IDS = LUNCH_PRODUCT_IDS + DINNER_PRODUCT_IDS
-LINEUP_ORDER = (4, 23, 29, 2)
+# 라인업 = (product_id, 구분, 표시명). 순서 = 화면 순서.
+# 새 라인업은 여기 한 줄만 추가하면 집계·매니저 표·라인업 표에 모두 반영된다 (day_cache VERSION도 올릴 것)
+LINEUPS = (
+    (4, "lunch", "가정식"),
+    (23, "lunch", "프레시밀"),
+    (29, "lunch", "라이트밀"),
+    (2, "dinner", "가정식"),
+    (31, "dinner", "프레시밀"),
+    (30, "dinner", "라이트밀"),
+)
+LUNCH_PRODUCT_IDS = tuple(p for p, meal, _ in LINEUPS if meal == "lunch")
+DINNER_PRODUCT_IDS = tuple(p for p, meal, _ in LINEUPS if meal == "dinner")
+LINEUP_IDS = tuple(p for p, _, _ in LINEUPS)
+LINEUP_ORDER = LINEUP_IDS
+LINEUP_META = [{"id": str(p), "meal": meal, "label": label} for p, meal, label in LINEUPS]
+
+
 DEFAULT_CUTOFF_TIME = time(14, 30)
 
 # 앱(배송 처리)이 쓰는 시각 컬럼은 UTC로 저장된다 (DB 서버 시간대 KST와 무관).
@@ -124,6 +137,19 @@ def _has_coord(lat, lng) -> bool:
     # 0 좌표도 미입력으로 본다 (국내 배송지에 0 좌표는 존재 불가)
     return lat is not None and lng is not None and float(lat) != 0 and float(lng) != 0
 
+# 운영 DB 색이 비었거나 형식이 틀린 매니저용 대체 색 (id 기준 고정 → 화면·날짜가 달라도 같은 색)
+# 빨강은 미완료 링과 겹쳐 제외
+_PALETTE = ("#0ea5e9", "#f97316", "#10b981", "#8b5cf6", "#eab308", "#14b8a6",
+            "#6366f1", "#ec4899", "#84cc16", "#06b6d4", "#a855f7", "#f59e0b")
+_HEX_COLOR = re.compile(r"#?([0-9a-fA-F]{6}|[0-9a-fA-F]{3})")
+
+def manager_color(manager_id, raw) -> str | None:
+    if manager_id is None:
+        return None
+    m = _HEX_COLOR.fullmatch((raw or "").strip())
+    if m:
+        return "#" + m.group(1)
+    return _PALETTE[int(manager_id) % len(_PALETTE)]
 
 def prepare_lines(raw_lines: list[dict]) -> list[dict]:
     """원시 행 → 정규화 + VAT 제외 금액 계산. 수량·환불이 모두 0인 행은 버린다."""
@@ -513,6 +539,7 @@ def delivery_view(agg: dict) -> dict:
         "unassigned": {"stops": t["unassigned_stops"]},
         "stops": agg["stops"],
         "by_lineup": agg["by_lineup"],
+        "lineup_meta": LINEUP_META,        
         "warnings": w,
         "internal": agg.get("internal") or {},
     }
@@ -648,7 +675,7 @@ def delivery_row_to_info(r) -> dict:
         "delivery_hour": r["delivery_hour"],
         "manager_id": r["manager_id"],
         "manager_name": r["manager_name"],
-        "manager_color": r["manager_color"],
+        "manager_color": manager_color(r["manager_id"], r["manager_color"]),
         "delivered_at": to_kst(r["delivered_at"]),
     }
 
