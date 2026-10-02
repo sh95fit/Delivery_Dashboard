@@ -3,26 +3,11 @@ import Panel from "../../components/ui/Panel";
 import Button from "../../components/ui/Button";
 import DataTable from "../../components/ui/DataTable";
 import * as api from "../../api/masters";
+import { PERIOD_CATS, EXPENSE_CATS } from "../../api/masters";
 import type { Vehicle, PeriodCost, Expense, CostSummary } from "../../api/masters";
 import { won, todayKst } from "../../lib/format";
 import { errText, parseAmount, daysIncl, yearEnd } from "../../lib/form";
 
-export const PERIOD_CATS: Record<string, string> = {
-  insurance: "보험",
-  lease: "리스·렌트",
-  tax: "자동차세",
-  etc: "기타",
-};
-
-export const EXPENSE_CATS: Record<string, string> = {
-  fuel: "주유",
-  toll: "통행료",
-  parking: "주차",
-  repair: "정비",
-  wash: "세차",
-  fine: "과태료",
-  etc: "기타",
-};
 
 type Vid = number | "";
 type Props = { vehicles: Vehicle[]; isAdmin: boolean };
@@ -228,7 +213,7 @@ export function ExpenseTab({ vehicles, isAdmin }: Props) {
 
   const [vid, setVid] = useState<Vid>("");
   const [date, setDate] = useState(todayKst());
-  const [cat, setCat] = useState("fuel");
+  const [cat, setCat] = useState("repair");
   const [amount, setAmount] = useState("");
   const [memo, setMemo] = useState("");
 
@@ -291,7 +276,7 @@ export function ExpenseTab({ vehicles, isAdmin }: Props) {
                 )}
               </tr>
             ))}
-            <tr className="tbl-total">
+            <tr className="sum">
               <td colSpan={3}>합계</td>
               <td className="num">{won(total)}</td>
               <td colSpan={isAdmin ? 3 : 2} />
@@ -390,7 +375,7 @@ export function CostSummaryTab() {
               <td className="num">{won(rowTotal(r))}</td>
             </tr>
           ))}
-          <tr className="tbl-total">
+          <tr className="sum">
             <td>합계 ({data.days}일)</td>
             <td className="num">{won(data.totals.period_cost)}</td>
             {withExp && <td className="num">{won(data.totals.expense)}</td>}

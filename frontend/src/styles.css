@@ -292,8 +292,7 @@ body {
 
 /* 비용 탭 보조 */
 .row-gap { display: flex; gap: 8px; align-items: center; }
-.form-error { margin: 0 0 8px; font-size: var(--fs-sm); color: #dc2626; }
-.tbl-total td { font-weight: 700; border-top: 2px solid var(--line); }
+.form-error { margin: 0 0 8px; font-size: var(--fs-sm); color: var(--danger); }
 
 @media (max-width: 900px) {
   .field-wide { grid-column: auto; }
