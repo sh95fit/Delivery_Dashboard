@@ -35,6 +35,24 @@ LINEUP_IDS = LUNCH_PRODUCT_IDS + DINNER_PRODUCT_IDS
 LINEUP_ORDER = (4, 23, 29, 2)
 DEFAULT_CUTOFF_TIME = time(14, 30)
 
+# 앱(배송 처리)이 쓰는 시각 컬럼은 UTC로 저장된다 (DB 서버 시간대 KST와 무관).
+# 앱 저장 방식이 바뀌면 .env에 OPS_NAIVE_TZ=KST
+OPS_NAIVE_TZ = KST if os.environ.get("OPS_NAIVE_TZ", "UTC").upper() == "KST" else timezone.utc
+
+
+def to_kst(raw) -> datetime | None:
+    """앱 기록 시각(UTC, 시간대 없음) → KST(aware). API에 +09:00이 붙어 나간다."""
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+    if raw.tzinfo is None:
+        raw = raw.replace(tzinfo=OPS_NAIVE_TZ)
+    return raw.astimezone(KST)
+
 MODE_DELIVERY = "delivery"
 MODE_PREVIEW_OPEN = "preview_open"
 MODE_PREVIEW_CLOSED = "preview_closed"
@@ -88,13 +106,10 @@ def normalize_delivery_hour(raw: str | None) -> str | None:
 
 
 def cutoff_from_schedule(raw, target: date_type) -> tuple[datetime, str]:
-    """schedules.order_completed_at(UTC naive) → KST. 없으면 전날 14:30 KST."""
-    if raw is not None:
-        if isinstance(raw, str):
-            raw = datetime.fromisoformat(raw)
-        if raw.tzinfo is None:
-            raw = raw.replace(tzinfo=timezone.utc)
-        return raw.astimezone(KST), "schedule"
+    """schedules.order_completed_at(앱 기록 UTC) → KST. 없으면 전날 14:30 KST."""
+    v = to_kst(raw)
+    if v is not None:
+        return v, "schedule"
     prev = target - timedelta(days=1)
     return datetime.combine(prev, DEFAULT_CUTOFF_TIME, tzinfo=KST), "default"
 
@@ -634,7 +649,7 @@ def delivery_row_to_info(r) -> dict:
         "manager_id": r["manager_id"],
         "manager_name": r["manager_name"],
         "manager_color": r["manager_color"],
-        "delivered_at": r["delivered_at"],
+        "delivered_at": to_kst(r["delivered_at"]),
     }
 
 

@@ -277,3 +277,25 @@ def test_internal_targets_db_failure_falls_back_to_env(monkeypatch):
     monkeypatch.setenv("INTERNAL_ADDRESS_IDS", "2")
     monkeypatch.delenv("INTERNAL_ACCOUNT_IDS", raising=False)
     assert da.internal_targets() == {"address_ids": {2}, "account_ids": set()}
+
+from datetime import datetime, timezone
+
+from app.services import day_aggregate as da
+
+
+def test_to_kst_naive_is_utc():
+    assert da.to_kst(datetime(2026, 10, 1, 1, 29)).strftime("%H:%M") == "10:29"
+
+
+def test_to_kst_aware_kept():
+    v = datetime(2026, 10, 1, 1, 29, tzinfo=timezone.utc)
+    assert da.to_kst(v).isoformat() == "2026-10-01T10:29:00+09:00"
+
+
+def test_to_kst_none():
+    assert da.to_kst(None) is None
+
+
+def test_cutoff_still_utc():
+    v, src = da.cutoff_from_schedule(datetime(2026, 9, 30, 5, 30), datetime(2026, 10, 1).date())
+    assert (v.strftime("%H:%M"), src) == ("14:30", "schedule")

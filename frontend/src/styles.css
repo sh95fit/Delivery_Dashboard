@@ -14,7 +14,7 @@
   --caution: #9a3412; --caution-soft: #fff7ed;
   --danger: #b91c1c; --danger-soft: #fef2f2;
   --internal: #7c3aed; --internal-soft: #faf5ff; --internal-line: #ddd6fe;
-  --ring-todo: #f97316; --ring-miss: #dc2626;  
+  --ring-miss: #ef4444;
   --side: #111827; --side-hover: #1f2937; --side-text: #cbd5e1;
   --sb-w: 232px; --sb-w-min: 64px;
   --r: 10px; --r-sm: 6px;
@@ -188,7 +188,7 @@ body {
   position: relative; overflow: hidden; width: 100%; height: clamp(420px, 68vh, 720px);
   border: 1px solid var(--line); border-radius: var(--r); background: #f8f9fb;
 }
-.map-canvas { position: absolute; inset: 0; }
+.map-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .map-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
 
 /* 노선 목록 (행 색은 --c 데이터 색) */
@@ -229,23 +229,15 @@ body {
   position: absolute; right: -10px; top: -8px; min-width: 18px; height: 16px; padding: 0 4px; border-radius: 8px;
   background: #111827; color: #fff; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center;
 }
-/* 상태 링: 매니저 색 | 흰 띠 | 상태 색 — 매니저 색이 빨강/주황이어도 구분됨 */
-.mk-num.st-todo { box-shadow: 0 0 0 3px var(--ring-todo), 0 2px 8px rgba(0, 0, 0, .35); }
-.mk-num.st-miss { box-shadow: 0 0 0 3px var(--ring-miss), 0 2px 8px rgba(0, 0, 0, .35); }
-.mk.focus .mk-num.st-todo { box-shadow: 0 0 0 3.5px var(--ring-todo), 0 3px 10px rgba(0, 0, 0, .45); }
-.mk.focus .mk-num.st-miss { box-shadow: 0 0 0 3.5px var(--ring-miss), 0 3px 10px rgba(0, 0, 0, .45); }
-.mk-flag {
-  position: absolute; left: -9px; top: -9px; width: 16px; height: 16px; border-radius: 50%;
-  background: var(--ring-miss); border: 1.5px solid #fff; color: #fff; font-size: 10px; font-weight: 800;
-  display: flex; align-items: center; justify-content: center;
-}
+/* 미완료 링: 매니저 색 | 흰 테두리(기존) | 빨강 2px */
+.mk-num.st-miss { box-shadow: 0 0 0 2px var(--ring-miss), 0 1px 4px rgba(0, 0, 0, .3); }
+.mk.focus .mk-num.st-miss { box-shadow: 0 0 0 2px var(--ring-miss), 0 2px 6px rgba(0, 0, 0, .4); }
 
 /* 범례 */
 .map-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .lg { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--text); }
-.lg-mk { width: 14px; height: 14px; border-radius: 50%; background: #64748b; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line); }
-.lg-mk.st-todo { box-shadow: 0 0 0 2.5px var(--ring-todo); }
-.lg-mk.st-miss { box-shadow: 0 0 0 2.5px var(--ring-miss); }
+.lg-mk { width: 12px; height: 12px; border-radius: 50%; background: #64748b; border: 1.5px solid #fff; box-shadow: 0 0 0 1px var(--line); }
+.lg-mk.st-miss { box-shadow: 0 0 0 1.5px var(--ring-miss); }
 .mk-origin {
   position: relative; width: 44px; height: 24px; border-radius: 6px; border: 2px solid #fff; background: #111827; color: #fff;
   font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: 0 3px 10px rgba(0, 0, 0, .4);

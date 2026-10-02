@@ -18,7 +18,7 @@ from app.services.day_aggregate import KST
 
 logger = logging.getLogger("day_cache")
 
-VERSION = "v1"          # day_aggregate 결과 구조가 바뀌면 올린다
+VERSION = "v2"          # v2: delivered_at UTC→KST
 TTL_TODAY = 20
 TTL_RECENT = 600
 TTL_OLD = 21600

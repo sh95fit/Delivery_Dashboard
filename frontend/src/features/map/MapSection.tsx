@@ -170,13 +170,12 @@ function mergeWithStaleRoutes(current: RouteSummary[], previous: RouteSummary[])
 }
 
 /* ---------- 마커 ---------- */
-type MkState = "done" | "todo" | "miss" | "plan";
+type MkState = "done" | "miss" | "plan";
 
-/** 바탕 = 매니저 색(노선), 링 = 상태. 같은 위치 여러 건은 하나라도 미배송이면 링 표시 */
+/** 바탕 = 매니저 색(노선), 빨강 링 = 미완료(delivered_at 없음). 같은 위치는 하나라도 미완료면 링 */
 function markerState(vis: StopPoint[], phase: Phase): MkState {
   if (phase === "preview" || vis.every(isPreviewStop)) return "plan";
-  if (vis.every((x) => x.delivered_at)) return "done";
-  return phase === "live" ? "todo" : "miss";
+  return vis.every((x) => x.delivered_at) ? "done" : "miss";
 }
 
 function markerStyle(naver: any, g: StopGroup, order: Map<string, number>, sel: number | null, phase: Phase) {
@@ -186,16 +185,14 @@ function markerStyle(naver: any, g: StopGroup, order: Map<string, number>, sel: 
   const nums = dim ? [] : groupNos(g, order, sel);
   const color = groupColor(g, sel);
   const st: MkState | null = dim ? null : markerState(vis, phase);
-  const open = st === "todo" || st === "miss";
   const extra = !dim && nums.length <= 1 && vis.length > 1 ? vis.length - 1 : 0;
   const cls = ["mk", focus && "focus", dim && "dim"].filter(Boolean).join(" ");
   const numCls = st ? `mk-num st-${st}` : "mk-num";
   const style = dim ? "" : `background:${color}`;
   const content =
     `<div class="${cls}"><span class="${numCls}" style="${style}">${dim ? "" : esc(noLabel(nums))}` +
-    `${extra > 0 ? `<span class="mk-more">+${extra}</span>` : ""}` +
-    `${st === "miss" ? `<span class="mk-flag">!</span>` : ""}</span></div>`;
-  const zIndex = dim ? 10 : (focus ? 300 : 100) + (open ? 20 : 0);
+    `${extra > 0 ? `<span class="mk-more">+${extra}</span>` : ""}</span></div>`;
+  const zIndex = dim ? 10 : (focus ? 300 : 100) + (st === "miss" ? 20 : 0);
   return { icon: { content, anchor: new naver.maps.Point(16, 16) }, zIndex };
 }
 
@@ -203,9 +200,7 @@ function markerStyle(naver: any, g: StopGroup, order: Map<string, number>, sel: 
 function statusChip(s: StopPoint, phase: Phase) {
   if (phase === "preview" || isPreviewStop(s)) return `<span class="chip chip-warn">예상</span>`;
   if (s.delivered_at) return `<span class="chip chip-ok">완료 ${esc(hhmm(s.delivered_at))}</span>`;
-  return phase === "live"
-    ? `<span class="chip chip-caution">배송전</span>`
-    : `<span class="chip chip-danger">미완료</span>`;
+  return `<span class="chip chip-danger">미완료</span>`;
 }
 
 function itemHtml(s: StopPoint, no: number | undefined, phase: Phase, multi: boolean, multiMgr: boolean) {
@@ -295,6 +290,7 @@ export default function MapSection({
   const lastGoodRoutesRef = useRef<RouteSummary[]>([]);
   const [ready, setReady] = useState(false);
   const [built, setBuilt] = useState(0);
+  const [sized, setSized] = useState(0);
   const [mapError, setMapError] = useState("");
   const [listOpen, setListOpen] = useState(() => {
     try { return localStorage.getItem(LIST_KEY) !== "0"; } catch { return true; }
@@ -401,6 +397,8 @@ export default function MapSection({
     const naver = window.naver;
     const map = mapRef.current;
     if (!naver?.maps || !map) return false;
+    const sz = map.getSize?.();
+    if (sz && (sz.width < 50 || sz.height < 50)) return false; // 크기 확정 전 맞춤 금지 (최저 배율 방지)
     const sel = onlySelected ? selectedManagerId : null;
     const pts: Array<[number, number]> = [];
     for (const g of groups) if (sel == null || g.items.some((x) => x.manager_id === sel)) pts.push([g.latitude, g.longitude]);
@@ -428,8 +426,10 @@ export default function MapSection({
       .then(() => {
         if (cancelled || !containerRef.current || mapRef.current) return;
         const naver = window.naver;
+        const box = boxRef.current;
         const map = new naver.maps.Map(containerRef.current, {
-          center: new naver.maps.LatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng),
+          ...(box && box.clientWidth > 0 ? { size: new naver.maps.Size(box.clientWidth, box.clientHeight) } : {}),
+          center: new naver.maps.LatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng),        
           zoom: 11,
           zoomControl: true,
           zoomControlOptions: { position: naver.maps.Position.TOP_RIGHT },
@@ -470,6 +470,7 @@ export default function MapSection({
         const cur = map.getSize?.();
         if (cur && Math.round(cur.width) === w && Math.round(cur.height) === h) return;
         map.setSize(new naver.maps.Size(w, h));
+        setSized((v) => v + 1); // 크기 확정 → 미뤄둔 자동 맞춤 재시도
       });
     });
     ro.observe(box);
@@ -586,10 +587,12 @@ export default function MapSection({
   }, [ready, effectiveRoutes]);
 
   // 6) 자동 맞춤 — 날짜·선택 변경 시에만
+  //    지도 크기가 확정되기 전에는 fit()이 false를 돌려주므로 키를 기록하지 않고,
+  //    크기가 정해지면(sized 증가) 다시 시도한다.
   useEffect(() => {
     if (!ready || loading || fitKeyRef.current === autoFitKey) return;
     if (fit(true)) fitKeyRef.current = autoFitKey;
-  }, [ready, loading, autoFitKey, groups, effectiveRoutes]);
+  }, [ready, loading, autoFitKey, groups, effectiveRoutes, sized]);
 
   const onShowAll = () => {
     if (selectedManagerId != null) select(null);
@@ -633,7 +636,7 @@ export default function MapSection({
               <input className="input input-sm grow" value={q} onChange={(e) => setQ(e.target.value)} placeholder="매니저 검색" />
               <select className="input input-sm" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="정렬">
                 <option value="name">이름순</option>
-                <option value="todo">배송전 많은 순</option>
+                <option value="todo">미완료 많은 순</option>
                 <option value="stops">배송지 많은 순</option>
               </select>
             </div>
@@ -697,9 +700,7 @@ export default function MapSection({
             {sr && sr.duration_ms > 0 && <Chip>예상 {fmtMin(sr.duration_ms / 60000)}</Chip>}
             {phase !== "preview" && selRow && <Chip tone="ok">완료 {num(selRow.done)}</Chip>}
             {phase !== "preview" && selRow && (
-              <Chip tone={phase === "live" ? "caution" : "danger"}>
-                {phase === "live" ? "배송전" : "미완료"} {num(selRow.stops - selRow.done)}
-              </Chip>
+              <Chip tone="danger">미완료 {num(selRow.stops - selRow.done)}</Chip>
             )}
             {sr && sr.toll_fare > 0 && <Chip>통행료 {won(sr.toll_fare)}</Chip>}
             {sr && (sr.fuel_price_naver ?? 0) > 0 && <Chip>유류비(NAVER) {won(sr.fuel_price_naver)}</Chip>}
@@ -712,15 +713,14 @@ export default function MapSection({
         ) : (
           <div className="map-legend">
             {phase === "preview" ? (
-              <span className="lg"><i className="lg-mk st-plan" />예상 배송지</span>
+              <span className="lg"><i className="lg-mk" />예상 배송지</span>
             ) : (
               <>
-                <span className="lg"><i className="lg-mk st-done" />완료</span>
-                {phase === "live" && <span className="lg"><i className="lg-mk st-todo" />배송전</span>}
+                <span className="lg"><i className="lg-mk" />완료</span>
                 <span className="lg"><i className="lg-mk st-miss" />미완료</span>
               </>
             )}
-            <span className="muted small">숫자 = 도착 순서 · 같은 위치는 5-6 · 실선 완료 / 점선 배송전 경로</span>
+            <span className="muted small">숫자 = 도착 순서 · 같은 위치는 5-6 · 실선 완료 / 점선 미완료 경로</span>
           </div>
         )}
       </div>
