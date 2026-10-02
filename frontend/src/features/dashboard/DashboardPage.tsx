@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import PageLayout from "@/layouts/PageLayout";
 import Badge from "@/components/ui/Badge";
 import Chip from "@/components/ui/Chip";
@@ -17,14 +17,13 @@ import MapSection from "@/features/map/MapSection";
 import { getStatus } from "@/api/status";
 import { getDeliveries } from "@/api/deliveries";
 import { getAllRoutes } from "@/api/routes";
-import type { AllRoutesResp, ManagerRow } from "@/api/types";
+import type { AllRoutesResp } from "@/api/types";
 import { useAsync } from "@/hooks/useAsync";
 import { usePolling } from "@/hooks/usePolling";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { todayISO } from "@/lib/date";
 import { kstDateTime } from "@/lib/format";
 
-type AssignedManager = ManagerRow & { manager_id: number };
 
 export default function DashboardPage() {
   const [date, setDate] = useState(todayISO());
@@ -48,17 +47,6 @@ export default function DashboardPage() {
   const stops = delivery.data?.stops ?? [];
   const byLineup = delivery.data?.by_lineup ?? {};
   const noData = !status.loading && !delivery.loading && !status.error && !delivery.error && rows.length === 0;
-
-  const managerOptions = useMemo(
-    () => rows.filter((x): x is AssignedManager => x.manager_id != null),
-    [rows],
-  );
-
-  const displayedRoutes = useMemo(() => {
-    if (!routesData) return [];
-    if (selectedManagerId == null) return routesData.routes;
-    return routesData.routes.filter((r) => r.manager_id === selectedManagerId);
-  }, [routesData, selectedManagerId]);
 
   async function loadRoutes() {
     setRoutesLoading(true);
@@ -140,35 +128,15 @@ export default function DashboardPage() {
       )}
 
       {!error && stops.length > 0 && (
-        <Panel
-          title="배송 지도"
-          right={
-            <>
-              {routesLoading && <span className="muted small">경로 불러오는 중…</span>}
-              {managerOptions.length > 0 && (
-                <select
-                  className="input"
-                  aria-label="노선 강조 매니저"
-                  value={selectedManagerId ?? ""}
-                  onChange={(e) => setSelectedManagerId(e.target.value ? Number(e.target.value) : null)}
-                >
-                  <option value="">전체 노선</option>
-                  {managerOptions.map((m) => (
-                    <option key={m.manager_id} value={m.manager_id}>{m.manager_name ?? m.manager_id}</option>
-                  ))}
-                </select>
-              )}
-            </>
-          }
-        >
-          <MapSection
-            stops={stops}
-            routes={displayedRoutes}
-            selectedManagerId={selectedManagerId}
-            onSelectManager={setSelectedManagerId}
-            autoFitKey={`${date}:${selectedManagerId ?? "all"}`}
-          />
-        </Panel>
+        <MapSection
+          stops={stops}
+          routes={routesData?.routes ?? []}
+          selectedManagerId={selectedManagerId}
+          onSelectManager={setSelectedManagerId}
+          autoFitKey={`${date}:${selectedManagerId ?? "all"}`}
+          loading={delivery.loading}
+          routesLoading={routesLoading}
+        />
       )}
 
       {!error && noData && (
