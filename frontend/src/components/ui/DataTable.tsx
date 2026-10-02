@@ -1,21 +1,21 @@
 import type { ReactNode } from "react";
 
-export default function DataTable({ columns, children }: { columns: string[]; children: ReactNode }) {
+export type Col = string | { label: string; num?: boolean };
+
+export default function DataTable({ columns, children }: { columns: Col[]; children: ReactNode }) {
   return (
-    <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
-      <thead>
-        <tr>
-          {columns.map((c) => (
-            <th
-              key={c}
-              style={{ textAlign: "left", padding: "8px 10px", borderBottom: "2px solid #eee" }}
-            >
-              {c}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>{children}</tbody>
-    </table>
+    <div className="tbl-wrap">
+      <table className="tbl">
+        <thead>
+          <tr>
+            {columns.map((c) => {
+              const col = typeof c === "string" ? { label: c } : c;
+              return <th key={col.label} className={col.num ? "num" : undefined}>{col.label}</th>;
+            })}
+          </tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
+    </div>
   );
 }

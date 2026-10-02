@@ -1,10 +1,7 @@
-import type { CSSProperties } from "react";
 import DataTable from "@/components/ui/DataTable";
+import type { Col } from "@/components/ui/DataTable";
 import type { ManagerRow, StopPoint } from "@/api/types";
 import { num, won } from "@/lib/format";
-
-const td: CSSProperties = { padding: "8px 10px", borderBottom: "1px solid #f0f0f0" };
-const tdSum: CSSProperties = { ...td, fontWeight: 700, borderTop: "2px solid #eee" };
 
 type Props = { rows: ManagerRow[]; stops: StopPoint[]; showProgress: boolean };
 
@@ -18,44 +15,43 @@ export default function ManagerTable({ rows, stops, showProgress }: Props) {
   const doneOf = (m: ManagerRow) => done.get(String(m.manager_id ?? "none")) ?? 0;
   const sum = (f: (m: ManagerRow) => number) => rows.reduce((a, m) => a + f(m), 0);
 
-  const columns = [
-    "매니저", "배송지", ...(showProgress ? ["완료"] : []),
-    "식수", "중식", "석식", "고객사", "총금액 − 환불",
+  const columns: Col[] = [
+    "매니저",
+    { label: "배송지", num: true },
+    ...(showProgress ? [{ label: "완료", num: true }] : []),
+    { label: "식수", num: true }, { label: "중식", num: true }, { label: "석식", num: true },
+    { label: "고객사", num: true }, { label: "총금액 − 환불", num: true },
   ];
 
   return (
     <DataTable columns={columns}>
       {rows.map((m) => (
         <tr key={m.manager_id ?? "none"}>
-          <td style={td}>
-            {m.color && (
-              <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 9999, background: m.color, marginRight: 6 }} />
-            )}
+          <td>
+            {m.color && <span className="dot" style={{ background: m.color }} />}
             {m.manager_id == null ? "미배정" : m.manager_name ?? m.manager_id}
           </td>
-          <td style={td}>
+          <td className="num">
             {num(m.stops)}
-            {m.internal_stops > 0 && (
-              <span style={{ color: "#7c3aed", fontSize: 11, marginLeft: 6 }}>직원식 {m.internal_stops}</span>
-            )}
+            {m.internal_stops > 0 && <span className="text-internal tag-inline">직원식 {m.internal_stops}</span>}
           </td>
-          {showProgress && <td style={td}>{num(doneOf(m))} / {num(m.stops)}</td>}
-          <td style={td}>{num(m.meals)}</td>
-          <td style={td}>{num(m.lunch_meals)}</td>
-          <td style={td}>{num(m.dinner_meals)}</td>
-          <td style={td}>{num(m.accounts)}</td>
-          <td style={td}>{won(m.net_revenue)}</td>
+          {showProgress && <td className="num">{num(doneOf(m))} / {num(m.stops)}</td>}
+          <td className="num">{num(m.meals)}</td>
+          <td className="num">{num(m.lunch_meals)}</td>
+          <td className="num">{num(m.dinner_meals)}</td>
+          <td className="num">{num(m.accounts)}</td>
+          <td className="num">{won(m.net_revenue)}</td>
         </tr>
       ))}
-      <tr>
-        <td style={tdSum}>합계</td>
-        <td style={tdSum}>{num(sum((m) => m.stops))}</td>
-        {showProgress && <td style={tdSum}>{num(sum(doneOf))} / {num(sum((m) => m.stops))}</td>}
-        <td style={tdSum}>{num(sum((m) => m.meals))}</td>
-        <td style={tdSum}>{num(sum((m) => m.lunch_meals))}</td>
-        <td style={tdSum}>{num(sum((m) => m.dinner_meals))}</td>
-        <td style={tdSum}>-</td>
-        <td style={tdSum}>{won(sum((m) => m.net_revenue))}</td>
+      <tr className="sum">
+        <td>합계</td>
+        <td className="num">{num(sum((m) => m.stops))}</td>
+        {showProgress && <td className="num">{num(sum(doneOf))} / {num(sum((m) => m.stops))}</td>}
+        <td className="num">{num(sum((m) => m.meals))}</td>
+        <td className="num">{num(sum((m) => m.lunch_meals))}</td>
+        <td className="num">{num(sum((m) => m.dinner_meals))}</td>
+        <td className="num">-</td>
+        <td className="num">{won(sum((m) => m.net_revenue))}</td>
       </tr>
     </DataTable>
   );

@@ -1,9 +1,9 @@
 import type { IconName } from "./Icon";
 
-export type NavItem = { to: string; label: string; icon: IconName; ready: boolean; step?: string };
+/** label은 한글 7자 이내. 긴 정식 명칭은 hint(마우스 오버 표시)로. */
+export type NavItem = { to: string; label: string; hint?: string; icon: IconName; ready: boolean; step?: string };
 export type NavSection = { section: string; items: NavItem[] };
 
-/** ready=false 메뉴는 '준비' 표시만 하고 이동하지 않는다. 단계 완료 시 true로 바꾸고 routes.tsx에 등록. */
 export const NAV: NavSection[] = [
   {
     section: "운영",
@@ -24,14 +24,16 @@ export const NAV: NavSection[] = [
   },
   {
     section: "도구",
-    items: [{ to: "/tools/simulation", label: "신규 고객사 시뮬레이션", icon: "route", ready: false, step: "P9" }],
+    items: [
+      { to: "/tools/simulation", label: "시뮬레이션", hint: "신규 고객사 시뮬레이션", icon: "route", ready: false, step: "P9" },
+    ],
   },
   {
     section: "설정",
     items: [
       { to: "/settings/managers", label: "매니저", icon: "users", ready: false, step: "P1" },
       { to: "/settings/vehicles", label: "차량·지출", icon: "truck", ready: false, step: "P1" },
-      { to: "/settings/internal", label: "직원식", icon: "tag", ready: true },
+      { to: "/settings/internal", label: "직원식", hint: "직원식 대상 설정", icon: "tag", ready: true },
       { to: "/settings/permissions", label: "권한", icon: "lock", ready: false, step: "P11" },
     ],
   },

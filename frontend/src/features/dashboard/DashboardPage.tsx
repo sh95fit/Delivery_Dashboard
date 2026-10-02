@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import PageLayout from "@/layouts/PageLayout";
 import Badge from "@/components/ui/Badge";
+import Chip from "@/components/ui/Chip";
+import Panel from "@/components/ui/Panel";
 import Spinner from "@/components/ui/Spinner";
 import ErrorBox from "@/components/ui/ErrorBox";
 import EmptyState from "@/components/ui/EmptyState";
 import RetryButton from "@/components/ui/RetryButton";
+import RefreshControl from "@/components/ui/RefreshControl";
 import StatusCards from "./components/StatusCards";
 import ManagerTable from "./components/ManagerTable";
 import WarningsBar from "./components/WarningsBar";
@@ -17,6 +20,7 @@ import { getAllRoutes } from "@/api/routes";
 import type { AllRoutesResp, ManagerRow } from "@/api/types";
 import { useAsync } from "@/hooks/useAsync";
 import { usePolling } from "@/hooks/usePolling";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { todayISO } from "@/lib/date";
 import { kstDateTime } from "@/lib/format";
 
@@ -28,12 +32,14 @@ export default function DashboardPage() {
   const [routesData, setRoutesData] = useState<AllRoutesResp | null>(null);
   const [routesLoading, setRoutesLoading] = useState(false);
   const [routesError, setRoutesError] = useState("");
+  const [lastAt, setLastAt] = useState<Date | null>(null);
+  const auto = useAutoRefresh();
 
   const status = useAsync(() => getStatus(date), [date]);
   const delivery = useAsync(() => getDeliveries(date), [date]);
 
   const st = status.data;
-  const shouldPoll = st?.state === "PREVIEW" || st?.state === "LIVE";
+  const live = st?.state === "PREVIEW" || st?.state === "LIVE";
   const est = st ? st.state === "PREVIEW" || Boolean(st.estimated) : false;
   const showProgress = st?.state === "LIVE" || st?.state === "RESULT";
   const internalOn = Boolean(st?.internal?.enabled);
@@ -54,14 +60,11 @@ export default function DashboardPage() {
     return routesData.routes.filter((r) => r.manager_id === selectedManagerId);
   }, [routesData, selectedManagerId]);
 
-  const autoFitKey = `${date}:${selectedManagerId ?? "all"}`;
-
   async function loadRoutes() {
     setRoutesLoading(true);
     setRoutesError("");
     try {
-      const data = await getAllRoutes(date);
-      setRoutesData(data);
+      setRoutesData(await getAllRoutes(date));
     } catch (e) {
       setRoutesError(e instanceof Error ? e.message : String(e));
       setRoutesData(null);
@@ -70,7 +73,7 @@ export default function DashboardPage() {
     }
   }
 
-  const retryAll = () => {
+  const refreshAll = () => {
     status.refetch().catch(() => {});
     delivery.refetch().catch(() => {});
     loadRoutes().catch(() => {});
@@ -82,18 +85,18 @@ export default function DashboardPage() {
   }, [date]);
 
   useEffect(() => {
+    if (status.data) setLastAt(new Date());
+  }, [status.data]);
+
+  useEffect(() => {
     if (selectedManagerId == null) return;
-    const exists = rows.some((m) => m.manager_id === selectedManagerId);
-    if (!exists) setSelectedManagerId(null);
+    if (!rows.some((m) => m.manager_id === selectedManagerId)) setSelectedManagerId(null);
   }, [rows, selectedManagerId]);
 
-  usePolling(() => {
-    status.refetch().catch(() => {});
-    delivery.refetch().catch(() => {});
-    loadRoutes().catch(() => {});
-  }, 30000, Boolean(shouldPoll));
+  // 자동 갱신: 오늘·진행 중 날짜 + 사용자가 켠 경우에만
+  usePolling(refreshAll, auto.sec * 1000, Boolean(live) && auto.on);
 
-  const isLoading = status.loading || delivery.loading || routesLoading;
+  const busy = status.loading || delivery.loading || routesLoading;
   const error = status.error || delivery.error || routesError;
 
   return (
@@ -101,32 +104,33 @@ export default function DashboardPage() {
       title="배송 대시보드"
       right={
         <>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          {st && <Badge state={st.state} />}
-          {est && (
-            <span style={{ fontSize: 12, color: "#8b8b00", fontWeight: 700 }}>예상치 기준</span>
-          )}
-          {shouldPoll && (
-            <span style={{ fontSize: 12, color: "#c62828", fontWeight: 700 }}>30초 갱신 중</span>
-          )}         
-          <span style={{ marginLeft: "auto", fontSize: 12, color: "#666" }}>
-            {st
-              ? `주문 마감: ${kstDateTime(st.cutoff_at)} KST${st.cutoff_source === "default" ? " (기본값)" : ""}`
-              : ""}
-          </span>
+          <div className="toolbar">
+            <input type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
+            {st && <Badge state={st.state} />}
+            {est && <Chip tone="warn">예상치 기준</Chip>}
+          </div>
+          <div className="toolbar toolbar-end">
+            {st && (
+              <span className="muted small">
+                주문 마감 {kstDateTime(st.cutoff_at)} KST{st.cutoff_source === "default" ? " (기본값)" : ""}
+              </span>
+            )}
+            <RefreshControl
+              live={Boolean(live)} on={auto.on} sec={auto.sec} busy={busy} lastAt={lastAt}
+              onToggle={auto.setOn} onSec={auto.setSec} onRefresh={refreshAll}
+            />
+          </div>
         </>
       }
     >
       {error && (
-        <div style={{ display: "grid", gap: 12, marginBottom: 16 }}>
+        <div className="stack">
           <ErrorBox message={error} />
-          <div>
-            <RetryButton onClick={retryAll} />
-          </div>
+          <div><RetryButton onClick={refreshAll} /></div>
         </div>
       )}
 
-      {isLoading && <Spinner />}
+      {busy && !st && <Spinner />}
 
       {!error && st && (
         <>
@@ -135,58 +139,55 @@ export default function DashboardPage() {
         </>
       )}
 
-      {!error && managerOptions.length > 0 && (
-        <div style={{ marginTop: 16, marginBottom: 8, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <label htmlFor="manager-select" style={{ fontSize: 14, fontWeight: 600 }}>노선 강조 매니저</label>
-          <select
-            id="manager-select"
-            value={selectedManagerId ?? ""}
-            onChange={(e) => setSelectedManagerId(e.target.value ? Number(e.target.value) : null)}
-          >
-            <option value="">전체 노선</option>
-            {managerOptions.map((m) => (
-              <option key={m.manager_id} value={m.manager_id}>
-                {m.manager_name ?? m.manager_id}
-              </option>
-            ))}
-          </select>
-          {routesLoading && <span style={{ fontSize: 12, color: "#666" }}>경로 불러오는 중…</span>}
-        </div>
-      )}
-
       {!error && stops.length > 0 && (
-        <MapSection
-          stops={stops}
-          routes={displayedRoutes}
-          selectedManagerId={selectedManagerId}
-          onSelectManager={setSelectedManagerId}
-          autoFitKey={autoFitKey}
-        />
+        <Panel
+          title="배송 지도"
+          right={
+            <>
+              {routesLoading && <span className="muted small">경로 불러오는 중…</span>}
+              {managerOptions.length > 0 && (
+                <select
+                  className="input"
+                  aria-label="노선 강조 매니저"
+                  value={selectedManagerId ?? ""}
+                  onChange={(e) => setSelectedManagerId(e.target.value ? Number(e.target.value) : null)}
+                >
+                  <option value="">전체 노선</option>
+                  {managerOptions.map((m) => (
+                    <option key={m.manager_id} value={m.manager_id}>{m.manager_name ?? m.manager_id}</option>
+                  ))}
+                </select>
+              )}
+            </>
+          }
+        >
+          <MapSection
+            stops={stops}
+            routes={displayedRoutes}
+            selectedManagerId={selectedManagerId}
+            onSelectManager={setSelectedManagerId}
+            autoFitKey={`${date}:${selectedManagerId ?? "all"}`}
+          />
+        </Panel>
       )}
 
       {!error && noData && (
-        <div style={{ marginTop: 24 }}>
-          <EmptyState
-            title="해당 날짜 데이터가 없습니다"
-            description="주문/배송 데이터가 없는 날짜이거나 아직 집계되지 않았습니다."
-          />
-        </div>
+        <EmptyState
+          title="해당 날짜 데이터가 없습니다"
+          description="주문/배송 데이터가 없는 날짜이거나 아직 집계되지 않았습니다."
+        />
       )}
 
       {!error && rows.length > 0 && (
-        <>
-          <h2 style={{ fontSize: 16, margin: "24px 0 8px" }}>매니저별 현황 {est ? "(예상)" : ""}</h2>
+        <Panel title={`매니저별 현황${est ? " (예상)" : ""}`}>
           <ManagerTable rows={rows} stops={stops} showProgress={showProgress} />
-        </>
+        </Panel>
       )}
 
       {!error && Object.keys(byLineup).length > 0 && (
-        <>
-          <h2 style={{ fontSize: 16, margin: "24px 0 8px" }}>
-            라인업별 {est ? "(예상)" : ""} <span style={{ fontSize: 12, color: "#888", fontWeight: 400 }}>VAT 제외</span>
-          </h2>
+        <Panel title={`라인업별${est ? " (예상)" : ""}`} right={<span className="muted small">VAT 제외</span>}>
           <LineupTable byLineup={byLineup} internalOn={internalOn} />
-        </>
+        </Panel>
       )}
 
       {!error && <InternalBlock internal={st?.internal} est={est} />}

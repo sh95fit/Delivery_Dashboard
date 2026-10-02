@@ -93,7 +93,8 @@ export default function AppShell() {
                         to={it.to}
                         end={it.to === "/"}
                         className={({ isActive }) => `sb-item${isActive ? " active" : ""}`}
-                        title={isCollapsed ? it.label : undefined}
+                        // NavLink (ready)
+                        title={isCollapsed || it.hint ? it.hint ?? it.label : undefined}
                       >
                         <Icon name={it.icon} />
                         <span className="sb-label">{it.label}</span>
@@ -102,7 +103,8 @@ export default function AppShell() {
                       <span
                         key={it.to}
                         className="sb-item off"
-                        title={`${it.label} — 준비 중${it.step ? ` (${it.step})` : ""}`}
+                        // span (준비 중)
+                        title={`${it.hint ?? it.label} — 준비 중${it.step ? ` (${it.step})` : ""}`}
                       >
                         <Icon name={it.icon} />
                         <span className="sb-label">{it.label}</span>
