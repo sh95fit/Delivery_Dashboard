@@ -138,6 +138,7 @@ export interface StopPoint {
   manager_name?: string | null;
   manager_color?: string | null;
   delivered_at?: string | null;
+  seq?: number | null;
   accounts: number;
   meals: number;
   lunch_meals: number;

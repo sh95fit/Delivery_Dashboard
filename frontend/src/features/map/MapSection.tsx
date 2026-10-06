@@ -30,6 +30,12 @@ type Row = {
 };
 type SortKey = "name" | "todo" | "stops";
 
+const NO_RULE: Record<Phase, string> = {
+  preview: "숫자 = 예상 순서 (최근 배송 순서, 없으면 희망시간)",
+  live: "숫자 = 완료 순서 → 미완료(빨간 테두리)는 배송 순서대로 이어서 · 완료되면 다시 매김",
+  result: "숫자 = 실제 도착 순서 (완료 시각 기준)",
+};
+
 type Props = {
   stops: StopPoint[];
   /** 전체 노선 (선택 노선만 거르지 말 것 — 흐림 처리·번호 계산에 전체가 필요) */
@@ -93,25 +99,71 @@ function loadNaverMaps(): Promise<void> {
   });
 }
 
-/* ---------- 번호: 매니저별 · 배송건별 ---------- */
-function buildOrderMap(routes: RouteSummary[]) {
+/* ---------- 번호: 배송지 데이터로 직접 계산 (경로 캐시와 무관) ---------- */
+const hasXY = (s: StopPoint) => Number.isFinite(s.latitude) && Number.isFinite(s.longitude);
+const xy = (s: StopPoint): Pt => ({ lat: s.latitude as number, lng: s.longitude as number });
+const dist2 = (a: Pt, s: StopPoint) =>
+  (a.lat - (s.latitude as number)) ** 2 + ((a.lng - (s.longitude as number)) * 0.8) ** 2;
+const doneAt = (s: StopPoint) => new Date(s.delivered_at as string).getTime();
+const byId = (a: StopPoint, b: StopPoint) => String(a.delivery_id).localeCompare(String(b.delivery_id));
+
+/** 순서 값이 없는 배송지: 희망시간대 순 → 같은 시간대는 현재 위치에서 가까운 곳부터 */
+function planOrder(list: StopPoint[], start: Pt | null): StopPoint[] {
+  const bySlot = new Map<string, StopPoint[]>();
+  for (const s of list) {
+    const k = s.delivery_time || "99:99";
+    if (!bySlot.has(k)) bySlot.set(k, []);
+    bySlot.get(k)!.push(s);
+  }
+  const out: StopPoint[] = [];
+  let cur = start;
+  for (const k of [...bySlot.keys()].sort()) {
+    const rest = bySlot.get(k)!.slice();
+    while (rest.length) {
+      let bi = 0;
+      if (cur) {
+        let bd = Infinity;
+        rest.forEach((s, i) => {
+          const d = hasXY(s) ? dist2(cur!, s) : Infinity;
+          if (d < bd) { bd = d; bi = i; }
+        });
+      }
+      const [s] = rest.splice(bi, 1);
+      out.push(s);
+      if (hasXY(s)) cur = xy(s);
+    }
+  }
+  return out;
+}
+
+/** 완료분 = 완료 시각순 확정 / 미완료 = delivery.ordering 순 → 순서 없는 곳은 뒤에 */
+function buildStopOrder(stops: StopPoint[], phase: Phase, origin: Pt | null) {
   const order = new Map<string, number>();
-  for (const r of routes) {
-    const ids = [...(r.completed_stop_ids ?? []), ...(r.remaining_stop_ids ?? [])];
-    ids.forEach((id, i) => {
-      const k = `${r.manager_id}:${id}`;
-      if (!order.has(k)) order.set(k, i + 1);
-    });
+  const byMgr = new Map<number, StopPoint[]>();
+  for (const s of stops) {
+    if (s.manager_id == null) continue;
+    if (!byMgr.has(s.manager_id)) byMgr.set(s.manager_id, []);
+    byMgr.get(s.manager_id)!.push(s);
+  }
+  for (const [mid, list] of byMgr) {
+    const done = phase === "preview" ? [] : list
+      .filter((s) => s.delivered_at)
+      .sort((a, b) => doneAt(a) - doneAt(b) || byId(a, b));
+    const todo = phase === "result" ? [] : list.filter((s) => phase === "preview" || !s.delivered_at);
+    const withSeq = todo
+      .filter((s) => s.seq != null)
+      .sort((a, b) => (a.seq as number) - (b.seq as number)
+        || (a.delivery_time ?? "99:99").localeCompare(b.delivery_time ?? "99:99") || byId(a, b));
+    const noSeq = todo.filter((s) => s.seq == null);
+    const tail = [...done, ...withSeq].reverse().find(hasXY);
+    const ordered = [...done, ...withSeq, ...planOrder(noSeq, tail ? xy(tail) : origin)];
+    ordered.forEach((s, i) => order.set(`${mid}:${s.delivery_id}`, i + 1));
   }
   return order;
 }
 
 function stopNo(s: StopPoint, order: Map<string, number>) {
-  if (s.manager_id == null) return undefined;
-  return (
-    order.get(`${s.manager_id}:${s.delivery_id}`) ??
-    (s.address_id != null ? order.get(`${s.manager_id}:${s.address_id}`) : undefined)
-  );
+  return s.manager_id == null ? undefined : order.get(`${s.manager_id}:${s.delivery_id}`);
 }
 
 const visibleItems = (g: StopGroup, sel: number | null) =>
@@ -214,7 +266,11 @@ function itemHtml(s: StopPoint, no: number | undefined, phase: Phase, multi: boo
       .map((x) => `${esc(x.name)} ${num(x.qty)}`)
       .join(" · ") || "-";
   const rows: Array<[string, string]> = [
-    ["배송시간", esc(s.delivery_time ?? "-")],
+    ["배송시간", (() => {
+      const t = s.delivery_time ?? "-";
+      const raw = (s.delivery_hour_raw ?? "").trim();
+      return raw && raw !== t ? `${esc(t)} <span class="iw-raw">${esc(raw)}</span>` : esc(t);
+    })()],
     ...(multiMgr ? ([["매니저", esc(s.manager_name ?? "미배정")]] as Array<[string, string]>) : []),
     ["식수", meals],
     ["고객사", `${num(s.accounts)}곳`],
@@ -302,7 +358,13 @@ export default function MapSection({
   const select = onSelectManager ?? (() => {});
   const groups = useMemo(() => groupStops(stops), [stops]);
   const effectiveRoutes = useMemo(() => mergeWithStaleRoutes(routes, lastGoodRoutesRef.current), [routes]);
-  const order = useMemo(() => buildOrderMap(effectiveRoutes), [effectiveRoutes]);
+  const originRoute = effectiveRoutes.find((r) => Number.isFinite(r.origin_latitude) && Number.isFinite(r.origin_longitude));
+  const oLat = originRoute?.origin_latitude ?? null;
+  const oLng = originRoute?.origin_longitude ?? null;
+  const order = useMemo(
+    () => buildStopOrder(stops, phase, oLat != null && oLng != null ? { lat: oLat, lng: oLng } : null),
+    [stops, phase, oLat, oLng],
+  );
   const colorById = useMemo(() => {
     const m = new Map<number, string>();
     for (const s of stops) if (s.manager_id != null && !m.has(s.manager_id)) m.set(s.manager_id, safeColor(s.manager_color));
@@ -333,6 +395,7 @@ export default function MapSection({
       it.stops += 1;
       it.meals += s.meals ?? 0;
       if (s.delivered_at) it.done += 1;
+      if (stopNo(s, order) != null) it.hasOrder = true;       
       m.set(s.manager_id, it);
     }
     for (const r of effectiveRoutes) {
@@ -341,10 +404,9 @@ export default function MapSection({
       it.km = (r.distance_m ?? 0) / 1000;
       it.min = (r.duration_ms ?? 0) / 60000;
       it.hasLine = hasLine(r);
-      it.hasOrder = (r.completed_stop_ids?.length ?? 0) + (r.remaining_stop_ids?.length ?? 0) > 0;
     }
     return [...m.values()];
-  }, [stops, effectiveRoutes]);
+  }, [stops, effectiveRoutes, order]);
 
   const listRows = useMemo(() => {
     const key = q.trim().toLowerCase();
@@ -608,9 +670,9 @@ export default function MapSection({
   const sr = selectedManagerId == null ? null : effectiveRoutes.find((r) => r.manager_id === selectedManagerId) ?? null;
   const selRow = rows.find((r) => r.id === selectedManagerId) ?? null;
   const missingNo = useMemo(() => {
-    if (selectedManagerId == null || !selRow?.hasOrder) return 0;
+    if (selectedManagerId == null || phase !== "result") return 0;
     return stops.filter((s) => s.manager_id === selectedManagerId && stopNo(s, order) == null).length;
-  }, [stops, order, selectedManagerId, selRow]);
+  }, [stops, order, selectedManagerId, selRow, phase]);
   const srcLabel: Record<string, string> = { cache: "캐시", naver: "새 계산", pending: "경로 계산 전", unavailable: "경로선 없음" };
 
   return (
@@ -711,8 +773,7 @@ export default function MapSection({
             {sr && sr.toll_fare > 0 && <Chip>통행료 {won(sr.toll_fare)}</Chip>}
             {sr && (sr.fuel_price_naver ?? 0) > 0 && <Chip>유류비(NAVER) {won(sr.fuel_price_naver)}</Chip>}
             {sr && (sr.fuel_price_opinet ?? 0) > 0 && <Chip>유류비(오피넷) {won(sr.fuel_price_opinet as number)}</Chip>}
-            {missingNo > 0 && <Chip tone="caution" title="노선 순서 정보와 배송건 ID가 맞지 않는 배송지">번호 없음 {num(missingNo)}곳</Chip>}
-            {selRow && !selRow.hasOrder && <Chip tone="caution">순서 정보 없음</Chip>}
+            {missingNo > 0 && <Chip tone="caution" title="완료 시각이 없어 순서를 매기지 않은 배송지">완료시각 없음 {num(missingNo)}곳</Chip>}
             {sr?.origin_name && <span className="muted small">출발지 {sr.origin_name}</span>}
             {sr && <span className="muted small">· {srcLabel[sr.source] ?? sr.source}</span>}
           </>
@@ -726,7 +787,7 @@ export default function MapSection({
                 <span className="lg"><i className="lg-mk st-miss" />미완료</span>
               </>
             )}
-            <span className="muted small">숫자 = 도착 순서 · 같은 위치는 5-6 · 실선 완료 / 점선 미완료 경로</span>
+            <span className="muted small">{NO_RULE[phase]} · 같은 위치는 5-6 · 실선 완료 / 점선 미완료 경로</span>
           </div>
         )}
       </div>

@@ -18,7 +18,7 @@ from app.services.day_aggregate import KST
 
 logger = logging.getLogger("day_cache")
 
-VERSION = "v3"          # v3: 석식 31·30 라인업, 매니저 대체 색
+VERSION = "v4"          # v4: 배송 순서(seq), 배송시간 파싱 보강
 TTL_TODAY = 20
 TTL_RECENT = 600
 TTL_OLD = 21600

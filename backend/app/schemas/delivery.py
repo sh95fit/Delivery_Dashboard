@@ -47,6 +47,7 @@ class StopPoint(BaseModel):
     manager_name: str | None
     manager_color: str | None
     delivered_at: datetime | None = None    
+    seq: int | None = None
     accounts: int
     meals: int
     lunch_meals: int = 0

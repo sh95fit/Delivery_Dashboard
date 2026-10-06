@@ -1,16 +1,23 @@
 import { Fragment, useMemo, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { LineupMeta, ManagerRow, StopLineup, StopPoint } from "@/api/types";
 import { num, won } from "@/lib/format";
 
 type Props = { rows: ManagerRow[]; stops: StopPoint[]; showProgress: boolean; meta: LineupMeta[] };
 type Item = { id: string; label: string };
 
+const TOTAL = "__total";
 const keyOf = (m: ManagerRow) => String(m.manager_id ?? "none");
 const Z = <span className="zero">-</span>;
 const qtyCell = (v: number) => (v ? num(v) : Z);
 const refundCell = (v: number) => (v ? <span className="neg">−{won(v)}</span> : Z);
 
-/** 라인업 합치기 (합계 행 상세용) */
+const Chevron = () => (
+  <svg className="mt-caret" viewBox="0 0 16 16" aria-hidden="true">
+    <path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 function mergeLineups(rows: ManagerRow[]) {
   const out: Record<string, StopLineup> = {};
   for (const m of rows) {
@@ -24,7 +31,7 @@ function mergeLineups(rows: ManagerRow[]) {
   return out;
 }
 
-/** 펼침 상세: 식사별 라인업 수량·금액 */
+/** 펼침 상세: 식사별 라인업 카드 (수량·금액·비중) */
 function LineupDetail({ lineups, meta }: { lineups: Record<string, StopLineup>; meta: LineupMeta[] }) {
   const known = new Set(meta.map((x) => x.id));
   const groups: Array<{ key: string; label: string; items: Item[] }> = [
@@ -36,46 +43,37 @@ function LineupDetail({ lineups, meta }: { lineups: Record<string, StopLineup>; 
     },
   ];
 
-  const body = groups.flatMap((g) => {
+  const blocks = groups.flatMap((g) => {
     const items = g.items.filter((l) => (lineups[l.id]?.qty ?? 0) > 0);
     if (items.length === 0) return [];
     const q = items.reduce((a, l) => a + (lineups[l.id]?.qty ?? 0), 0);
     const amt = items.reduce((a, l) => a + (lineups[l.id]?.amount ?? 0), 0);
     return [
-      ...items.map((l, i) => {
-        const v = lineups[l.id];
-        return (
-          <tr key={`${g.key}-${l.id}`}>
-            <td className="mt-meal">{i === 0 ? g.label : ""}</td>
-            <td>{l.label}</td>
-            <td className="num">{num(v.qty)}식</td>
-            <td className="num">{won(v.amount ?? 0)}</td>
-            <td className="num">{v.internal_qty ? <span className="text-internal">{num(v.internal_qty)}</span> : Z}</td>
-          </tr>
-        );
-      }),
-      <tr key={`${g.key}-sum`} className="mt-sub-sum">
-        <td />
-        <td>{g.label} 계</td>
-        <td className="num">{num(q)}식</td>
-        <td className="num">{won(amt)}</td>
-        <td />
-      </tr>,
+      <div className="ld-row" key={g.key}>
+        <div className="ld-meal">{g.label}</div>
+        <div className="ld-cards">
+          {items.map((l) => {
+            const v = lineups[l.id];
+            return (
+              <div className="ld-card" key={l.id}>
+                <div className="ld-name">{l.label}<span className="ld-pct">{q ? Math.round((v.qty / q) * 100) : 0}%</span></div>
+                <div className="ld-qty">{num(v.qty)}<small>식</small></div>
+                <div className="ld-amt">{won(v.amount ?? 0)}</div>
+                {v.internal_qty ? <div className="ld-int">직원식 {num(v.internal_qty)}</div> : null}
+              </div>
+            );
+          })}
+          <div className="ld-card ld-total">
+            <div className="ld-name">{g.label} 계</div>
+            <div className="ld-qty">{num(q)}<small>식</small></div>
+            <div className="ld-amt">{won(amt)}</div>
+          </div>
+        </div>
+      </div>,
     ];
   });
 
-  if (body.length === 0) return <div className="muted small">라인업 주문이 없습니다.</div>;
-  return (
-    <table className="mt-sub">
-      <thead>
-        <tr>
-          <th>구분</th><th>라인업</th><th className="num">수량</th>
-          <th className="num">금액(매출−환불)</th><th className="num">직원식</th>
-        </tr>
-      </thead>
-      <tbody>{body}</tbody>
-    </table>
-  );
+  return blocks.length ? <div className="ld">{blocks}</div> : <div className="muted small">라인업 주문이 없습니다.</div>;
 }
 
 export default function ManagerTable({ rows, stops, showProgress, meta }: Props) {
@@ -94,7 +92,7 @@ export default function ManagerTable({ rows, stops, showProgress, meta }: Props)
 
   const doneOf = (m: ManagerRow) => done.get(keyOf(m)) ?? 0;
   const sum = (f: (m: ManagerRow) => number) => rows.reduce((a, m) => a + f(m), 0);
-  const allKeys = [...rows.map(keyOf), "__total"];
+  const allKeys = [...rows.map(keyOf), TOTAL];
   const allOpen = allKeys.every((k) => open.has(k));
   const colCount = showProgress ? 10 : 9;
 
@@ -106,17 +104,25 @@ export default function ManagerTable({ rows, stops, showProgress, meta }: Props)
       return next;
     });
 
-  const nameBtn = (k: string, label: React.ReactNode) => (
-    <button type="button" className="mt-name" aria-expanded={open.has(k)} onClick={() => toggle(k)} title="라인업 상세">
-      <span className="mt-caret">▸</span>
+  // 버튼에는 onClick 없음 → 클릭·Enter 모두 행(tr)의 onClick 한 번으로 처리
+  const nameBtn = (k: string, label: ReactNode) => (
+    <button type="button" className="mt-name" aria-expanded={open.has(k)} title="라인업 상세">
+      <Chevron />
       {label}
     </button>
   );
 
-  const detailRow = (k: string, lineups: Record<string, StopLineup>) =>
+  const rowProps = (k: string, extra = "") => ({
+    className: `mt-row${open.has(k) ? " mt-open" : ""}${extra}`,
+    onClick: () => toggle(k),
+  });
+
+  const detailRow = (k: string, lineups: Record<string, StopLineup>, color?: string | null) =>
     open.has(k) && (
       <tr className="mt-detail">
-        <td colSpan={colCount}><LineupDetail lineups={lineups} meta={meta} /></td>
+        <td colSpan={colCount} style={{ "--c": color ?? "#cbd5e1" } as CSSProperties}>
+          <LineupDetail lineups={lineups} meta={meta} />
+        </td>
       </tr>
     );
 
@@ -147,7 +153,7 @@ export default function ManagerTable({ rows, stops, showProgress, meta }: Props)
             const k = keyOf(m);
             return (
               <Fragment key={k}>
-                <tr className={open.has(k) ? "mt-open" : undefined}>
+                <tr {...rowProps(k)}>
                   <td>
                     {nameBtn(k, (
                       <>
@@ -169,12 +175,12 @@ export default function ManagerTable({ rows, stops, showProgress, meta }: Props)
                   <td className="num">{refundCell(m.refund_amount)}</td>
                   <td className="num">{won(m.net_revenue)}</td>
                 </tr>
-                {detailRow(k, m.lineups ?? {})}
+                {detailRow(k, m.lineups ?? {}, m.color)}
               </Fragment>
             );
           })}
-          <tr className="sum">
-            <td>{nameBtn("__total", "합계")}</td>
+          <tr {...rowProps(TOTAL, " sum")}>
+            <td>{nameBtn(TOTAL, "합계")}</td>
             <td className="num">{num(sum((m) => m.stops))}</td>
             {showProgress && <td className="num">{num(sum(doneOf))} / {num(sum((m) => m.stops))}</td>}
             <td className="num">{num(sum((m) => m.meals))}</td>
@@ -185,7 +191,7 @@ export default function ManagerTable({ rows, stops, showProgress, meta }: Props)
             <td className="num">{refundCell(sum((m) => m.refund_amount))}</td>
             <td className="num">{won(sum((m) => m.net_revenue))}</td>
           </tr>
-          {detailRow("__total", totalLineups)}
+          {detailRow(TOTAL, totalLineups)}
         </tbody>
       </table>
     </div>

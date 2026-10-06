@@ -32,33 +32,8 @@ def _today_kst() -> date_type:
 
 
 def _normalize_delivery_hour(raw: str | None) -> str:
-    if not raw:
-        return "99:99"
-    text_value = raw.strip()
-    if not text_value:
-        return "99:99"
-
-    m = re.search(r"(\d{1,2}):(\d{2})", text_value)
-    if m:
-        hh = int(m.group(1))
-        mm = int(m.group(2))
-        if 0 <= hh <= 23 and 0 <= mm <= 59:
-            return f"{hh:02d}:{mm:02d}"
-
-    m = re.search(r"(\d{1,2})시\s*(\d{1,2})분", text_value)
-    if m:
-        hh = int(m.group(1))
-        mm = int(m.group(2))
-        if 0 <= hh <= 23 and 0 <= mm <= 59:
-            return f"{hh:02d}:{mm:02d}"
-
-    m = re.search(r"(\d{1,2})시", text_value)
-    if m:
-        hh = int(m.group(1))
-        if 0 <= hh <= 23:
-            return f"{hh:02d}:00"
-
-    return "99:99"
+    from app.services.day_aggregate import normalize_delivery_hour
+    return normalize_delivery_hour(raw) or "99:99"
 
 
 def _active_origin() -> tuple[dict, str]:
@@ -438,21 +413,35 @@ def _same_point(a: dict, b: dict, precision: int = 6) -> bool:
     )
 
 
-def _preview_nearest_neighbor(origin: dict, stops: list[dict]) -> list[dict]:
-    remaining = stops[:]
+def _plan_order(start: dict, stops: list[dict]) -> list[dict]:
+    """순서 값이 없는 배송지: 희망시간대 순 → 같은 시간대는 현재 위치에서 가까운 곳부터."""
+    def d2(a: dict, s: dict) -> float:
+        return (a["latitude"] - s["latitude"]) ** 2 + ((a["longitude"] - s["longitude"]) * 0.8) ** 2
+
     ordered: list[dict] = []
-    current = {"latitude": origin["latitude"], "longitude": origin["longitude"]}
-
-    while remaining:
-        nxt = min(
-            remaining,
-            key=lambda s: (_distance_sq(current, s), s["delivery_time"], s["address_name"] or "", s["id"]),
-        )
-        ordered.append(nxt)
-        remaining.remove(nxt)
-        current = {"latitude": nxt["latitude"], "longitude": nxt["longitude"]}
-
+    current = {"latitude": start["latitude"], "longitude": start["longitude"]}
+    for slot in sorted({s["delivery_time"] for s in stops}):
+        rest = [s for s in stops if s["delivery_time"] == slot]
+        while rest:
+            nxt = min(rest, key=lambda s: (d2(current, s), s["address_name"] or "", str(s["id"])))
+            ordered.append(nxt)
+            rest.remove(nxt)
+            current = {"latitude": nxt["latitude"], "longitude": nxt["longitude"]}
     return ordered
+
+
+def _order_todo(start: dict, stops: list[dict]) -> list[dict]:
+    """미완료 배송지 순서 = delivery.ordering 순 → 순서 없는 곳은 뒤에 (지도 번호와 같은 규칙)."""
+    with_seq = sorted(
+        (s for s in stops if s.get("seq") is not None),
+        key=lambda s: (s["seq"], s["delivery_time"], str(s["id"])),
+    )
+    no_seq = [s for s in stops if s.get("seq") is None]
+    return with_seq + _plan_order(with_seq[-1] if with_seq else start, no_seq)
+
+
+def _preview_nearest_neighbor(origin: dict, stops: list[dict]) -> list[dict]:
+    return _order_todo(origin, stops)
 
 
 def _naver_headers() -> dict:
@@ -755,6 +744,7 @@ def _fetch_state_and_groups(target: date_type) -> tuple[str, str, list[dict]]:
             "address_name": s["address_name"],
             "detail_address": s["detail_address"],
             "delivered_at": s["delivered_at"],
+            "seq": s.get("seq"),             
         })
 
     return state, source, items
@@ -825,9 +815,9 @@ def _build_manager_route(
             [s for s in manager_stops if s["delivered_at"] is not None],
             key=lambda s: (s["delivered_at"], s["id"]),
         )
-        remaining = sorted(
+        remaining = _order_todo(
+            completed[-1] if completed else origin,
             [s for s in manager_stops if s["delivered_at"] is None],
-            key=lambda s: (s["delivery_time"], s["address_name"] or "", s["id"]),
         )
     else:
         completed = []

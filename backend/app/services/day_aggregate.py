@@ -99,23 +99,40 @@ def ex_vat(amount) -> int:
     return (a * 20 + 11) // 22
 
 
+_HOUR_RE = re.compile(
+    r"(?P<ap>오전|오후|am|pm)?\s*(?<![\d:])"
+    r"(?:(?P<h1>\d{1,2})\s*[:：.]\s*(?P<m1>\d{2})(?!\d)"
+    r"|(?P<h2>\d{1,2})\s*시\s*(?:(?P<m2>\d{1,2})\s*분?|(?P<half>반))?"
+    r"|(?P<h3>\d{1,2})(?P<m3>\d{2})(?!\d))",
+    re.IGNORECASE,
+)
+
+
 def normalize_delivery_hour(raw: str | None) -> str | None:
-    """addresses.delivery_hour 원문에서 대표 시간 1개만 추출."""
+    """addresses.delivery_hour 원문 → 대표 시각 'HH:MM' (맨 앞 시각).
+    12:00 / 12 : 00 / 12：00 / 12.30 / 1230 / 10시30분 / 12시 / 12시반 / 오후 1시 / 9:30~11:00(앞 시각)
+    오전·오후 표기 없는 1~6시는 오후로 본다 (점심·석식 배송 기준). 못 읽으면 None."""
     if not raw:
         return None
-    v = raw.strip()
-    if not v:
-        return None
-    m = re.search(r"(\d{1,2}):(\d{2})", v)
-    if m and 0 <= int(m.group(1)) <= 23 and 0 <= int(m.group(2)) <= 59:
-        return f"{int(m.group(1)):02d}:{int(m.group(2)):02d}"
-    m = re.search(r"(\d{1,2})시\s*(\d{1,2})분", v)
-    if m and 0 <= int(m.group(1)) <= 23 and 0 <= int(m.group(2)) <= 59:
-        return f"{int(m.group(1)):02d}:{int(m.group(2)):02d}"
-    m = re.search(r"(\d{1,2})시", v)
-    if m and 0 <= int(m.group(1)) <= 23:
-        return f"{int(m.group(1)):02d}:00"
+    for m in _HOUR_RE.finditer(str(raw).strip()):
+        h = m.group("h1") or m.group("h2") or m.group("h3")
+        mm = m.group("m1") or m.group("m2") or m.group("m3") or ("30" if m.group("half") else "0")
+        h, mm = int(h), int(mm)
+        ap = (m.group("ap") or "").lower()
+        if ap in ("오후", "pm") and h < 12:
+            h += 12
+        elif not ap and 1 <= h <= 6:
+            h += 12
+        if 0 <= h <= 23 and 0 <= mm <= 59:
+            return f"{h:02d}:{mm:02d}"
     return None
+
+
+def _to_int(v) -> int | None:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def cutoff_from_schedule(raw, target: date_type) -> tuple[datetime, str]:
@@ -372,6 +389,7 @@ def assemble(target: date_type, mode: str, cutoff_at: datetime, cutoff_source: s
             "manager_name": info.get("manager_name"),
             "manager_color": info.get("manager_color"),
             "delivered_at": info.get("delivered_at"),
+            "seq": int(info["seq"]) if str(info.get("seq") or "").lstrip("-").isdigit() else None,            
             "is_internal": bool(info.get("is_internal")),
             "accounts": len(s["accounts"]),
             "lineups": s["lineups"],
@@ -551,7 +569,7 @@ def delivery_view(agg: dict) -> dict:
 SQL_CUTOFF = "SELECT MAX(order_completed_at) FROM schedules WHERE delivery_on = :d"
 
 SQL_DELIVERY_STOPS = """
-SELECT d.id AS delivery_id, d.address_id, d.manager_id, d.delivered_at, a.account_id,
+SELECT d.id AS delivery_id, d.address_id, d.manager_id, d.delivered_at, d.ordering AS seq, a.account_id,
        m.name AS manager_name, m.color AS manager_color,
        a.name AS address_name, a.detail_address, a.latitude, a.longitude, a.delivery_hour
 FROM delivery d
@@ -677,6 +695,7 @@ def delivery_row_to_info(r) -> dict:
         "manager_name": r["manager_name"],
         "manager_color": manager_color(r["manager_id"], r["manager_color"]),
         "delivered_at": to_kst(r["delivered_at"]),
+        "seq": r.get("seq"),        
     }
 
 
@@ -707,7 +726,39 @@ def fetch_address_stops(conn, address_ids: list[int]) -> list[dict]:
         "manager_name": r["manager_name"],
         "manager_color": manager_color(r["manager_id"], r["manager_color"]),
         "delivered_at": None,
+        "seq": None,
     } for r in sorted(rows, key=lambda x: x["address_id"])]
+
+
+SQL_LAST_SEQ = """
+SELECT d.manager_id, d.address_id, d.ordering AS seq
+FROM delivery d
+JOIN (
+  SELECT manager_id, MAX(date) AS last_date FROM delivery
+  WHERE date < :d AND date >= :since AND deleted_at IS NULL
+    AND ordering IS NOT NULL AND manager_id IN :mids
+  GROUP BY manager_id
+) x ON x.manager_id = d.manager_id AND x.last_date = d.date
+WHERE d.deleted_at IS NULL AND d.ordering IS NOT NULL
+"""
+
+
+def fill_preview_seq(conn, target: date_type, stop_infos: list[dict]) -> None:
+    """미리보기: 매니저별 최근 배송일(14일 이내)의 순서를 같은 배송지에 빌려 쓴다. 실패해도 집계는 계속."""
+    mids = sorted({s["manager_id"] for s in stop_infos if s.get("manager_id") is not None})
+    if not mids:
+        return
+    try:
+        rows = conn.execute(
+            text(SQL_LAST_SEQ).bindparams(bindparam("mids", expanding=True)),
+            {"d": target, "since": target - timedelta(days=14), "mids": mids},
+        ).mappings().all()
+    except Exception:  # noqa: BLE001
+        return
+    last = {(int(r["manager_id"]), int(r["address_id"])): r["seq"] for r in rows}
+    for s in stop_infos:
+        if s.get("manager_id") is not None and s.get("address_id") is not None:
+            s["seq"] = last.get((int(s["manager_id"]), int(s["address_id"])))
 
 
 def fetch_order_lines(conn, target: date_type) -> list[dict]:
@@ -807,6 +858,7 @@ def build_day(conn, target: date_type, now: datetime | None = None) -> dict:
     else:
         ids = sorted({ln["address_id"] for ln in lines if ln["address_id"] is not None})
         stop_infos = fetch_address_stops(conn, ids)
+        fill_preview_seq(conn, target, stop_infos)
 
     targets = internal_targets()
     mark_internal(stop_infos, lines, targets)

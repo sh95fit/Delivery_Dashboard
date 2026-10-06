@@ -329,3 +329,25 @@ def test_delivery_response_keeps_lineup_meta():
     dump = resp.model_dump() if hasattr(resp, "model_dump") else resp.dict()
     assert [m["id"] for m in dump["lineup_meta"]] == [str(p) for p in da.LINEUP_IDS]
     assert dump["managers"][0]["lineups"]
+    
+    
+@pytest.mark.parametrize("raw,want", [
+    ("12:00", "12:00"), ("9:30", "09:30"), (" 12:00 ", "12:00"),
+    ("12:00(점심시간 12:00~13:00)", "12:00"), ("11:25(식사시작시간 11:30~)", "11:25"),
+    ("12:00 (식사시작11:45~)", "12:00"), ("10:50(수요일만 이용)", "10:50"),
+    ("10시30분", "10:30"), ("12시", "12:00"), ("12시반", "12:30"),
+    ("9:30~11:00", "09:30"), ("10:30(10:20 식사시작)", "10:30"),
+    ("12 : 30", "12:30"), ("12：30", "12:30"), ("12.30", "12:30"), ("1230", "12:30"),
+    ("오후 1시", "13:00"), ("1:00", "13:00"), ("오전 11시", "11:00"),
+    ("", None), (None, None), ("시간 협의", None), ("25:00", None),
+])
+def test_normalize_delivery_hour(raw, want):
+    assert da.normalize_delivery_hour(raw) == want
+
+
+def test_seq_passthrough():
+    s = _dlv("u1", 1, 1)
+    s["seq"] = 7
+    agg = _agg([s], [_line("web", 1, 10, 4, 1, 1000)], mode=da.MODE_DELIVERY)
+    assert agg["stops"][0]["seq"] == 7
+    assert _agg([_addr(2)], [_line("web", 2, 10, 4, 1, 1000)])["stops"][0]["seq"] is None
