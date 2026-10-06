@@ -107,33 +107,43 @@ const dist2 = (a: Pt, s: StopPoint) =>
 const doneAt = (s: StopPoint) => new Date(s.delivered_at as string).getTime();
 const byId = (a: StopPoint, b: StopPoint) => String(a.delivery_id).localeCompare(String(b.delivery_id));
 
-/** 순서 값이 없는 배송지: 희망시간대 순 → 같은 시간대는 현재 위치에서 가까운 곳부터 */
-function planOrder(list: StopPoint[], start: Pt | null): StopPoint[] {
-  const bySlot = new Map<string, StopPoint[]>();
+/** start에서 가장 가까운 곳을 차례로 고른다 */
+function nearestChain(list: StopPoint[], start: Pt | null): { out: StopPoint[]; end: Pt | null } {
+  const rest = list.slice().sort(byId);
+  const out: StopPoint[] = [];
+  let cur = start;
+  while (rest.length) {
+    let bi = 0;
+    if (cur) {
+      let bd = Infinity;
+      rest.forEach((s, i) => {
+        const d = hasXY(s) ? dist2(cur!, s) : Infinity;
+        if (d < bd) { bd = d; bi = i; }
+      });
+    }
+    const [s] = rest.splice(bi, 1);
+    out.push(s);
+    if (hasXY(s)) cur = xy(s);
+  }
+  return { out, end: cur };
+}
+
+/** 같은 키(순서 값 또는 희망시간)끼리 묶어 키 순서대로, 묶음 안은 직전 위치에서 가까운 곳부터 */
+function chainBy<K extends string | number>(list: StopPoint[], key: (s: StopPoint) => K, start: Pt | null) {
+  const groups = new Map<K, StopPoint[]>();
   for (const s of list) {
-    const k = s.delivery_time || "99:99";
-    if (!bySlot.has(k)) bySlot.set(k, []);
-    bySlot.get(k)!.push(s);
+    const k = key(s);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(s);
   }
   const out: StopPoint[] = [];
   let cur = start;
-  for (const k of [...bySlot.keys()].sort()) {
-    const rest = bySlot.get(k)!.slice();
-    while (rest.length) {
-      let bi = 0;
-      if (cur) {
-        let bd = Infinity;
-        rest.forEach((s, i) => {
-          const d = hasXY(s) ? dist2(cur!, s) : Infinity;
-          if (d < bd) { bd = d; bi = i; }
-        });
-      }
-      const [s] = rest.splice(bi, 1);
-      out.push(s);
-      if (hasXY(s)) cur = xy(s);
-    }
+  for (const k of [...groups.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const r = nearestChain(groups.get(k)!, cur);
+    out.push(...r.out);
+    cur = r.end;
   }
-  return out;
+  return { out, end: cur };
 }
 
 /** 완료분 = 완료 시각순 확정 / 미완료 = delivery.ordering 순 → 순서 없는 곳은 뒤에 */
@@ -150,13 +160,10 @@ function buildStopOrder(stops: StopPoint[], phase: Phase, origin: Pt | null) {
       .filter((s) => s.delivered_at)
       .sort((a, b) => doneAt(a) - doneAt(b) || byId(a, b));
     const todo = phase === "result" ? [] : list.filter((s) => phase === "preview" || !s.delivered_at);
-    const withSeq = todo
-      .filter((s) => s.seq != null)
-      .sort((a, b) => (a.seq as number) - (b.seq as number)
-        || (a.delivery_time ?? "99:99").localeCompare(b.delivery_time ?? "99:99") || byId(a, b));
-    const noSeq = todo.filter((s) => s.seq == null);
-    const tail = [...done, ...withSeq].reverse().find(hasXY);
-    const ordered = [...done, ...withSeq, ...planOrder(noSeq, tail ? xy(tail) : origin)];
+    const last = [...done].reverse().find(hasXY);
+    const a = chainBy(todo.filter((s) => s.seq != null), (s) => s.seq as number, last ? xy(last) : origin);
+    const b = chainBy(todo.filter((s) => s.seq == null), (s) => s.delivery_time || "99:99", a.end);
+    const ordered = [...done, ...a.out, ...b.out];
     ordered.forEach((s, i) => order.set(`${mid}:${s.delivery_id}`, i + 1));
   }
   return order;

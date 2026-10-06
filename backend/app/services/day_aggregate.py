@@ -389,7 +389,7 @@ def assemble(target: date_type, mode: str, cutoff_at: datetime, cutoff_source: s
             "manager_name": info.get("manager_name"),
             "manager_color": info.get("manager_color"),
             "delivered_at": info.get("delivered_at"),
-            "seq": int(info["seq"]) if str(info.get("seq") or "").lstrip("-").isdigit() else None,            
+            "seq": _to_int(info.get("seq")),       
             "is_internal": bool(info.get("is_internal")),
             "accounts": len(s["accounts"]),
             "lineups": s["lineups"],

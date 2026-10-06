@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 from datetime import date as date_type, datetime, timedelta, timezone
 
 import requests
@@ -402,10 +401,6 @@ def _job_state_touch(route_date: date_type, manager_id: int, state: str) -> None
         conn.commit()
 
 
-def _distance_sq(origin: dict, stop: dict) -> float:
-    return (origin["latitude"] - stop["latitude"]) ** 2 + (origin["longitude"] - stop["longitude"]) ** 2
-
-
 def _same_point(a: dict, b: dict, precision: int = 6) -> bool:
     return (
         round(float(a["latitude"]), precision) == round(float(b["latitude"]), precision)
@@ -413,31 +408,43 @@ def _same_point(a: dict, b: dict, precision: int = 6) -> bool:
     )
 
 
-def _plan_order(start: dict, stops: list[dict]) -> list[dict]:
-    """순서 값이 없는 배송지: 희망시간대 순 → 같은 시간대는 현재 위치에서 가까운 곳부터."""
-    def d2(a: dict, s: dict) -> float:
-        return (a["latitude"] - s["latitude"]) ** 2 + ((a["longitude"] - s["longitude"]) * 0.8) ** 2
+def _d2(a: dict, s: dict) -> float:
+    return (a["latitude"] - s["latitude"]) ** 2 + ((a["longitude"] - s["longitude"]) * 0.8) ** 2
 
+
+def _chain(start: dict, stops: list[dict]) -> list[dict]:
+    """start에서 가장 가까운 곳을 차례로 고른다."""
     ordered: list[dict] = []
-    current = {"latitude": start["latitude"], "longitude": start["longitude"]}
-    for slot in sorted({s["delivery_time"] for s in stops}):
-        rest = [s for s in stops if s["delivery_time"] == slot]
-        while rest:
-            nxt = min(rest, key=lambda s: (d2(current, s), s["address_name"] or "", str(s["id"])))
-            ordered.append(nxt)
-            rest.remove(nxt)
-            current = {"latitude": nxt["latitude"], "longitude": nxt["longitude"]}
+    cur = start
+    rest = list(stops)
+    while rest:
+        nxt = min(rest, key=lambda s: (_d2(cur, s), s["address_name"] or "", str(s["id"])))
+        ordered.append(nxt)
+        rest.remove(nxt)
+        cur = nxt
     return ordered
 
 
+def _chain_by(start: dict, stops: list[dict], key) -> list[dict]:
+    """같은 키끼리 묶어 키 순서대로, 묶음 안은 직전 위치에서 가까운 곳부터 (지도 번호와 같은 규칙)."""
+    ordered: list[dict] = []
+    cur = start
+    for k in sorted({key(s) for s in stops}):
+        part = _chain(cur, [s for s in stops if key(s) == k])
+        ordered += part
+        cur = part[-1]
+    return ordered
+
+
+def _plan_order(start: dict, stops: list[dict]) -> list[dict]:
+    return _chain_by(start, stops, lambda s: s["delivery_time"])
+
+
 def _order_todo(start: dict, stops: list[dict]) -> list[dict]:
-    """미완료 배송지 순서 = delivery.ordering 순 → 순서 없는 곳은 뒤에 (지도 번호와 같은 규칙)."""
-    with_seq = sorted(
-        (s for s in stops if s.get("seq") is not None),
-        key=lambda s: (s["seq"], s["delivery_time"], str(s["id"])),
-    )
-    no_seq = [s for s in stops if s.get("seq") is None]
-    return with_seq + _plan_order(with_seq[-1] if with_seq else start, no_seq)
+    """미완료 = ordering 순(같은 값은 가까운 곳부터) → 순서 없는 곳은 희망시간·거리순으로 뒤에."""
+    head = _chain_by(start, [s for s in stops if s.get("seq") is not None], lambda s: s["seq"])
+    tail = [s for s in stops if s.get("seq") is None]
+    return head + _plan_order(head[-1] if head else start, tail)
 
 
 def _preview_nearest_neighbor(origin: dict, stops: list[dict]) -> list[dict]:
