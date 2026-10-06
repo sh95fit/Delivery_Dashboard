@@ -142,7 +142,7 @@ export default function WorkerImport({ managers, onDone, onClose }: Props) {
   return (
     <Modal
       open
-      size="lg"
+      size="xl"
       onClose={onClose}
       title="인력 일괄 등록"
       footer={
@@ -217,42 +217,49 @@ export default function WorkerImport({ managers, onDone, onClose }: Props) {
                 </label>
               </div>
 
-              <DataTable columns={["", "이름", "구분", "금액", "지정 출근", "지정 퇴근", "부가세", "고정 계정", "근무", "확인"]}>
-                {prev.rows.map((r, i) => {
-                  const e = edits[i];
-                  const off = r.status !== "new";
-                  return (
-                    <tr key={`${r.sheet}-${r.row}`} className={off ? "off" : undefined}>
-                      <td><input type="checkbox" checked={e.sel} disabled={off} onChange={(ev) => upd(i, { sel: ev.target.checked })} /></td>
-                      <td><input className="input input-sm" value={e.name} disabled={off} onChange={(ev) => upd(i, { name: ev.target.value })} /></td>
-                      <td>
-                        <select className="input input-sm" value={e.income} disabled={off} onChange={(ev) => upd(i, { income: ev.target.value as IncomeType })}>
-                          {INCOMES.map((k) => <option key={k} value={k}>{INCOME_LABEL[k]}</option>)}
-                        </select>
-                      </td>
-                      <td><input className="input input-sm" inputMode="numeric" value={e.rate} disabled={off} onChange={(ev) => upd(i, { rate: ev.target.value })} /></td>
-                      <td><input type="time" className="input input-sm" value={e.ws} disabled={off} onChange={(ev) => upd(i, { ws: ev.target.value })} /></td>
-                      <td><input type="time" className="input input-sm" value={e.we} disabled={off} onChange={(ev) => upd(i, { we: ev.target.value })} /></td>
-                      <td><input type="checkbox" checked={e.vat} disabled={off} onChange={(ev) => upd(i, { vat: ev.target.checked })} /></td>
-                      <td>
-                        <select className="input input-sm" value={e.mgr} disabled={off} onChange={(ev) => upd(i, { mgr: ev.target.value })}>
-                          <option value="">없음</option>
-                          {mgrOptions.map((m) => (
-                            <option key={m.manager_id} value={m.manager_id}>
-                              {m.name ?? `#${m.manager_id}`}{m.ops_status !== "active" ? " (비활성)" : ""}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="muted small">{num(r.days)}일 · {hm(r.minutes)}</td>
-                      <td className="small">
-                        {r.status === "new" ? <Chip tone="ok">신규</Chip> : r.status === "exists" ? <Chip>등록됨</Chip> : <Chip tone="caution">제외</Chip>}
-                        {r.flags.map((f) => <div key={f} className="muted">{f}</div>)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </DataTable>
+              <div className="imp-tbl mt">
+                <DataTable columns={["", "이름", "구분", "시급(원)", "지정 근무", "부가세", "고정 계정", "근무", "확인"]}>
+                  {prev.rows.map((r, i) => {
+                    const e = edits[i];
+                    const off = r.status !== "new";
+                    return (
+                      <tr key={`${r.sheet}-${r.row}`} className={off ? "off" : undefined}>
+                        <td className="c-chk"><input type="checkbox" checked={e.sel} disabled={off} onChange={(ev) => upd(i, { sel: ev.target.checked })} /></td>
+                        <td className="c-name"><input className="input input-sm" value={e.name} disabled={off} onChange={(ev) => upd(i, { name: ev.target.value })} /></td>
+                        <td className="c-inc">
+                          <select className="input input-sm" value={e.income} disabled={off} onChange={(ev) => upd(i, { income: ev.target.value as IncomeType })}>
+                            {INCOMES.map((k) => <option key={k} value={k}>{INCOME_LABEL[k]}</option>)}
+                          </select>
+                        </td>
+                        <td className="c-amt"><input className="input input-sm" inputMode="numeric" value={e.rate} disabled={off} onChange={(ev) => upd(i, { rate: ev.target.value })} /></td>
+                        <td className="c-time">
+                          <div className="imp-time">
+                            <input type="time" className="input input-sm" value={e.ws} disabled={off} onChange={(ev) => upd(i, { ws: ev.target.value })} />
+                            <span className="muted">~</span>
+                            <input type="time" className="input input-sm" value={e.we} disabled={off} onChange={(ev) => upd(i, { we: ev.target.value })} />
+                          </div>
+                        </td>
+                        <td className="c-chk"><input type="checkbox" checked={e.vat} disabled={off} onChange={(ev) => upd(i, { vat: ev.target.checked })} /></td>
+                        <td className="c-mgr">
+                          <select className="input input-sm" value={e.mgr} disabled={off} onChange={(ev) => upd(i, { mgr: ev.target.value })}>
+                            <option value="">없음</option>
+                            {mgrOptions.map((m) => (
+                              <option key={m.manager_id} value={m.manager_id}>
+                                {m.name ?? `#${m.manager_id}`}{m.ops_status !== "active" ? " (비활성)" : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="c-work muted small">{num(r.days)}일<br />{hm(r.minutes)}</td>
+                        <td className="c-flag small">
+                          {r.status === "new" ? <Chip tone="ok">신규</Chip> : r.status === "exists" ? <Chip>등록됨</Chip> : <Chip tone="caution">제외</Chip>}
+                          {r.flags.map((f) => <div key={f} className="muted">{f}</div>)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </DataTable>
+              </div>
             </>
           )}
         </>

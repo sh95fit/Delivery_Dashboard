@@ -105,7 +105,7 @@ export default function WorkersPage() {
                   <div className="muted small">등록된 인력이 없습니다. 근무표 엑셀(시급제)과 운영 계정(정규직·개인 계정)에서 한 번에 등록할 수 있습니다.</div>
                   {isAdmin && <div className="mt"><Button variant="primary" onClick={() => setImportOpen(true)}>일괄 등록 시작</Button></div>}
                 </div>
-              ) : <div className="muted small">표시할 인력이 없습니다.</div>    
+            ) : <div className="muted small">표시할 인력이 없습니다.</div>    
         ) : (
           <DataTable columns={["이름", "구분", "계약(현재)", "지정 근무", "초과수당", "부가세", "고정 계정", "상태", "관리"]}>
             {shown.map((r) => {

@@ -8,7 +8,7 @@ type Props = {
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
-  size?: "md" | "lg";
+  size?: "md" | "lg" | "xl";
 };
 
 /** 입력 팝업. 바깥 클릭으로는 닫히지 않음(입력 유실 방지) — ✕ / Esc / 하단 버튼으로만 닫힘 */

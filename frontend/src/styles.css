@@ -355,3 +355,20 @@ body {
 @keyframes row-new { 0% { background: #fef08a; } 100% { background: transparent; } }
 .kv-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .chip-btn { border: 0; background: none; padding: 0; cursor: pointer; }
+
+
+/* S2-P0b-2 일괄 등록 모달 */
+.modal.modal-xl { width: min(1280px, 96vw); max-width: 96vw; max-height: 92vh; }
+.imp-tbl .tbl td { padding: 6px; vertical-align: middle; }
+.imp-tbl .tbl th { padding: 8px 6px; }
+.imp-tbl .input-sm { width: 100%; }
+.imp-tbl .c-chk { width: 36px; text-align: center; }
+.imp-tbl .c-name { min-width: 96px; width: 110px; }
+.imp-tbl .c-inc { min-width: 92px; width: 100px; }
+.imp-tbl .c-amt { min-width: 80px; width: 90px; }
+.imp-tbl .c-time { min-width: 230px; }
+.imp-time { display: flex; align-items: center; gap: 4px; }
+.imp-time .input-sm { flex: 1 1 0; min-width: 0; }
+.imp-tbl .c-mgr { min-width: 140px; width: 170px; }
+.imp-tbl .c-work { white-space: nowrap; line-height: 1.4; }
+.imp-tbl .c-flag { min-width: 120px; max-width: 200px; line-height: 1.4; }
