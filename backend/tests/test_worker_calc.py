@@ -1,6 +1,7 @@
 from datetime import time
+import pytest
 
-from app.services.worker_calc import day_calc, month_pay, pay_total, recognized_in, resolve_accounts
+from app.services.worker_calc import day_calc, month_pay, pay_total, recognized_in, resolve_accounts, check_rate
 
 EARLY = dict(break_min=0, break_paid=True, work_start=time(7), work_end=time(12, 30), ot_unit_min=30, ot_unit_amount=5000)
 LATE = {**EARLY, "work_end": time(13, 30)}   # 김도연 9/8부터
@@ -62,3 +63,28 @@ def test_resolve_accounts():
     assert resolve_accounts(fixed, {2: 101}) == {2: 101, 3: 103}
     assert resolve_accounts(fixed, {3: None}) == {1: 101, 2: 102}
     assert resolve_accounts(fixed, {2: 104}) == {1: 101, 2: 104, 3: 103}
+
+
+RATE = dict(pay_type="hourly", amount=16000, work_start=time(7), work_end=time(13),
+            break_min=0, break_paid=True, ot_unit_min=30, ot_unit_amount=5000, vat_applied=False)
+
+
+def test_check_rate_ok():
+    out = check_rate("employee", RATE)
+    assert out["amount"] == 16000 and out["ot_unit_min"] == 30 and out["work_start"] == time(7)
+    m = check_rate("regular", {**RATE, "pay_type": "monthly", "amount": 3_000_000})
+    assert m["work_start"] is None and m["ot_unit_min"] == 0 and m["ot_unit_amount"] == 0
+
+
+@pytest.mark.parametrize("income,patch,msg", [
+    ("regular", {}, "월급제"),
+    ("employee", {"pay_type": "monthly"}, "시급제"),
+    ("employee", {"amount": 0}, "금액"),
+    ("employee", {"work_start": None, "work_end": None}, "지정 출근"),
+    ("employee", {"work_end": time(6)}, "늦어야"),
+    ("employee", {"break_min": 400}, "휴게"),
+    ("business", {"ot_unit_amount": 0}, "초과수당"),
+])
+def test_check_rate_errors(income, patch, msg):
+    with pytest.raises(ValueError, match=msg):
+        check_rate(income, {**RATE, **patch})

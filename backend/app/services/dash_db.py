@@ -5,7 +5,8 @@ from sqlalchemy import text
 
 from app.database import get_dash_engine
 
-SOFT_TABLES = {"manager_pay_rates", "vehicle_assignments", "vehicles", "vehicle_period_costs", "vehicle_expenses"}
+SOFT_TABLES = {"manager_pay_rates", "vehicle_assignments", "vehicles", "vehicle_period_costs", "vehicle_expenses",
+               "worker_pay_rates", "worker_accounts"}
 
 
 def rows(sql: str, params: dict | None = None) -> list[dict]:

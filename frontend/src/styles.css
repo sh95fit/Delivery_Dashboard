@@ -341,7 +341,8 @@ body {
 .ld-total { background: #eff6ff; border-color: #bfdbfe; }
 .ld-total .ld-name { font-weight: 600; color: var(--brand); }
 
-.iw-raw { margin-left: 4px; font-size: 11px; color: var(--muted, #6b7280); }.tbl tbody tr.mt-detail:hover > td { background: var(--bg); }
+.iw-raw { margin-left: 4px; font-size: 11px; color: var(--muted, #6b7280); }
+.tbl tbody tr.mt-detail:hover > td { background: var(--bg); }
 
 
 /* S1-P1.5 저장 결과 표시 · 운영 상태 */

@@ -86,3 +86,42 @@ def resolve_accounts(fixed: dict[int, int | None], overrides: dict[int, int | No
         else:
             acc[mid] = wid
     return acc
+
+
+INCOME_TYPES = ("regular", "employee", "business", "freelancer")
+INCOME_PAY = {"regular": "monthly", "employee": "hourly", "business": "hourly", "freelancer": "hourly"}
+
+
+def check_rate(income_type: str, r: dict) -> dict:
+    """계약 조건 검증 → 저장할 값. 규칙 위반은 ValueError (메시지 그대로 화면 표시).
+    정규직 = 월급(지정 시각·초과수당 없음), 그 외 = 시급 + 지정 출퇴근 필수"""
+    if income_type not in INCOME_PAY:
+        raise ValueError("소득 구분이 올바르지 않습니다")
+    pt = r.get("pay_type")
+    out = {**r, "amount": int(r.get("amount") or 0), "vat_applied": bool(r.get("vat_applied")),
+           "break_min": int(r.get("break_min") or 0), "break_paid": bool(r.get("break_paid")),
+           "ot_unit_min": int(r.get("ot_unit_min") or 0), "ot_unit_amount": int(r.get("ot_unit_amount") or 0)}
+    if pt == "none":
+        return {**out, "amount": 0, "vat_applied": False, "work_start": None, "work_end": None,
+                "break_min": 0, "ot_unit_min": 0, "ot_unit_amount": 0}
+    want = INCOME_PAY[income_type]
+    if pt != want:
+        raise ValueError("정규직은 월급제만 입력할 수 있습니다" if want == "monthly"
+                         else "정규직 외 인력은 시급제만 입력할 수 있습니다")
+    if out["amount"] <= 0:
+        raise ValueError("금액을 입력하세요")
+    if pt == "monthly":
+        return {**out, "work_start": None, "work_end": None, "break_min": 0,
+                "ot_unit_min": 0, "ot_unit_amount": 0}
+    ws, we = r.get("work_start"), r.get("work_end")
+    if ws is None or we is None:
+        raise ValueError("시급제는 지정 출근·퇴근 시각이 필요합니다 (초과 판정 기준)")
+    span = _min(we) - _min(ws)
+    if span <= 0:
+        raise ValueError("지정 퇴근은 지정 출근보다 늦어야 합니다 (자정 넘김 미지원)")
+    if out["break_min"] >= span:
+        raise ValueError("휴게시간이 근무시간보다 깁니다")
+    if (out["ot_unit_min"] > 0) != (out["ot_unit_amount"] > 0):
+        raise ValueError("초과수당 단위(분)와 금액은 둘 다 입력하거나 둘 다 비워 두세요")
+    return out
+

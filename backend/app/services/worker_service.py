@@ -1,0 +1,152 @@
+"""S2-P0b 인력(사람) 마스터: 기본 정보 · 계약 조건 이력 · 고정 계정 이력 (dash_db).
+운영 계정(manager)은 이름·색 표시용으로만 읽는다 (운영 DB 장애여도 화면은 열림)."""
+from __future__ import annotations
+
+from datetime import date
+
+from sqlalchemy import text
+
+from app.database import get_dash_engine
+from app.services import dash_db
+from app.services.cost_calc import latest_by
+from app.services.manager_service import _hm, _iso, _rds_managers, today
+from app.services.worker_calc import check_rate, day_calc
+
+SQL_RATES = "SELECT * FROM worker_pay_rates WHERE deleted_at IS NULL"
+SQL_ACCOUNTS = "SELECT * FROM worker_accounts WHERE deleted_at IS NULL"
+
+
+def _managers() -> dict[int, dict]:
+    try:
+        return {m["manager_id"]: m for m in _rds_managers()}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def rate_out(r: dict) -> dict:
+    pt = r["pay_type"]
+    amount = int(r["amount"] or 0)
+    d = day_calc(r.get("work_start"), r.get("work_end"), break_min=int(r.get("break_min") or 0),
+                 break_paid=bool(r.get("break_paid")), work_start=None, work_end=None)
+    return {
+        "id": r["id"], "effective_from": _iso(r["effective_from"]), "pay_type": pt, "amount": amount,
+        "vat_applied": bool(r.get("vat_applied")),
+        "work_start": _hm(r.get("work_start")), "work_end": _hm(r.get("work_end")),
+        "break_min": int(r.get("break_min") or 0), "break_paid": bool(r.get("break_paid")),
+        "ot_unit_min": int(r.get("ot_unit_min") or 0), "ot_unit_amount": int(r.get("ot_unit_amount") or 0),
+        "paid_min": d["paid"],
+        "daily_base": (amount * d["paid"] + 30) // 60 if pt == "hourly" else None,
+        "memo": r.get("memo"), "created_by": r.get("created_by"),
+    }
+
+
+def account_out(a: dict, mgrs: dict[int, dict]) -> dict:
+    mid = a["manager_id"]
+    m = mgrs.get(mid) if mid is not None else None
+    return {"id": a["id"], "manager_id": mid, "start_date": _iso(a["start_date"]),
+            "manager_name": (m or {}).get("name"), "manager_color": (m or {}).get("color"),
+            "created_by": a.get("created_by")}
+
+
+def list_workers() -> list[dict]:
+    d = today()
+    mgrs = _managers()
+    ws = dash_db.rows("SELECT * FROM workers WHERE deleted_at IS NULL ORDER BY id")
+    rates = latest_by(dash_db.rows(SQL_RATES), "worker_id", "effective_from", d)
+    accs = latest_by(dash_db.rows(SQL_ACCOUNTS), "worker_id", "start_date", d)
+    out = []
+    for w in ws:
+        wid = w["id"]
+        a = accs.get(wid)
+        out.append({
+            "id": wid, "name": w["name"], "income_type": w["income_type"], "active": bool(w["active"]),
+            "memo": w.get("memo"), "legacy_manager_id": w.get("legacy_manager_id"),
+            "updated_at": _iso(w.get("updated_at")), "updated_by": w.get("updated_by"),
+            "rate": rate_out(rates[wid]) if wid in rates else None,
+            "account": account_out(a, mgrs) if a and a["manager_id"] is not None else None,
+        })
+    return out
+
+
+def worker_detail(wid: int) -> dict:
+    mgrs = _managers()
+    rates = dash_db.rows(SQL_RATES + " AND worker_id = :w ORDER BY effective_from DESC", {"w": wid})
+    accs = dash_db.rows(SQL_ACCOUNTS + " AND worker_id = :w ORDER BY start_date DESC", {"w": wid})
+    return {"rates": [rate_out(r) for r in rates], "accounts": [account_out(a, mgrs) for a in accs]}
+
+
+def save_worker(wid: int | None, name: str, income_type: str, active: bool, memo: str | None, email: str) -> int:
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("이름을 입력하세요")
+    with get_dash_engine().begin() as conn:
+        dup = conn.execute(text(
+            "SELECT 1 FROM workers WHERE name = :n AND deleted_at IS NULL AND id <> :w"
+        ), {"n": name, "w": wid or 0}).fetchone()
+        if dup:
+            raise ValueError("같은 이름의 인력이 이미 있습니다. 동명이인은 '김민수B'처럼 구분해 입력하세요")
+        p = {"n": name, "t": income_type, "a": active, "m": memo, "e": email}
+        if wid is None:
+            return int(conn.execute(text("""
+                INSERT INTO workers (name, income_type, active, memo, created_by, updated_by)
+                VALUES (:n, :t, :a, :m, :e, :e) RETURNING id
+            """), p).scalar_one())
+        res = conn.execute(text("""
+            UPDATE workers SET name = :n, income_type = :t, active = :a, memo = :m,
+                   updated_by = :e, updated_at = NOW()
+            WHERE id = :w AND deleted_at IS NULL
+        """), {**p, "w": wid})
+        if res.rowcount == 0:
+            raise ValueError("인력을 찾을 수 없습니다")
+        return wid
+
+
+def add_rate(wid: int, body: dict, email: str) -> int:
+    with get_dash_engine().begin() as conn:
+        w = conn.execute(text("SELECT income_type FROM workers WHERE id = :w AND deleted_at IS NULL"),
+                         {"w": wid}).fetchone()
+        if not w:
+            raise ValueError("인력을 찾을 수 없습니다")
+        r = check_rate(w[0], body)
+        dup = conn.execute(text("""
+            SELECT 1 FROM worker_pay_rates
+            WHERE worker_id = :w AND effective_from = :f AND deleted_at IS NULL
+        """), {"w": wid, "f": r["effective_from"]}).fetchone()
+        if dup:
+            raise ValueError("같은 적용 시작일의 계약 조건이 이미 있습니다. 기존 행을 삭제한 뒤 입력하세요")
+        return int(conn.execute(text("""
+            INSERT INTO worker_pay_rates
+                (worker_id, effective_from, pay_type, amount, vat_applied, work_start, work_end,
+                 break_min, break_paid, ot_unit_min, ot_unit_amount, memo, created_by)
+            VALUES (:w, :f, :t, :a, :v, :ws, :we, :bm, :bp, :um, :ua, :memo, :e) RETURNING id
+        """), {"w": wid, "f": r["effective_from"], "t": r["pay_type"], "a": r["amount"],
+               "v": r["vat_applied"], "ws": r.get("work_start"), "we": r.get("work_end"),
+               "bm": r["break_min"], "bp": r["break_paid"], "um": r["ot_unit_min"],
+               "ua": r["ot_unit_amount"], "memo": r.get("memo"), "e": email}).scalar_one())
+
+
+def assign_account(wid: int, manager_id: int | None, start_date: date, email: str) -> int:
+    with get_dash_engine().begin() as conn:
+        if not conn.execute(text("SELECT 1 FROM workers WHERE id = :w AND deleted_at IS NULL"),
+                            {"w": wid}).fetchone():
+            raise ValueError("인력을 찾을 수 없습니다")
+        if manager_id is not None:
+            others = [dict(r) for r in conn.execute(text("""
+                SELECT a.worker_id, a.manager_id, a.start_date, w.name
+                FROM worker_accounts a
+                JOIN workers w ON w.id = a.worker_id AND w.deleted_at IS NULL AND w.active
+                WHERE a.deleted_at IS NULL AND a.worker_id <> :w
+            """), {"w": wid}).mappings().all()]
+            cur = latest_by(others, "worker_id", "start_date", start_date)
+            holder = next((r["name"] for r in cur.values() if r["manager_id"] == manager_id), None)
+            if holder:
+                raise ValueError(f"{start_date} 기준 '{holder}'님이 이 계정을 고정 사용 중입니다. "
+                                 "그 사람의 계정을 먼저 바꾸세요 (하루만 바뀌는 경우는 근무 입력의 일 단위 예외로 처리)")
+        conn.execute(text("""
+            UPDATE worker_accounts SET deleted_at = NOW(), deleted_by = :e
+            WHERE worker_id = :w AND start_date = :s AND deleted_at IS NULL
+        """), {"w": wid, "s": start_date, "e": email})
+        return int(conn.execute(text("""
+            INSERT INTO worker_accounts (worker_id, manager_id, start_date, created_by)
+            VALUES (:w, :m, :s, :e) RETURNING id
+        """), {"w": wid, "m": manager_id, "s": start_date, "e": email}).scalar_one())

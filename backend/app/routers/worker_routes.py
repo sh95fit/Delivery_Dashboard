@@ -1,0 +1,58 @@
+from fastapi import APIRouter, Depends
+
+from app.auth import get_current_email
+from app.deps import guard, memo, require_admin
+from app.schemas.workers import WorkerAccountIn, WorkerIn, WorkerRateIn
+from app.services import dash_db
+from app.services import worker_service as svc
+
+router = APIRouter(prefix="/workers", tags=["workers"])
+
+
+@router.get("")
+def list_workers(_: str = Depends(get_current_email)):
+    return {"items": guard(svc.list_workers, fail="인력 조회 실패")}
+
+
+@router.get("/{wid}")
+def worker_detail(wid: int, _: str = Depends(get_current_email)):
+    return guard(svc.worker_detail, wid, fail="인력 상세 조회 실패")
+
+
+@router.post("")
+def create_worker(body: WorkerIn, email: str = Depends(require_admin)):
+    new_id = guard(svc.save_worker, None, body.name, body.income_type, body.active, memo(body.memo), email,
+                   fail="인력 등록 실패")
+    return {"ok": True, "id": new_id}
+
+
+@router.put("/{wid}")
+def update_worker(wid: int, body: WorkerIn, email: str = Depends(require_admin)):
+    guard(svc.save_worker, wid, body.name, body.income_type, body.active, memo(body.memo), email,
+          fail="인력 저장 실패")
+    return {"ok": True, "id": wid}
+
+
+@router.post("/{wid}/rates")
+def add_rate(wid: int, body: WorkerRateIn, email: str = Depends(require_admin)):
+    data = body.model_dump()
+    data["memo"] = memo(body.memo)
+    return {"ok": True, "id": guard(svc.add_rate, wid, data, email, fail="계약 조건 저장 실패")}
+
+
+@router.delete("/rates/{rid}")
+def delete_rate(rid: int, email: str = Depends(require_admin)):
+    guard(dash_db.soft_delete, "worker_pay_rates", rid, email, fail="삭제 실패")
+    return {"ok": True}
+
+
+@router.post("/{wid}/accounts")
+def assign_account(wid: int, body: WorkerAccountIn, email: str = Depends(require_admin)):
+    new_id = guard(svc.assign_account, wid, body.manager_id, body.start_date, email, fail="계정 배정 실패")
+    return {"ok": True, "id": new_id}
+
+
+@router.delete("/accounts/{aid}")
+def delete_account(aid: int, email: str = Depends(require_admin)):
+    guard(dash_db.soft_delete, "worker_accounts", aid, email, fail="삭제 실패")
+    return {"ok": True}
