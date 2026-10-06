@@ -56,3 +56,30 @@ export const workText = (r: WorkerRate) => {
 export const otText = (r: WorkerRate) =>
   r.ot_unit_min > 0 && r.ot_unit_amount > 0 ? `${r.ot_unit_min}분당 ${won(r.ot_unit_amount)}` : "없음";
 export const needsName = (w: WorkerRow) => w.name.startsWith("계정#");
+
+
+export type ImportStatus = "new" | "exists" | "dup" | "invalid";
+export interface ImportRowPreview {
+  sheet: string; row: number; month: string; name: string; rate: number | null; note: string;
+  days: number; minutes: number; has_vat: boolean; income_type: IncomeType;
+  work_start: string | null; work_end: string | null; status: ImportStatus; flags: string[];
+  manager_id: number | null; manager_name: string | null;
+}
+export interface ImportSheet {
+  sheet: string; month: string | null; people: number; errors: number; warns: number; skipped: boolean; msg: string;
+}
+export interface ImportPreview { sheets: ImportSheet[]; rows: ImportRowPreview[] }
+export interface AccountCandidate {
+  manager_id: number; name: string; color: string | null;
+  status: "new" | "shared" | "exists" | "held"; holder: string | null;
+}
+export type ImportCommitRow = {
+  name: string; income_type: IncomeType; memo?: string | null;
+  rate?: WorkerRateInput | null; manager_id?: number | null; account_from?: string | null;
+};
+
+export const previewImportExcel = (body: { file_name: string; content_b64: string; file_income: "employee" | "business" }) =>
+  post<ImportPreview>("/api/workers/import/excel", body);
+export const importAccountCandidates = () => http<{ items: AccountCandidate[] }>("/api/workers/import/accounts");
+export const commitImport = (rows: ImportCommitRow[]) =>
+  post<{ ok: boolean; created: number; ids: number[] }>("/api/workers/import/commit", { rows });

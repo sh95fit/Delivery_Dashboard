@@ -15,6 +15,7 @@ import type { WorkerRow } from "@/api/workers";
 import { errText } from "@/lib/form";
 import { num } from "@/lib/format";
 import WorkerEditor from "./WorkerEditor";
+import WorkerImport from "./WorkerImport";
 
 type View = "active" | "inactive" | "all";
 const VIEWS: Array<[View, string]> = [["active", "활성"], ["inactive", "비활성"], ["all", "전체"]];
@@ -30,6 +31,8 @@ export default function WorkersPage() {
   const [sel, setSel] = useState<number | "new" | null>(null);
   const [created, setCreated] = useState<number | null>(null);
   const [lastSaved, setLastSaved] = useState<{ id: number; at: string } | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [imported, setImported] = useState("");
 
   async function reload() {
     try {
@@ -89,6 +92,7 @@ export default function WorkersPage() {
               ))}
             </div>
             <input className="input input-sm" value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름·계정 검색" />
+            {isAdmin && <Button size="sm" onClick={() => setImportOpen(true)}>일괄 등록</Button>}
             {isAdmin && <Button size="sm" variant="primary" onClick={() => setSel("new")}>인력 추가</Button>}
           </>
         }
@@ -96,7 +100,12 @@ export default function WorkersPage() {
         {loading ? (
           <Spinner />
         ) : shown.length === 0 ? (
-          <div className="muted small">표시할 인력이 없습니다.</div>
+            rows.length === 0 ? (
+                <div className="stack">
+                  <div className="muted small">등록된 인력이 없습니다. 근무표 엑셀(시급제)과 운영 계정(정규직·개인 계정)에서 한 번에 등록할 수 있습니다.</div>
+                  {isAdmin && <div className="mt"><Button variant="primary" onClick={() => setImportOpen(true)}>일괄 등록 시작</Button></div>}
+                </div>
+              ) : <div className="muted small">표시할 인력이 없습니다.</div>    
         ) : (
           <DataTable columns={["이름", "구분", "계약(현재)", "지정 근무", "초과수당", "부가세", "고정 계정", "상태", "관리"]}>
             {shown.map((r) => {
@@ -144,6 +153,17 @@ export default function WorkersPage() {
             }
           }}
           onClose={() => { setSel(null); setCreated(null); }}
+        />
+      )}
+      {imported && <div className="mt"><span className="save-note ok">✓ {imported}</span></div>}
+      {importOpen && (
+        <WorkerImport
+          managers={managers}
+          onDone={async (n) => {
+            await reload();
+            setImported(`${n}명 등록됨 · ${nowHms()} — '계약 미입력' 칩이 있으면 이어서 입력하세요`);
+          }}
+          onClose={() => setImportOpen(false)}
         />
       )}
     </PageLayout>

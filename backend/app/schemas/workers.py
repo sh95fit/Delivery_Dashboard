@@ -30,3 +30,22 @@ class WorkerRateIn(BaseModel):
 class WorkerAccountIn(BaseModel):
     manager_id: int | None = None
     start_date: date
+
+
+class ImportExcelIn(BaseModel):
+    file_name: str = Field(default="", max_length=255)
+    content_b64: str = Field(min_length=1, max_length=3_000_000)
+    file_income: Literal["employee", "business"] = "employee"
+
+
+class ImportRow(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+    income_type: IncomeType
+    memo: str | None = Field(default=None, max_length=500)
+    rate: WorkerRateIn | None = None
+    manager_id: int | None = None
+    account_from: date | None = None
+
+
+class ImportCommitIn(BaseModel):
+    rows: list[ImportRow] = Field(min_length=1, max_length=300)

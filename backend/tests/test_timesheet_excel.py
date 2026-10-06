@@ -1,6 +1,6 @@
 from datetime import date, datetime, time, timedelta
 
-from app.services.timesheet_excel import cell_minutes, parse_timesheet
+from app.services.timesheet_excel import cell_minutes, parse_timesheet, schedule_ranges
 
 W = {1: (time(7), "13:13"), 2: (time(7), time(13, 10)), 3: ("07:00", "13:02:00")}
 
@@ -90,3 +90,12 @@ def test_pay_and_vat_columns():
     assert parse_timesheet(sheet(b))["ok"]
     b[3][36] = pay + 10000                             # 월급여 오기
     assert any(m.startswith("월급여") for m in msgs(parse_timesheet(sheet(b))))
+
+
+def test_schedule_ranges():
+    assert schedule_ranges("07:00~13:00") == [("07:00", "13:00")]
+    assert schedule_ranges("600~13:00") == [("06:00", "13:00")]
+    assert schedule_ranges("6:00 - 13:00") == [("06:00", "13:00")]
+    assert schedule_ranges("07:00~12:30 / 9/8~ 07:00~13:30") == [("07:00", "12:30"), ("07:00", "13:30")]
+    assert schedule_ranges("13:00~07:00") == []
+    assert schedule_ranges(None) == []

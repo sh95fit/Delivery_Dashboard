@@ -293,3 +293,19 @@ def parse_timesheet(rows, sheet_name: str = "") -> dict:
 
     out["ok"] = not any(x["level"] == "error" for x in issues)
     return out
+
+
+_RANGE_RE = re.compile(r"(\d{1,2})\s*[:;.]?\s*(\d{2})\s*[~\-–]\s*(\d{1,2})\s*[:;.]?\s*(\d{2})")
+
+
+def schedule_ranges(note: str | None) -> list[tuple[str, str]]:
+    """'시간대' 칸 → [(HH:MM, HH:MM), …] 등장 순서, 중복 제거.
+    '07:00~13:00', '600~13:00'(콜론 누락), '6:00 - 13:00' 모두 읽음. 퇴근 ≤ 출근이면 버림."""
+    out: list[tuple[str, str]] = []
+    for m in _RANGE_RE.finditer(note or ""):
+        h1, m1, h2, m2 = map(int, m.groups())
+        if h1 < 24 and h2 < 24 and m1 < 60 and m2 < 60 and h2 * 60 + m2 > h1 * 60 + m1:
+            r = (f"{h1:02d}:{m1:02d}", f"{h2:02d}:{m2:02d}")
+            if r not in out:
+                out.append(r)
+    return out

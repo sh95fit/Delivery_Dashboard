@@ -89,7 +89,7 @@ export default function ManagersPage() {
   const selRow = rows.find((r) => r.manager_id === sel) ?? null;
 
   return (
-    <PageLayout title="매니저">
+    <PageLayout title="매니저 계정">
       <div className="notice">
         이름·색·<b>운영 상태</b>는 운영 DB에서 가져옵니다(여기서 변경 불가). <b>대시보드 상태·급여·근무 기준·차량 배정</b>은 여기서 관리합니다.
         시급제의 근무 시작·종료·휴게는 <b>예상 물류비</b> 산출 기준이며, 실제 비용은 이후 근무일지(출퇴근 기록)로 보정합니다.

@@ -1,5 +1,6 @@
 """S2-P0b 인력(사람) 마스터: 기본 정보 · 계약 조건 이력 · 고정 계정 이력 (dash_db).
-운영 계정(manager)은 이름·색 표시용으로만 읽는다 (운영 DB 장애여도 화면은 열림)."""
+운영 계정(manager)은 이름·색 표시용으로만 읽는다 (운영 DB 장애여도 화면은 열림).
+insert_rate / account_holder / insert_account 는 일괄 등록(worker_import)과 공용."""
 from __future__ import annotations
 
 from datetime import date
@@ -101,28 +102,55 @@ def save_worker(wid: int | None, name: str, income_type: str, active: bool, memo
         return wid
 
 
+def insert_rate(conn, wid: int, r: dict, email: str) -> int:
+    """check_rate를 통과한 값 r 저장. 같은 적용 시작일이 있으면 ValueError."""
+    dup = conn.execute(text("""
+        SELECT 1 FROM worker_pay_rates
+        WHERE worker_id = :w AND effective_from = :f AND deleted_at IS NULL
+    """), {"w": wid, "f": r["effective_from"]}).fetchone()
+    if dup:
+        raise ValueError("같은 적용 시작일의 계약 조건이 이미 있습니다. 기존 행을 삭제한 뒤 입력하세요")
+    return int(conn.execute(text("""
+        INSERT INTO worker_pay_rates
+            (worker_id, effective_from, pay_type, amount, vat_applied, work_start, work_end,
+             break_min, break_paid, ot_unit_min, ot_unit_amount, memo, created_by)
+        VALUES (:w, :f, :t, :a, :v, :ws, :we, :bm, :bp, :um, :ua, :memo, :e) RETURNING id
+    """), {"w": wid, "f": r["effective_from"], "t": r["pay_type"], "a": r["amount"],
+           "v": r["vat_applied"], "ws": r.get("work_start"), "we": r.get("work_end"),
+           "bm": r["break_min"], "bp": r["break_paid"], "um": r["ot_unit_min"],
+           "ua": r["ot_unit_amount"], "memo": r.get("memo"), "e": email}).scalar_one())
+
+
 def add_rate(wid: int, body: dict, email: str) -> int:
     with get_dash_engine().begin() as conn:
         w = conn.execute(text("SELECT income_type FROM workers WHERE id = :w AND deleted_at IS NULL"),
                          {"w": wid}).fetchone()
         if not w:
             raise ValueError("인력을 찾을 수 없습니다")
-        r = check_rate(w[0], body)
-        dup = conn.execute(text("""
-            SELECT 1 FROM worker_pay_rates
-            WHERE worker_id = :w AND effective_from = :f AND deleted_at IS NULL
-        """), {"w": wid, "f": r["effective_from"]}).fetchone()
-        if dup:
-            raise ValueError("같은 적용 시작일의 계약 조건이 이미 있습니다. 기존 행을 삭제한 뒤 입력하세요")
-        return int(conn.execute(text("""
-            INSERT INTO worker_pay_rates
-                (worker_id, effective_from, pay_type, amount, vat_applied, work_start, work_end,
-                 break_min, break_paid, ot_unit_min, ot_unit_amount, memo, created_by)
-            VALUES (:w, :f, :t, :a, :v, :ws, :we, :bm, :bp, :um, :ua, :memo, :e) RETURNING id
-        """), {"w": wid, "f": r["effective_from"], "t": r["pay_type"], "a": r["amount"],
-               "v": r["vat_applied"], "ws": r.get("work_start"), "we": r.get("work_end"),
-               "bm": r["break_min"], "bp": r["break_paid"], "um": r["ot_unit_min"],
-               "ua": r["ot_unit_amount"], "memo": r.get("memo"), "e": email}).scalar_one())
+        return insert_rate(conn, wid, check_rate(w[0], body), email)
+
+
+def account_holder(conn, wid: int | None, manager_id: int, start_date: date) -> str | None:
+    """start_date 기준 이 계정을 고정 사용 중인 다른 활성 인력 이름 (같은 트랜잭션의 미확정 행 포함)."""
+    others = [dict(r) for r in conn.execute(text("""
+        SELECT a.worker_id, a.manager_id, a.start_date, w.name
+        FROM worker_accounts a
+        JOIN workers w ON w.id = a.worker_id AND w.deleted_at IS NULL AND w.active
+        WHERE a.deleted_at IS NULL AND a.worker_id <> :w
+    """), {"w": wid or 0}).mappings().all()]
+    cur = latest_by(others, "worker_id", "start_date", start_date)
+    return next((r["name"] for r in cur.values() if r["manager_id"] == manager_id), None)
+
+
+def insert_account(conn, wid: int, manager_id: int | None, start_date: date, email: str) -> int:
+    conn.execute(text("""
+        UPDATE worker_accounts SET deleted_at = NOW(), deleted_by = :e
+        WHERE worker_id = :w AND start_date = :s AND deleted_at IS NULL
+    """), {"w": wid, "s": start_date, "e": email})
+    return int(conn.execute(text("""
+        INSERT INTO worker_accounts (worker_id, manager_id, start_date, created_by)
+        VALUES (:w, :m, :s, :e) RETURNING id
+    """), {"w": wid, "m": manager_id, "s": start_date, "e": email}).scalar_one())
 
 
 def assign_account(wid: int, manager_id: int | None, start_date: date, email: str) -> int:
@@ -131,22 +159,8 @@ def assign_account(wid: int, manager_id: int | None, start_date: date, email: st
                             {"w": wid}).fetchone():
             raise ValueError("인력을 찾을 수 없습니다")
         if manager_id is not None:
-            others = [dict(r) for r in conn.execute(text("""
-                SELECT a.worker_id, a.manager_id, a.start_date, w.name
-                FROM worker_accounts a
-                JOIN workers w ON w.id = a.worker_id AND w.deleted_at IS NULL AND w.active
-                WHERE a.deleted_at IS NULL AND a.worker_id <> :w
-            """), {"w": wid}).mappings().all()]
-            cur = latest_by(others, "worker_id", "start_date", start_date)
-            holder = next((r["name"] for r in cur.values() if r["manager_id"] == manager_id), None)
+            holder = account_holder(conn, wid, manager_id, start_date)
             if holder:
                 raise ValueError(f"{start_date} 기준 '{holder}'님이 이 계정을 고정 사용 중입니다. "
                                  "그 사람의 계정을 먼저 바꾸세요 (하루만 바뀌는 경우는 근무 입력의 일 단위 예외로 처리)")
-        conn.execute(text("""
-            UPDATE worker_accounts SET deleted_at = NOW(), deleted_by = :e
-            WHERE worker_id = :w AND start_date = :s AND deleted_at IS NULL
-        """), {"w": wid, "s": start_date, "e": email})
-        return int(conn.execute(text("""
-            INSERT INTO worker_accounts (worker_id, manager_id, start_date, created_by)
-            VALUES (:w, :m, :s, :e) RETURNING id
-        """), {"w": wid, "m": manager_id, "s": start_date, "e": email}).scalar_one())
+        return insert_account(conn, wid, manager_id, start_date, email)

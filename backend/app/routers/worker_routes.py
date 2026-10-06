@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends
 
 from app.auth import get_current_email
 from app.deps import guard, memo, require_admin
-from app.schemas.workers import WorkerAccountIn, WorkerIn, WorkerRateIn
-from app.services import dash_db
+from app.schemas.workers import ImportCommitIn, ImportExcelIn, WorkerAccountIn, WorkerIn, WorkerRateIn
+from app.services import dash_db, worker_import
 from app.services import worker_service as svc
 
 router = APIRouter(prefix="/workers", tags=["workers"])
@@ -12,6 +12,24 @@ router = APIRouter(prefix="/workers", tags=["workers"])
 @router.get("")
 def list_workers(_: str = Depends(get_current_email)):
     return {"items": guard(svc.list_workers, fail="인력 조회 실패")}
+
+
+@router.post("/import/excel")
+def import_excel_preview(body: ImportExcelIn, _: str = Depends(require_admin)):
+    return guard(worker_import.preview_excel, body.content_b64, body.file_income, fail="근무표 읽기 실패")
+
+
+@router.get("/import/accounts")
+def import_account_candidates(_: str = Depends(require_admin)):
+    return {"items": guard(worker_import.account_candidates, fail="운영 계정 조회 실패")}
+
+
+@router.post("/import/commit")
+def import_commit(body: ImportCommitIn, email: str = Depends(require_admin)):
+    rows = [r.model_dump() for r in body.rows]
+    for r in rows:
+        r["memo"] = memo(r.get("memo"))
+    return guard(worker_import.commit, rows, email, fail="일괄 등록 실패")
 
 
 @router.get("/{wid}")

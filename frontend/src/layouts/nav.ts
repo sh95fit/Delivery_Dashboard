@@ -31,8 +31,8 @@ export const NAV: NavSection[] = [
   {
     section: "설정",
     items: [
-      { to: "/settings/managers", label: "매니저", icon: "users", ready: true },
-      { to: "/settings/workers", label: "인력", hint: "인력 계약·지정 근무·고정 계정", icon: "users", ready: true },
+      { to: "/settings/workers", label: "인력", hint: "사람별 계약·지정 근무·고정 계정", icon: "users", ready: true },
+      { to: "/settings/managers", label: "매니저 계정", hint: "운영 앱 배송 계정 (이름·색·운영 상태)", icon: "idcard", ready: true },
       { to: "/settings/vehicles", label: "차량·지출", icon: "truck", ready: true },
       { to: "/settings/internal", label: "직원식", hint: "직원식 대상 설정", icon: "tag", ready: true },
       { to: "/settings/permissions", label: "권한", icon: "lock", ready: false, step: "P11" },
