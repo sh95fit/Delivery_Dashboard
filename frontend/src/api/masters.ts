@@ -22,12 +22,21 @@ export interface Assignment {
   id: number; vehicle_id: number | null; plate_no?: string | null; model?: string | null;
   start_date: string; created_by?: string | null;
 }
+
+export type OpsStatus = "active" | "inactive" | "deleted" | "unknown";
+export const OPS_LABEL: Record<OpsStatus, string> = {
+  active: "활성", inactive: "비활성", deleted: "삭제", unknown: "확인 필요",
+};
+
 export interface ManagerRow {
   manager_id: number; name: string | null; color: string | null;
+  ops_status: OpsStatus; ops_status_raw: string | null;
   active: boolean; memo: string | null;
+  updated_at: string | null; updated_by: string | null;
   pay: PayRate | null;
   vehicle: { vehicle_id: number; plate_no: string; model?: string | null } | null;
 }
+
 export interface ManagerDetail { rates: PayRate[]; assignments: Assignment[] }
 
 export interface Vehicle {

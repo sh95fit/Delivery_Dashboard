@@ -16,7 +16,21 @@ from app.services.day_aggregate import KST, manager_color
 
 PAY_TYPES = ("monthly", "hourly", "none")
 
-SQL_MANAGERS = "SELECT id, name, color FROM manager ORDER BY id"
+SQL_MANAGERS = "SELECT * FROM manager ORDER BY id"
+_OPS_ACTIVE = {"active", "1", "true", "y", "yes"}
+_OPS_INACTIVE = {"inactive", "0", "false", "n", "no", "stop", "stopped", "suspended", "disabled"}
+
+def ops_status(raw, deleted_at) -> str:
+    """운영 DB manager.status → active / inactive / deleted / unknown"""
+    if deleted_at is not None:
+        return "deleted"
+    s = str(raw if raw is not None else "").strip().lower()
+    if s in _OPS_ACTIVE:
+        return "active"
+    if s in _OPS_INACTIVE:
+        return "inactive"
+    return "unknown"
+
 SQL_ASSIGN = """
 SELECT va.id, va.manager_id, va.vehicle_id, va.start_date, va.created_by, v.plate_no, v.model
 FROM vehicle_assignments va
@@ -64,22 +78,35 @@ def assign_out(r: dict) -> dict:
 def _rds_managers() -> list[dict]:
     with get_engine().connect() as conn:
         base = conn.execute(text(SQL_MANAGERS)).mappings().all()
-    return [{"manager_id": int(r["id"]), "name": r["name"], "color": manager_color(r["id"], r["color"])}
-            for r in base]
+    out = []
+    for r in base:
+        raw = r.get("status")
+        out.append({
+            "manager_id": int(r["id"]),
+            "name": r.get("name"),
+            "color": manager_color(r["id"], r.get("color")),
+            "ops_status": ops_status(raw, r.get("deleted_at")),
+            "ops_status_raw": None if raw is None else str(raw),
+        })
+    return out
 
 
 def list_managers() -> list[dict]:
     d = today()
     base = _rds_managers()
-    profiles = {r["manager_id"]: r for r in dash_db.rows("SELECT manager_id, active, memo FROM manager_profiles")}
+    profiles = {r["manager_id"]: r for r in dash_db.rows(
+        "SELECT manager_id, active, memo, updated_by, updated_at FROM manager_profiles")}
     pay = latest_by(dash_db.rows("SELECT * FROM manager_pay_rates WHERE deleted_at IS NULL"),
                     "manager_id", "effective_from", d)
     veh = latest_by(dash_db.rows(SQL_ASSIGN), "manager_id", "start_date", d)
     for m in base:
         mid = m["manager_id"]
         p = profiles.get(mid) or {}
-        m["active"] = bool(p.get("active", True))
+        # 대시보드에서 한 번도 저장하지 않았으면 운영 상태를 따른다
+        m["active"] = bool(p["active"]) if "active" in p else m["ops_status"] == "active"
         m["memo"] = p.get("memo")
+        m["updated_at"] = _iso(p.get("updated_at"))
+        m["updated_by"] = p.get("updated_by")
         m["pay"] = rate_out(pay[mid]) if mid in pay else None
         a = veh.get(mid)
         m["vehicle"] = ({"vehicle_id": a["vehicle_id"], "plate_no": a["plate_no"], "model": a["model"]}

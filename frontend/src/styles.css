@@ -342,3 +342,15 @@ body {
 .ld-total .ld-name { font-weight: 600; color: var(--brand); }
 
 .iw-raw { margin-left: 4px; font-size: 11px; color: var(--muted, #6b7280); }.tbl tbody tr.mt-detail:hover > td { background: var(--bg); }
+
+
+/* S1-P1.5 저장 결과 표시 · 운영 상태 */
+.save-note { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600;
+  padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.save-note.ok { color: #047857; background: #ecfdf5; }
+.save-note.fail { color: #b91c1c; background: #fef2f2; }
+.save-note.ml { margin-left: 8px; }
+.row-new td { animation: row-new 2.4s ease-out; }
+@keyframes row-new { 0% { background: #fef08a; } 100% { background: transparent; } }
+.kv-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.chip-btn { border: 0; background: none; padding: 0; cursor: pointer; }
