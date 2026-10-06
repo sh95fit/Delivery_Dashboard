@@ -321,3 +321,11 @@ def test_manager_color_fallback():
     assert da.manager_color(5, None) == da.manager_color(5, "  ")
     assert da.manager_color(5, "red").startswith("#")
     assert da.manager_color(None, None) is None
+
+
+def test_delivery_response_keeps_lineup_meta():
+    from app.schemas.delivery import DeliveryDayResponse
+    resp = DeliveryDayResponse(**da.delivery_view(_mixed()))
+    dump = resp.model_dump() if hasattr(resp, "model_dump") else resp.dict()
+    assert [m["id"] for m in dump["lineup_meta"]] == [str(p) for p in da.LINEUP_IDS]
+    assert dump["managers"][0]["lineups"]

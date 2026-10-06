@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import PageLayout from "@/layouts/PageLayout";
 import Badge from "@/components/ui/Badge";
 import Chip from "@/components/ui/Chip";
@@ -46,7 +46,11 @@ export default function DashboardPage() {
   const rows = delivery.data?.managers ?? [];
   const stops = delivery.data?.stops ?? [];
   const byLineup = delivery.data?.by_lineup ?? {};
-  const lineupMeta = delivery.data?.lineup_meta ?? [];
+  const lineupMeta = useMemo(() => {
+    const d = delivery.data;
+    if (d?.lineup_meta?.length) return d.lineup_meta;
+    return Object.entries(d?.by_lineup ?? {}).map(([id, v]) => ({ id, meal: v.meal, label: v.name }));
+  }, [delivery.data]);
   const noData = !status.loading && !delivery.loading && !status.error && !delivery.error && rows.length === 0;
 
   async function loadRoutes() {

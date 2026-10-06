@@ -60,6 +60,12 @@ class StopPoint(BaseModel):
     lineups: dict[str, LineupQty]
 
 
+class LineupMetaOut(BaseModel):
+    id: str
+    meal: str
+    label: str
+
+
 class DeliveryDayResponse(BaseModel):
     date: str
     source: str
@@ -71,5 +77,6 @@ class DeliveryDayResponse(BaseModel):
     unassigned: dict
     stops: list[StopPoint]
     by_lineup: dict = {}
+    lineup_meta: list[LineupMetaOut] = []    
     warnings: dict = {}
     internal: dict = {}
