@@ -28,7 +28,7 @@ def block(name, rate, work, ndays=30, extra=()):
 def sheet(*blocks, month=date(2026, 9, 1), ndays=30):
     days = list(range(1, ndays + 1))
     wd = ["월화수목금토일"[date(month.year, month.month, d).weekday()] for d in days]
-    rows = [["공장", "장안공장"], ["부서", "물류팀"], ["연월", datetime(month.year, month.month, 1)], [],
+    rows = [["공장", "테스트공장"], ["부서", "물류팀"], ["연월", datetime(month.year, month.month, 1)], [],
             [None] * 4 + days + ["월", None, "월급여", "인센티브", "주말특별수당", "총지급액"],
             [None] * 4 + wd + ["합계"],
             ["성명", "시급", "시간대", "구분"]]
@@ -42,7 +42,7 @@ def msgs(res, level="error"):
 
 
 def test_valid_sheet_mixed_cell_types():
-    res = parse_timesheet(sheet(block("김도연", 16000, W), block("이재일", 27500, {1: (time(7), "13:45")})))
+    res = parse_timesheet(sheet(block("인력B", 16000, W), block("인력G", 27500, {1: (time(7), "13:45")})))
     assert res["ok"], msgs(res)
     assert res["month"] == "2026-09-01"
     p = res["people"][0]
@@ -50,7 +50,7 @@ def test_valid_sheet_mixed_cell_types():
 
 
 def test_typos_detected():
-    b = block("김도연", 16000, W)
+    b = block("인력B", 16000, W)
     b[1][4] = "13;13"                                  # 1일 퇴근 구분자 오기
     b[1][5] = "25:10"                                  # 2일 퇴근 읽기 실패
     b[3][6] = timedelta(hours=6, minutes=12)           # 3일 합계 오기 (실제 6:02)
@@ -62,29 +62,29 @@ def test_typos_detected():
 
 
 def test_people_added_removed_and_broken_block():
-    broken = block("한성민", 15000, {17: (time(8), time(13, 10))})
+    broken = block("인력J", 15000, {17: (time(8), time(13, 10))})
     del broken[2]                                      # 휴게 행 삭제
-    res = parse_timesheet(sheet(block("김도연", 16000, W), broken, block("김태훈", 15000, {1: (time(8), "13:15")})))
-    assert [p["name"] for p in res["people"]] == ["김도연", "김태훈"]
+    res = parse_timesheet(sheet(block("인력B", 16000, W), broken, block("인력E", 15000, {1: (time(8), "13:15")})))
+    assert [p["name"] for p in res["people"]] == ["인력B", "인력E"]
     assert any("4행" in m for m in msgs(res))
-    res2 = parse_timesheet(sheet(block("김태훈", 15000, {1: (time(8), "13:15")})))
-    assert res2["ok"] and [p["name"] for p in res2["people"]] == ["김태훈"]
+    res2 = parse_timesheet(sheet(block("인력E", 15000, {1: (time(8), "13:15")})))
+    assert res2["ok"] and [p["name"] for p in res2["people"]] == ["인력E"]
 
 
 def test_duplicate_name():
-    res = parse_timesheet(sheet(block("김도연", 16000, W), block("김도연", 16000, W)))
+    res = parse_timesheet(sheet(block("인력B", 16000, W), block("인력B", 16000, W)))
     assert any("중복" in m for m in msgs(res))
 
 
 def test_month_mismatch():
-    rows = sheet(block("김도연", 16000, W))
+    rows = sheet(block("인력B", 16000, W))
     rows[2][1] = datetime(2026, 10, 1)                 # 9월 양식에 10월 연월
     errs = msgs(parse_timesheet(rows))
     assert any("요일" in m for m in errs) and any("31일" in m for m in errs)
 
 
 def test_pay_and_vat_columns():
-    b = block("조영진", 27500, {1: (time(6, 30), "13:58")}, extra=[None])
+    b = block("인력H", 27500, {1: (time(6, 30), "13:58")}, extra=[None])
     pay = 27500 * 448 / 60
     b[3][-1] = round(pay * 1.1)
     assert parse_timesheet(sheet(b))["ok"]

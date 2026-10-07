@@ -1,10 +1,10 @@
 from datetime import time
 import pytest
 
-from app.services.worker_calc import day_calc, month_pay, pay_total, recognized_in, resolve_accounts, check_rate
+from app.services.worker_calc import day_calc, month_pay, pay_total, pay_summary, recognized_in, resolve_accounts, check_rate
 
 EARLY = dict(break_min=0, break_paid=True, work_start=time(7), work_end=time(12, 30), ot_unit_min=30, ot_unit_amount=5000)
-LATE = {**EARLY, "work_end": time(13, 30)}   # 김도연 9/8부터
+LATE = {**EARLY, "work_end": time(13, 30)}   # 인력B 9/8부터
 
 
 def test_recognized_in():
@@ -51,8 +51,8 @@ def test_rate_change_mid_month():
 
 
 def test_vat():
-    assert pay_total(4_218_500, 0, 0, True) == {"supply": 4_218_500, "vat": 421_850, "total": 4_640_350}   # 조영진
-    assert pay_total(1_732_042, 0, 18_410, True)["total"] == 1_925_497                                     # 최정길
+    assert pay_total(4_218_500, 0, 0, True) == {"supply": 4_218_500, "vat": 421_850, "total": 4_640_350}   # 인력H
+    assert pay_total(1_732_042, 0, 18_410, True)["total"] == 1_925_497                                     # 인력I
     assert pay_total(4_218_500, 10_000, 0, True)["total"] == 4_651_350                                     # 초과수당도 부가세 대상
     assert pay_total(2_025_067, 0, 0, False)["vat"] == 0
 
@@ -88,3 +88,14 @@ def test_check_rate_ok():
 def test_check_rate_errors(income, patch, msg):
     with pytest.raises(ValueError, match=msg):
         check_rate(income, {**RATE, **patch})
+
+
+def test_pay_summary_sheet_excludes_overtime():
+    s = pay_summary(2000000, 35000, 0, False, True)
+    assert s["sheet"]["total"] == 2000000          # 엑셀 총지급액: 초과수당 없음
+    assert s["expected"]["total"] == 2035000       # 화면 예상 총액
+    s = pay_summary(1000000, 50000, 0, True, True)  # 사업자
+    assert s["sheet"] == {"supply": 1000000, "vat": 100000, "total": 1100000}
+    assert s["expected"]["total"] == 1155000
+    s = pay_summary(2000000, 0, 0, False, False)    # 초과 기준 없음
+    assert s["ot_allow"] is None and s["expected"] is None

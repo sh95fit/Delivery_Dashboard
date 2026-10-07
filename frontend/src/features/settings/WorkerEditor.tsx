@@ -311,7 +311,7 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
           {isAdmin ? (
             <div className="form-grid">
               <label className="field">이름
-                <input className="input" value={name} maxLength={50} onChange={(e) => setName(e.target.value)} placeholder="예: 김도연" />
+                <input className="input" value={name} maxLength={50} onChange={(e) => setName(e.target.value)} placeholder="예: 홍길동" />
               </label>
               <label className="field">소득 구분
                 <select className="input" value={income} onChange={(e) => setIncome(e.target.value as IncomeType)}>

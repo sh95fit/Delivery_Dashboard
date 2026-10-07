@@ -6,9 +6,10 @@
 - ① 기본급 = 시급 × 월 전체 유급 분 ÷ 60. 초과 시간도 포함, 반올림은 월 합계 1회
      → 근무표 엑셀 '월급여'와 같아야 한다 (2026-09 검증)
 - ② 초과수당 = 날짜별 계약 시간대(지정 출근~지정 퇴근) 밖 근무 분 → 단위(분)마다 지정 금액, 단위 미만 버림
-     → 엑셀에 없는 별도 추가분. 초과 시간은 ①에 이미 시급으로 포함되어 있다
+     → [2026-10-07] 근무표 엑셀에는 넣지 않음. 시스템 화면에 '예상'으로만 표시 (기준 있을 때)
 - ③ 인센티브·주말수당·기타 (월 입력)
-- ④ 공급가 = ① + ② + ③,  ⑤ 부가세 = 사업자만 ④ × 10%,  ⑥ 지급 = ④ + ⑤
+- ④ 근무표 지급 = ① + ③ (+ 사업자 부가세 10%)  ← 엑셀 총지급액과 같아야 한다
+     예상 총액   = ① + ② + ③ (+ 사업자 부가세 10%)  ← 시스템 표시 전용
 """
 from __future__ import annotations
 
@@ -72,6 +73,18 @@ def pay_total(base: int, ot_allow: int, extras: int, vat_applied: bool) -> dict:
     supply = int(base) + int(ot_allow) + int(extras)
     vat = (supply + 5) // 10 if vat_applied else 0
     return {"supply": supply, "vat": vat, "total": supply + vat}
+
+
+def pay_summary(base: int, ot_allow: int, extras: int, vat_applied: bool, has_ot_rule: bool) -> dict:
+    """근무표(제출) 금액과 시스템 예상 금액을 나눠 계산.
+    sheet    = 근무표 엑셀에 쓰는 값: 기본급 + 월 수당 (+부가세). 초과수당 없음
+    expected = 화면 표시용: sheet + 예상 초과수당 (+부가세). 그 달 초과 기준이 없으면 None
+    has_ot_rule = 그 달 근무일 계약 중 하나라도 초과 단위·금액이 있으면 True (호출하는 쪽에서 판단)"""
+    sheet = pay_total(base, 0, extras, vat_applied)
+    if not has_ot_rule:
+        return {"sheet": sheet, "ot_allow": None, "expected": None}
+    return {"sheet": sheet, "ot_allow": int(ot_allow),
+            "expected": pay_total(base, ot_allow, extras, vat_applied)}
 
 
 def resolve_accounts(fixed: dict[int, int | None], overrides: dict[int, int | None]) -> dict[int, int]:
