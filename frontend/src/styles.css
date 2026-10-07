@@ -372,3 +372,16 @@ body {
 .imp-tbl .c-mgr { min-width: 140px; width: 170px; }
 .imp-tbl .c-work { white-space: nowrap; line-height: 1.4; }
 .imp-tbl .c-flag { min-width: 120px; max-width: 200px; line-height: 1.4; }
+
+
+/* S2-P0b-3 인력 편집: 이력(조회)과 입력 폼 분리 */
+.ed-tabs { margin-bottom: 12px; }
+.ed-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.ed-head .sub-title { margin: 0; }
+.ed-hist { padding: 12px; border: 1px solid var(--line); border-radius: var(--r); background: var(--bg); }
+.ed-form { margin-top: 12px; padding: 12px 14px; border: 2px solid var(--brand); border-radius: var(--r); background: var(--panel); }
+.ed-form.is-edit { border-color: var(--warn); background: var(--warn-soft); }
+.ed-form .form-actions { justify-content: flex-end; }
+tr.ed-editing td { background: var(--warn-soft); }
+tr.ed-editing td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+.ed-nowrap { white-space: nowrap; }

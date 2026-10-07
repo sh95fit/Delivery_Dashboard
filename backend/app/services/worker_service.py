@@ -164,3 +164,54 @@ def assign_account(wid: int, manager_id: int | None, start_date: date, email: st
                 raise ValueError(f"{start_date} 기준 '{holder}'님이 이 계정을 고정 사용 중입니다. "
                                  "그 사람의 계정을 먼저 바꾸세요 (하루만 바뀌는 경우는 근무 입력의 일 단위 예외로 처리)")
         return insert_account(conn, wid, manager_id, start_date, email)
+
+
+
+def update_rate(rid: int, body: dict, email: str) -> int:
+    """계약 이력 수정 = 기존 행 삭제 표시 + 새 행 저장 (한 트랜잭션 → 변경 기록 보존). 새 행 id 반환."""
+    with get_dash_engine().begin() as conn:
+        old = conn.execute(text("""
+            SELECT r.worker_id, w.income_type FROM worker_pay_rates r
+            JOIN workers w ON w.id = r.worker_id AND w.deleted_at IS NULL
+            WHERE r.id = :r AND r.deleted_at IS NULL
+        """), {"r": rid}).fetchone()
+        if not old:
+            raise ValueError("계약 이력을 찾을 수 없습니다 (이미 수정·삭제됨 — 새로고침하세요)")
+        wid = int(old[0])
+        r = check_rate(old[1], body)
+        dup = conn.execute(text("""
+            SELECT 1 FROM worker_pay_rates
+            WHERE worker_id = :w AND effective_from = :f AND deleted_at IS NULL AND id <> :r
+        """), {"w": wid, "f": r["effective_from"], "r": rid}).fetchone()
+        if dup:
+            raise ValueError(f"{r['effective_from']}에 시작하는 다른 계약이 이미 있습니다. 그 행을 수정하세요")
+        conn.execute(text("UPDATE worker_pay_rates SET deleted_at = NOW(), deleted_by = :e WHERE id = :r"),
+                     {"r": rid, "e": email})
+        return insert_rate(conn, wid, r, email)
+
+
+def update_account(aid: int, manager_id: int | None, start_date: date, email: str) -> int:
+    """고정 계정 이력 수정 (계정·시작일). 방식은 update_rate와 같음."""
+    with get_dash_engine().begin() as conn:
+        old = conn.execute(text("""
+            SELECT a.worker_id FROM worker_accounts a
+            JOIN workers w ON w.id = a.worker_id AND w.deleted_at IS NULL
+            WHERE a.id = :a AND a.deleted_at IS NULL
+        """), {"a": aid}).fetchone()
+        if not old:
+            raise ValueError("계정 이력을 찾을 수 없습니다 (이미 수정·삭제됨 — 새로고침하세요)")
+        wid = int(old[0])
+        dup = conn.execute(text("""
+            SELECT 1 FROM worker_accounts
+            WHERE worker_id = :w AND start_date = :s AND deleted_at IS NULL AND id <> :a
+        """), {"w": wid, "s": start_date, "a": aid}).fetchone()
+        if dup:
+            raise ValueError(f"{start_date}에 시작하는 다른 계정 이력이 이미 있습니다. 그 행을 수정하세요")
+        if manager_id is not None:
+            holder = account_holder(conn, wid, manager_id, start_date)
+            if holder:
+                raise ValueError(f"{start_date} 기준 '{holder}'님이 이 계정을 고정 사용 중입니다. "
+                                 "그 사람의 계정을 먼저 바꾸세요")
+        conn.execute(text("UPDATE worker_accounts SET deleted_at = NOW(), deleted_by = :e WHERE id = :a"),
+                     {"a": aid, "e": email})
+        return insert_account(conn, wid, manager_id, start_date, email)

@@ -45,6 +45,9 @@ export const deleteWorkerRate = (rid: number) => del<Ok>(`/api/workers/rates/${r
 export const assignWorkerAccount = (id: number, body: { manager_id: number | null; start_date: string }) =>
   post<Ok>(`/api/workers/${id}/accounts`, body);
 export const deleteWorkerAccount = (aid: number) => del<Ok>(`/api/workers/accounts/${aid}`);
+export const updateWorkerRate = (rid: number, body: WorkerRateInput) => put<Ok>(`/api/workers/rates/${rid}`, body);
+export const updateWorkerAccount = (aid: number, body: { manager_id: number | null; start_date: string }) =>
+  put<Ok>(`/api/workers/accounts/${aid}`, body);
 
 export const rateText = (r: WorkerRate) =>
   r.pay_type === "none" ? "인건비 없음" : `${r.pay_type === "monthly" ? "월급" : "시급"} ${won(r.amount)}`;

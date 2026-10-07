@@ -58,6 +58,13 @@ def add_rate(wid: int, body: WorkerRateIn, email: str = Depends(require_admin)):
     return {"ok": True, "id": guard(svc.add_rate, wid, data, email, fail="계약 조건 저장 실패")}
 
 
+@router.put("/rates/{rid}")
+def update_rate(rid: int, body: WorkerRateIn, email: str = Depends(require_admin)):
+    data = body.model_dump()
+    data["memo"] = memo(body.memo)
+    return {"ok": True, "id": guard(svc.update_rate, rid, data, email, fail="계약 조건 수정 실패")}
+
+
 @router.delete("/rates/{rid}")
 def delete_rate(rid: int, email: str = Depends(require_admin)):
     guard(dash_db.soft_delete, "worker_pay_rates", rid, email, fail="삭제 실패")
@@ -67,6 +74,12 @@ def delete_rate(rid: int, email: str = Depends(require_admin)):
 @router.post("/{wid}/accounts")
 def assign_account(wid: int, body: WorkerAccountIn, email: str = Depends(require_admin)):
     new_id = guard(svc.assign_account, wid, body.manager_id, body.start_date, email, fail="계정 배정 실패")
+    return {"ok": True, "id": new_id}
+
+
+@router.put("/accounts/{aid}")
+def update_account(aid: int, body: WorkerAccountIn, email: str = Depends(require_admin)):
+    new_id = guard(svc.update_account, aid, body.manager_id, body.start_date, email, fail="계정 이력 수정 실패")
     return {"ok": True, "id": new_id}
 
 
