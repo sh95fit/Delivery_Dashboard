@@ -200,16 +200,28 @@ function groupColor(g: StopGroup, sel: number | null) {
   return safeColor(pick.manager_color);
 }
 
+/** 같은 건물·바로 옆(15m 이내)은 한 마커로. 좌표가 몇 m 다른 같은 건물 고객사가 겹쳐 가려지는 것 방지 */
+const NEAR_M = 15;
+const meters = (aLat: number, aLng: number, bLat: number, bLng: number) => {
+  const dy = (aLat - bLat) * 111_320;
+  const dx = (aLng - bLng) * 111_320 * Math.cos((aLat * Math.PI) / 180);
+  return Math.hypot(dx, dy);
+};
+
 function groupStops(stops: StopPoint[]): StopGroup[] {
-  const map = new Map<string, StopGroup>();
-  for (const s of stops) {
-    if (typeof s.latitude !== "number" || typeof s.longitude !== "number") continue;
-    if (!Number.isFinite(s.latitude) || !Number.isFinite(s.longitude)) continue;
-    const key = `${s.latitude.toFixed(6)},${s.longitude.toFixed(6)}`;
-    if (!map.has(key)) map.set(key, { key, latitude: s.latitude, longitude: s.longitude, items: [] });
-    map.get(key)!.items.push(s);
+  const groups: StopGroup[] = [];
+  const valid = stops
+    .filter((s) => typeof s.latitude === "number" && typeof s.longitude === "number" &&
+      Number.isFinite(s.latitude) && Number.isFinite(s.longitude))
+    .sort(byId); // 폴링마다 같은 순서 → 마커 키·정보창 유지
+  for (const s of valid) {
+    const lat = s.latitude as number;
+    const lng = s.longitude as number;
+    const g = groups.find((x) => meters(x.latitude, x.longitude, lat, lng) <= NEAR_M);
+    if (g) g.items.push(s);
+    else groups.push({ key: `${lat.toFixed(6)},${lng.toFixed(6)}`, latitude: lat, longitude: lng, items: [s] });
   }
-  return Array.from(map.values());
+  return groups;
 }
 
 function mergeWithStaleRoutes(current: RouteSummary[], previous: RouteSummary[]): RouteSummary[] {
@@ -311,7 +323,7 @@ function popupEl(
   const first = items[0].s;
   const color = groupColor(g, sel);
   const label = noLabel(groupNos(g, order, null));
-  const title = multi ? `같은 위치 ${items.length}곳` : first.address_name?.trim() || `주소ID ${first.address_id}`;
+  const title = multi ? `같은 건물·인근 ${items.length}곳` : first.address_name?.trim() || `주소ID ${first.address_id}`;
   const mgr = multiMgr ? "매니저 여러 명" : first.manager_name ?? "미배정";
   const focusId = !multiMgr && typeof first.manager_id === "number" && first.manager_id !== sel ? first.manager_id : null;
 
