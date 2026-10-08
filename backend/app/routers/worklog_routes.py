@@ -1,6 +1,8 @@
 from datetime import date
+from typing import Literal
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.auth import get_current_email
 from app.deps import guard, memo, require_admin
@@ -41,3 +43,19 @@ def save_person(wid: int, body: WorkPersonIn, email: str = Depends(require_admin
 def delete_log(lid: int, email: str = Depends(require_admin)):
     guard(svc.delete_log, lid, email, fail="근무 기록 삭제 실패")
     return {"ok": True}
+
+
+@router.get("/export/plan")
+def export_plan(month: date = Query(...), start: date | None = Query(None), end: date | None = Query(None),
+                ids: list[int] | None = Query(None), _: str = Depends(get_current_email)):
+    return guard(svc.export_plan, month, start, end, ids, fail="근무표 점검 실패")
+
+
+@router.get("/export")
+def export_file(sheet: Literal["labor", "business", "all"] = Query(...), month: date = Query(...),
+                start: date | None = Query(None), end: date | None = Query(None),
+                ids: list[int] | None = Query(None), _: str = Depends(require_admin)):
+    name, data, media = guard(svc.export_file, sheet, month, start, end, ids, fail="근무표 생성 실패")
+    ext = name.rsplit(".", 1)[-1]
+    return Response(content=data, media_type=media, headers={
+        "Content-Disposition": f"attachment; filename=\"timesheet.{ext}\"; filename*=UTF-8''{quote(name)}"})

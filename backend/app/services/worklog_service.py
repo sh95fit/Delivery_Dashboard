@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import calendar
+import io
+import os
+import zipfile
 from datetime import date
 
 from sqlalchemy import text
@@ -12,6 +15,10 @@ from app.services.cost_calc import effective_on
 from app.services.manager_service import _hm, _iso, today
 from app.services.worker_service import _managers
 from app.services.worklog_calc import check_log, day_result, month_summary
+from app.services.timesheet_export import SHEET_TITLE, build_timesheet, schedule_note, verify_timesheet
+from app.services.worker_calc import pay_total
+from app.services.worklog_calc import check_log, day_result, month_summary, sheet_break
+
 
 SQL_LOGS = "SELECT * FROM work_logs WHERE deleted_at IS NULL AND work_date BETWEEN :a AND :b"
 SQL_WORKERS = "SELECT id, name, income_type, active FROM workers WHERE deleted_at IS NULL ORDER BY name"
@@ -243,3 +250,142 @@ def delete_log(lid: int, email: str) -> None:
             raise ValueError("마감된 달의 기록은 삭제할 수 없습니다")
         conn.execute(text("UPDATE work_logs SET deleted_at = NOW(), deleted_by = :e WHERE id = :i"),
                      {"i": lid, "e": email})
+
+
+# ---------- S2-P4a-2 근무표 엑셀 내보내기 ----------
+SQL_EXTRAS = """SELECT worker_id, kind, SUM(amount) AS amount FROM worker_month_extras
+                WHERE deleted_at IS NULL AND month = :m GROUP BY worker_id, kind"""
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _mins(t) -> int:
+    return t.hour * 60 + t.minute
+
+
+def _range(month: date, start: date | None, end: date | None) -> tuple[date, date, date]:
+    first, last = month_bounds(month)
+    a, b = start or first, end or last
+    if not (first <= a <= b <= last):
+        raise ValueError(f"기간은 {first.month}월 안에서 시작일 ≤ 종료일로 지정하세요 (근무표는 한 달 양식)")
+    return first, a, b
+
+
+def export_plan(month: date, start: date | None = None, end: date | None = None,
+                ids: list[int] | None = None) -> dict:
+    """다운로드 전 점검 + 엑셀에 들어갈 값. error가 있는 구분은 파일을 만들지 않음."""
+    first, a, b = _range(month, start, end)
+    full = (a, b) == month_bounds(first)
+    rates = _group(dash_db.rows("SELECT * FROM worker_pay_rates WHERE deleted_at IS NULL"), "worker_id")
+    logs = _group(dash_db.rows(SQL_LOGS + " ORDER BY work_date", {"a": a, "b": b}), "worker_id")
+    extras: dict[int, dict[str, int]] = {}
+    for e in dash_db.rows(SQL_EXTRAS, {"m": first}):
+        extras.setdefault(e["worker_id"], {})[e["kind"]] = int(e["amount"] or 0)
+    with get_dash_engine().connect() as conn:
+        closed = _closed(conn, first)
+    want = set(ids) if ids else None
+    sheets: dict[str, list[dict]] = {"labor": [], "business": []}
+    issues: list[dict] = []
+
+    def add(level: str, sheet: str | None, name: str | None, msg: str) -> None:
+        issues.append({"level": level, "sheet": sheet, "name": name, "msg": msg})
+
+    for w in dash_db.rows(SQL_WORKERS):
+        sheet = SHEET_OF.get(w["income_type"])             # 정규직 = 근무표 대상 아님
+        if sheet is None or (want is not None and w["id"] not in want):
+            continue
+        name = w["name"]
+        rs, mine = rates.get(w["id"], []), logs.get(w["id"], [])
+        spans = [r for r in _spans(rs, "effective_from", a, b) if _hourly(r)]
+        if not mine and not (spans and (w["active"] or want is not None)):
+            if want is not None:
+                add("warn", sheet, name, "기간 안에 근무 기록·시급 계약이 없어 제외")
+            continue
+        days: dict[int, dict] = {}
+        amounts: list[int] = []
+        ok_logs: list[dict] = []
+        for lg in mine:
+            wd = lg["work_date"]
+            r = effective_on(rs, wd, "effective_from")
+            if not _hourly(r):
+                add("error", sheet, name, f"{wd.month}/{wd.day} 근무에 적용되는 시급 계약이 없습니다 (인력 > 계약 조건 시작일 확인)")
+                continue
+            days[wd.day] = {"in": _mins(lg["clock_in"]), "out": _mins(lg["clock_out"]),
+                            "break": sheet_break(lg.get("break_min"), r)}
+            amounts.append(int(r["amount"]))
+            ok_logs.append(lg)
+        rate = amounts[-1] if amounts else (int(spans[-1]["amount"]) if spans else 0)
+        if rate <= 0:
+            continue                                        # 위에서 error 등록됨
+        base = month_summary(ok_logs, rs)["base"]
+        pay_value = None
+        if len(set(amounts)) > 1:
+            pay_value = base
+            add("warn", sheet, name, f"월 중 시급 변경({amounts[0]:,}→{amounts[-1]:,}원): "
+                                     "시급 칸은 마지막 시급, 월급여 칸은 날짜별 시급 합계 값(수식 아님)")
+        ex = extras.get(w["id"], {})
+        inc, wk, other = ex.get("incentive", 0), ex.get("weekend", 0), ex.get("other", 0)
+        if other:
+            add("warn", sheet, name, f"기타 수당 {other:,}원은 근무표에 칸이 없어 빠집니다")
+        if (inc or wk) and not full:
+            add("info", sheet, name, "인센티브·주말수당은 기간과 관계없이 그 달 금액이 들어갑니다")
+        if not days:
+            add("warn", sheet, name, "기간 안 근무 0일 — 빈 블록으로 들어갑니다")
+        last = effective_on(rs, b, "effective_from")
+        vat = bool(sheet == "business" and _hourly(last) and last.get("vat_applied"))
+        note = schedule_note([(r["effective_from"], _hm(r["work_start"]), _hm(r["work_end"]), int(r["amount"]))
+                              for r in spans])
+        sheets[sheet].append({
+            "worker_id": w["id"], "name": name, "active": bool(w["active"]),
+            "rate": rate, "note": note, "days": days, "pay_value": pay_value,
+            "incentive": inc, "weekend": wk, "vat": vat,
+            "work_days": len(days), "paid_min": sum(v["out"] - v["in"] - v["break"] for v in days.values()),
+            "base": base, "sheet_total": pay_total(base, 0, inc + wk, vat)["total"],
+        })
+    if b > today():
+        add("warn", None, None, "오늘 이후 날짜가 포함되어 있습니다 (아직 입력되지 않은 날)")
+    if not closed:
+        add("info", None, None, "마감 전 기록입니다. 이후 수정되면 다시 받아야 합니다")
+    return {"month": first.isoformat(), "start": a.isoformat(), "end": b.isoformat(), "closed": closed,
+            "sheets": sheets, "issues": issues,
+            "ok": {s: not any(i["level"] == "error" and i["sheet"] == s for i in issues) for s in sheets}}
+
+
+def _fname(sheet: str, first: date, a: date, b: date, people: list[dict], ids, dept: str) -> str:
+    tail = "" if (a, b) == month_bounds(first) else f"_{a.day}-{b.day}일"
+    if ids:
+        tail += f"_{people[0]['name']}" if len(people) == 1 else f"_{len(people)}명"
+    return f"{SHEET_TITLE[sheet]}_{dept}_{first.month}월 근무시간표{tail}.xlsx"
+
+
+def export_file(sheet: str, month: date, start: date | None = None, end: date | None = None,
+                ids: list[int] | None = None) -> tuple[str, bytes, str]:
+    """→ (파일명, 내용, MIME). all = 근로·사업 두 파일 zip (한쪽이 비면 xlsx 하나)."""
+    if sheet not in ("labor", "business", "all"):
+        raise ValueError("구분은 labor / business / all 입니다")
+    first, a, b = _range(month, start, end)
+    plan = export_plan(month, start, end, ids)
+    targets = ["labor", "business"] if sheet == "all" else [sheet]
+    errs = [i for i in plan["issues"] if i["level"] == "error" and i["sheet"] in targets]
+    if errs:
+        more = f" 외 {len(errs) - 5}건" if len(errs) > 5 else ""
+        raise ValueError("근무표를 만들 수 없습니다 — " + " / ".join(f"{e['name']}: {e['msg']}" for e in errs[:5]) + more)
+    factory, dept = os.getenv("TIMESHEET_FACTORY", ""), os.getenv("TIMESHEET_DEPT", "물류팀")
+    files: list[tuple[str, bytes]] = []
+    for s in targets:
+        people = plan["sheets"][s]
+        if not people:
+            continue
+        data = build_timesheet(s, first, people, factory=factory, dept=dept)
+        bad = verify_timesheet(data, people)
+        if bad:
+            raise ValueError(f"{SHEET_TITLE[s]} 파일 검증 실패로 중단 — " + " / ".join(bad[:5]))
+        files.append((_fname(s, first, a, b, people, ids, dept), data))
+    if not files:
+        raise ValueError("내보낼 대상이 없습니다 (구분·인력·기간 확인)")
+    if len(files) == 1:
+        return files[0][0], files[0][1], XLSX
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for n, d in files:
+            z.writestr(n, d)
+    return f"{dept}_{first.month}월 근무시간표.zip", buf.getvalue(), "application/zip"

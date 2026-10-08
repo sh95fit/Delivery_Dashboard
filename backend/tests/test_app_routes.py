@@ -3,4 +3,5 @@ def test_app_starts_with_worklog_routes():
     app.routes 내부 구조는 FastAPI 버전마다 달라서 쓰지 않음"""
     from app.main import app
     paths = set(app.openapi()["paths"])
-    assert {"/worklogs/day", "/worklogs/month", "/worklogs/day/{d}", "/worklogs/{lid}"} <= paths
+    assert {"/worklogs/day", "/worklogs/month", "/worklogs/day/{d}", "/worklogs/{lid}",
+            "/worklogs/export", "/worklogs/export/plan"} <= paths
