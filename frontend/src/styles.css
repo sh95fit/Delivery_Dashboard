@@ -431,3 +431,29 @@ tr.wl-dirty td { background: #fffbeb; }
 .input.wl-def { color: #9ca3af; }
 .input.wl-def:focus { color: inherit; }
 .wl-def-sample { color: #9ca3af; font-weight: 600; }
+
+/* S2-P4a-1e 한 달 입력 팝업: 화면 가득, 가로 스크롤 없음, 세로는 표 안에서만(머리글 고정) */
+.modal-back.modal-back-full { align-items: center; padding: 1vh 1vw; }
+.modal.modal-full { width: min(1480px, 98vw); max-width: 98vw; height: 98vh; max-height: 98vh; }
+.modal-full .modal-head { padding: 8px 16px; }
+.modal-full .modal-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; overflow: hidden; padding: 8px 16px; }
+.modal-full .modal-foot { padding: 8px 16px; }
+.modal-full .wp-tools { margin-bottom: 0; }
+.modal-full .wp-wrap { flex: 1; min-height: 0; max-height: none; overflow: auto; }
+.wp-help { margin-left: auto; }
+.wp-tbl { table-layout: fixed; }
+.wp-tbl thead th { padding: 4px 6px; }
+.wp-tbl td { padding: 1px 6px; height: 24px; overflow: hidden; text-overflow: ellipsis; }
+.wp-tbl .input-sm { width: 100%; max-width: none; height: 21px; padding: 0 4px; }
+.wp-tbl .chip { padding: 0 6px; font-size: 11px; line-height: 17px; }
+.wp-in { display: flex; align-items: center; gap: 4px; }
+.wp-in .input-sm { flex: 0 0 96px; width: 96px; }
+.wp-note { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.wp-tbl col.wp-c-day { width: 76px; }
+.wp-tbl col.wp-c-con { width: 190px; }
+.wp-tbl col.wp-c-in { width: 160px; }
+.wp-tbl col.wp-c-out { width: 104px; }
+.wp-tbl col.wp-c-brk { width: 72px; }
+.wp-tbl col.wp-c-acc { width: 180px; }
+.wp-tbl col.wp-c-paid { width: 130px; }
+.wp-tbl col.wp-c-st { width: 84px; }

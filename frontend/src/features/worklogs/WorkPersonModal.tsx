@@ -21,7 +21,7 @@ type Props = {
   onClose: () => void; onSaved: (msg: string) => void;
 };
 
-/** 월 표에서 한 사람의 한 달 근무를 세로 목록으로 입력 (이름 클릭 = 전체, 날짜 칸 클릭 = 그날로 이동) */
+/** 월 표에서 한 사람의 한 달 근무 입력 (이름 클릭 = 전체, 날짜 칸 클릭 = 그날로 이동). 화면 가득, 가로 스크롤 없음 */
 export default function WorkPersonModal({ person, month, lastDay, focusDay, closed, isAdmin, managers, onClose, onSaved }: Props) {
   const today = todayKst();
   const [y, m] = month.split("-").map(Number);
@@ -38,14 +38,6 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
   const rowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
 
   useEffect(() => { setForms(init); }, [init]);
-  useEffect(() => {
-    if (!focusDay) return;
-    const id = requestAnimationFrame(() => {
-      rowRefs.current[focusDay]?.scrollIntoView({ block: "center" });
-      outRefs.current[focusDay]?.focus();
-    });
-    return () => cancelAnimationFrame(id);
-  }, [focusDay]);
 
   const rows = useMemo(() => Array.from({ length: lastDay }, (_, i) => {
     const d = i + 1;
@@ -62,6 +54,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
   }), [forms, init, person, lastDay, month, today]);
 
   const locked = !isAdmin || closed;
+  const multi = person.contracts.filter((s) => s.contract).length > 1;   // 월 중 계약 변경자만 날짜별 지정 칸
   const saves = rows.filter((r) => r.dirty && r.f.out !== "");
   const dels = rows.filter((r) => r.del);
   const blocked = saves.filter((r) => r.pv.err || !r.c || r.future);
@@ -72,6 +65,17 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
     () => managers.filter((x) => x.name).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "", "ko", { numeric: true })),
     [managers],
   );
+
+  // 처음 열 때: 날짜 칸 클릭 = 그날, 이름 클릭 = 퇴근이 비어 있는 첫날
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      const d = focusDay ?? rows.find((r) => !locked && !r.future && r.c && r.f.out === "")?.d ?? null;
+      if (d == null) return;
+      rowRefs.current[d]?.scrollIntoView({ block: "nearest" });
+      outRefs.current[d]?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [focusDay]);
 
   const set = (d: number, patch: Partial<LogForm>) =>
     setForms((s) => ({ ...s, [d]: { ...(s[d] ?? init[d] ?? EMPTY_FORM), ...patch } }));
@@ -122,7 +126,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
     .join(" / ");
 
   return (
-    <Modal open size="lg" onClose={close}
+    <Modal open size="full" onClose={close}
       title={<>{person.name} <span className="muted small">{INCOME_LABEL[person.income_type]}</span> · {y}년 {m}월 근무 기록</>}
       footer={<>
         <span className="muted small wp-sum">
@@ -147,16 +151,22 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
           <Button size="sm" onClick={fillWeekdays}>빈 평일 → 지정 퇴근 채우기</Button>
           <Button size="sm" variant="ghost" disabled={dirtyCount === 0} onClick={() => setForms(init)}>변경 되돌리기</Button>
         </>}
-      </div>
-      <div className="muted small mb">
-        출근·휴게는 계약 기본값(<span className="wl-def-sample">회색</span>)이 채워져 있습니다. 퇴근(지문)만 입력하고 Enter → 다음 날.
-        지문 출근이 지정보다 늦은 날·휴게가 다른 날만 고치세요. 저장된 날의 퇴근을 지우면 삭제됩니다.
+        <span className="muted small wp-help"
+          title="출근·휴게는 계약 기본값(회색)이 채워져 있고 그대로 두면 계약을 따릅니다. 지문 출근이 지정보다 늦은 날·휴게가 다른 날만 고치세요. 저장된 날의 퇴근을 지우면 삭제됩니다.">
+          퇴근만 입력 → Enter = 다음 날 · <span className="wl-def-sample">회색</span> = 계약 기본값 · 퇴근 지우면 삭제
+        </span>
       </div>
       <div className="wp-wrap">
         <table className="tbl wp-tbl">
+          <colgroup>
+            <col className="wp-c-day" />
+            {multi && <col className="wp-c-con" />}
+            <col className="wp-c-in" /><col className="wp-c-out" /><col className="wp-c-brk" />
+            <col className="wp-c-acc" /><col /><col className="wp-c-paid" /><col className="wp-c-st" />
+          </colgroup>
           <thead>
             <tr>
-              <th>날짜</th><th>지정</th><th>출근(지문)</th><th>퇴근(지문)</th><th>휴게(분)</th>
+              <th>날짜</th>{multi && <th>지정</th>}<th>출근(지문)</th><th>퇴근(지문)</th><th>휴게(분)</th>
               <th>그날 계정</th><th>메모</th><th className="num">유급</th><th>상태</th>
             </tr>
           </thead>
@@ -168,13 +178,16 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
               return (
                 <tr key={r.d} ref={(el) => { rowRefs.current[r.d] = el; }} className={cls || undefined}>
                   <td>{r.d}일 ({WD[r.wd]})</td>
-                  <td className="small">{r.c ? contractText(r.c) : <Chip tone="danger">계약 없음</Chip>}</td>
+                  {multi && <td className="small">{r.c ? contractText(r.c) : <Chip tone="danger">계약 없음</Chip>}</td>}
                   <td>
-                    <input type="time" className={`input input-sm wl-time${isDefaultIn(r.c, r.f.punch) ? " wl-def" : ""}`}
-                      value={r.f.punch} disabled={dis}
-                      onChange={(e) => set(r.d, { punch: e.target.value })}
-                      onBlur={() => { if (!r.f.punch) set(r.d, { punch: defaultIn(r.c) }); }} />
-                    {r.pv.cin != null && toMin(r.f.punch) !== r.pv.cin && <div className="muted small">인정 {hmm(r.pv.cin)}</div>}
+                    <div className="wp-in">
+                      <input type="time" className={`input input-sm wl-time${isDefaultIn(r.c, r.f.punch) ? " wl-def" : ""}`}
+                        value={r.f.punch} disabled={dis}
+                        onChange={(e) => set(r.d, { punch: e.target.value })}
+                        onBlur={() => { if (!r.f.punch) set(r.d, { punch: defaultIn(r.c) }); }} />
+                      {!r.c && !multi && <Chip tone="danger">계약 없음</Chip>}
+                      {r.pv.cin != null && toMin(r.f.punch) !== r.pv.cin && <span className="wp-note">인정 {hmm(r.pv.cin)}</span>}
+                    </div>
                   </td>
                   <td>
                     <input type="time" className="input input-sm wl-time" value={r.f.out} disabled={dis}
