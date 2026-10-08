@@ -411,3 +411,18 @@ tr.wl-dirty td { background: #fffbeb; }
 .wl-cell.wl-empty { min-height: 40px; width: 100%; justify-content: center; color: #cbd5e1; }
 .wl-month .wl-exp { background: #f8fafc; color: #64748b; }
 .wl-month tr.wl-total td { font-weight: 600; border-top: 2px solid #e5e7eb; }
+
+/* S2-P4a-1c 월 표 → 사람별 한 달 입력 팝업 */
+.wl-namebtn { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: inherit; cursor: pointer; text-align: left; }
+.wl-namebtn:hover { color: #2563eb; text-decoration: underline; }
+.wp-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+.wp-wrap { max-height: min(62vh, 680px); overflow: auto; border: 1px solid #e5e7eb; border-radius: 8px; }
+.wp-tbl { width: 100%; }
+.wp-tbl thead th { position: sticky; top: 0; z-index: 1; background: #f8fafc; }
+.wp-tbl td { padding: 4px 6px; vertical-align: middle; white-space: nowrap; }
+.wp-tbl tr.wp-sun td:first-child { color: #c00000; font-weight: 600; }
+.wp-tbl tr.wp-sat td:first-child { color: #1f4e9e; font-weight: 600; }
+.wp-tbl tr.wp-focus td { background: #fff7d6; }
+.wp-sum { margin-right: auto; }
+.wl-bad-text { color: #c00000; }
+.mb { margin-bottom: 8px; }

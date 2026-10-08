@@ -15,6 +15,7 @@ export default function WorkLogPage() {
   const [date, setDate] = useState(todayKst());
   const [month, setMonth] = useState(todayKst().slice(0, 7));
   const [managers, setManagers] = useState<ManagerRow[]>([]);
+  const [ver, setVer] = useState(0);          // 월 표 팝업 저장 → 일일 입력 다시 불러오기
 
   useEffect(() => { listManagers().then((r) => setManagers(r.items)).catch(() => setManagers([])); }, []);
 
@@ -26,12 +27,12 @@ export default function WorkLogPage() {
       </div>
       {/* 일일 입력은 숨기기만 해서 탭을 오가도 입력 중인 값 유지 */}
       <div hidden={tab !== "day"}>
-        <WorkDayTab date={date} managers={managers} isAdmin={isAdmin}
+        <WorkDayTab date={date} managers={managers} isAdmin={isAdmin} reloadKey={ver}
           onDate={(d) => { setDate(d); setMonth(d.slice(0, 7)); }} />
       </div>
       {tab === "month" && (
-        <WorkMonthTab month={month} onMonth={setMonth}
-          onPickDay={(d) => { setDate(d); setTab("day"); }} />
+        <WorkMonthTab month={month} onMonth={setMonth} managers={managers} isAdmin={isAdmin}
+          onSaved={() => setVer((v) => v + 1)} />
       )}
     </PageLayout>
   );

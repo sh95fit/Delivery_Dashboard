@@ -12,6 +12,7 @@ import { deleteWorkLog, getWorkDay, hmm, saveWorkDay, toMin } from "@/api/worklo
 import type { WorkDayItem, WorkDayView, WorkLogInput } from "@/api/worklogs";
 import { errText } from "@/lib/form";
 import { num, todayKst } from "@/lib/format";
+import { preview } from "./calc";
 
 type Form = { punch: string; out: string; brk: string; mid: string; memo: string };
 const EMPTY: Form = { punch: "", out: "", brk: "", mid: "", memo: "" };
@@ -34,23 +35,10 @@ function initForm(it: WorkDayItem): Form {
 const same = (a: Form, b: Form) =>
   a.punch === b.punch && a.out === b.out && a.brk === b.brk && a.mid === b.mid && a.memo.trim() === b.memo.trim();
 
-/** 화면 미리보기. 저장 시 서버가 같은 규칙으로 다시 계산·검증 */
-function preview(it: WorkDayItem, f: Form): { cin: number | null; paid: number | null; err: string } {
-  const c = it.contract;
-  const ws = toMin(c?.work_start);
-  const out = toMin(f.out);
-  if (!c || ws == null || out == null) return { cin: null, paid: null, err: "" };
-  const cin = Math.max(toMin(f.punch) ?? ws, ws);
-  const brk = f.brk !== "" ? Number(f.brk) : c.break_paid ? 0 : c.break_min;
-  if (out <= cin) return { cin, paid: null, err: "퇴근이 출근보다 빠름" };
-  if (brk >= out - cin) return { cin, paid: null, err: "휴게가 근무보다 김" };
-  return { cin, paid: out - cin - brk, err: "" };
-}
-
-type Props = { date: string; onDate: (d: string) => void; managers: ManagerRow[]; isAdmin: boolean };
+type Props = { date: string; onDate: (d: string) => void; managers: ManagerRow[]; isAdmin: boolean; reloadKey?: number };
 type Result = { at: string; saved: number; unchanged: number; warns: Record<string, string[]> };
 
-export default function WorkDayTab({ date, onDate, managers, isAdmin }: Props) {
+export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey = 0 }: Props) {
   const [view, setView] = useState<WorkDayView | null>(null);
   const [forms, setForms] = useState<Record<number, Form>>({});
   const [loading, setLoading] = useState(true);
@@ -78,12 +66,14 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin }: Props) {
   const rows = useMemo(() => (view?.items ?? []).map((it) => {
     const f = forms[it.worker_id] ?? EMPTY;
     const dirty = !same(f, initForm(it));
-    return { it, f, dirty, pv: preview(it, f), cleared: dirty && !!it.log && f.out === "" };
+    return { it, f, dirty, pv: preview(it.contract, f), cleared: dirty && !!it.log && f.out === "" };
   }), [view, forms]);
 
   const toSave = rows.filter((r) => r.dirty && r.f.out !== "");
   const blocked = toSave.filter((r) => r.pv.err || !r.it.contract);
   const dirtyCount = rows.filter((r) => r.dirty).length;
+  // 월 표 팝업에서 저장하면 다시 불러옴 (입력 중인 값이 있으면 덮어쓰지 않음)
+  useEffect(() => { if (reloadKey && dirtyCount === 0) load(date); }, [reloadKey]);
   const locked = !isAdmin || !view || view.closed || view.future;
   const sortedManagers = useMemo(
     () => managers.filter((m) => m.name).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "", "ko", { numeric: true })),

@@ -20,7 +20,7 @@ export interface WorkDayView { date: string; closed: boolean; future: boolean; i
 export interface PaySet { supply: number; vat: number; total: number }
 export interface WorkMonthPerson {
   worker_id: number; name: string; income_type: IncomeType; active: boolean;
-  sheet: "labor" | "business" | null; contract: WorkContract | null;
+  sheet: "labor" | "business" | null; contract: WorkContract | null; contracts: ContractSpan[]; accounts: AccountSpan[];
   days: Record<string, WorkLog>;
   summary: { days: number; nocontract: number; paid_min: number; ot_min: number; base: number; ot_allow: number };
   pay: { sheet: PaySet; ot_allow: number | null; expected: PaySet | null };
@@ -47,3 +47,20 @@ export function toMin(s?: string | null): number | null {
 /** 425 → "7:05" (근무표 합계 표기) */
 export const hmm = (m?: number | null) =>
   m == null ? "-" : `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
+
+/** 월 표 팝업용: 그 달에 적용되는 계약·고정 계정 이력 (시작일 순) */
+export interface ContractSpan { from: string; contract: WorkContract | null }
+export interface AccountSpan { from: string; manager_id: number | null; manager_name: string | null }
+export type WorkLogDateInput = Omit<WorkLogInput, "worker_id"> & { work_date: string };
+export interface SavePersonResult {
+  ok: boolean; saved: number; unchanged: number; deleted: number; warns: Record<string, string[]>;
+}
+export const saveWorkPerson = (wid: number, items: WorkLogDateInput[], delete_ids: number[]) =>
+  put<SavePersonResult>(`/api/worklogs/person/${wid}`, { items, delete_ids });
+
+/** 시작일 순 이력에서 d 날짜에 적용되는 항목 */
+export function spanOn<T extends { from: string }>(spans: T[], d: string): T | null {
+  let hit: T | null = null;
+  for (const s of spans) if (s.from <= d) hit = s;
+  return hit;
+}
