@@ -426,3 +426,8 @@ tr.wl-dirty td { background: #fffbeb; }
 .wp-sum { margin-right: auto; }
 .wl-bad-text { color: #c00000; }
 .mb { margin-bottom: 8px; }
+
+/* S2-P4a-1d 계약 기본값(회색) vs 직접 입력(검정) */
+.input.wl-def { color: #9ca3af; }
+.input.wl-def:focus { color: inherit; }
+.wl-def-sample { color: #9ca3af; font-weight: 600; }

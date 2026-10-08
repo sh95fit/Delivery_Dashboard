@@ -12,35 +12,24 @@ import { deleteWorkLog, getWorkDay, hmm, saveWorkDay } from "@/api/worklogs";
 import type { WorkDayItem, WorkDayView, WorkLogInput } from "@/api/worklogs";
 import { errText } from "@/lib/form";
 import { num, todayKst } from "@/lib/format";
-import { preview } from "./calc";
+import { EMPTY_FORM, contractText, defaultBreak, defaultIn, isDefaultBreak, isDefaultIn, logToForm, preview, sameForm, toInput } from "./calc";
+import type { LogForm } from "./calc";
 
-type Form = { punch: string; out: string; brk: string; mid: string; memo: string };
-const EMPTY: Form = { punch: "", out: "", brk: "", mid: "", memo: "" };
 const WD = "일월화수목금토";
-
 const wd = (d: string) => WD[new Date(`${d}T00:00:00Z`).getUTCDay()];
 function shift(d: string, n: number) {
   const t = new Date(`${d}T00:00:00Z`);
   t.setUTCDate(t.getUTCDate() + n);
   return t.toISOString().slice(0, 10);
 }
-function initForm(it: WorkDayItem): Form {
-  const l = it.log;
-  if (!l) return EMPTY;
-  return {
-    punch: l.punch_in ?? "", out: l.clock_out ?? "", brk: l.break_min == null ? "" : String(l.break_min),
-    mid: l.manager_id == null ? "" : String(l.manager_id), memo: l.memo ?? "",
-  };
-}
-const same = (a: Form, b: Form) =>
-  a.punch === b.punch && a.out === b.out && a.brk === b.brk && a.mid === b.mid && a.memo.trim() === b.memo.trim();
+const initOf = (it: WorkDayItem) => logToForm(it.log, it.contract);
 
 type Props = { date: string; onDate: (d: string) => void; managers: ManagerRow[]; isAdmin: boolean; reloadKey?: number };
 type Result = { at: string; saved: number; unchanged: number; warns: Record<string, string[]> };
 
 export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey = 0 }: Props) {
   const [view, setView] = useState<WorkDayView | null>(null);
-  const [forms, setForms] = useState<Record<number, Form>>({});
+  const [forms, setForms] = useState<Record<number, LogForm>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -52,7 +41,7 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
     try {
       const v = await getWorkDay(d);
       setView(v);
-      setForms(Object.fromEntries(v.items.map((it) => [it.worker_id, initForm(it)])));
+      setForms(Object.fromEntries(v.items.map((it) => [it.worker_id, initOf(it)])));
       setError("");
     } catch (e) {
       setView(null);
@@ -64,8 +53,9 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
   useEffect(() => { setResult(null); load(date); }, [date]);
 
   const rows = useMemo(() => (view?.items ?? []).map((it) => {
-    const f = forms[it.worker_id] ?? EMPTY;
-    const dirty = !same(f, initForm(it));
+    const init = initOf(it);
+    const f = forms[it.worker_id] ?? init;
+    const dirty = !sameForm(f, init);
     return { it, f, dirty, pv: preview(it.contract, f), cleared: dirty && !!it.log && f.out === "" };
   }), [view, forms]);
 
@@ -80,8 +70,8 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
     [managers],
   );
 
-  function set(wid: number, patch: Partial<Form>) {
-    setForms((s) => ({ ...s, [wid]: { ...(s[wid] ?? EMPTY), ...patch } }));
+  function set(wid: number, patch: Partial<LogForm>) {
+    setForms((s) => ({ ...s, [wid]: { ...(s[wid] ?? EMPTY_FORM), ...patch } }));
   }
   function go(d: string) {
     if (d === date) return;
@@ -89,19 +79,17 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
     onDate(d);
   }
   function next(i: number) {
-    const n = rows[i + 1];
-    if (n) outRefs.current[n.it.worker_id]?.focus();
+    for (let k = i + 1; k < rows.length; k++) {
+      const el = outRefs.current[rows[k].it.worker_id];
+      if (el && !el.disabled) { el.focus(); return; }
+    }
   }
 
   async function save() {
     if (!view || toSave.length === 0) return;
     setBusy(true);
     try {
-      const body: WorkLogInput[] = toSave.map(({ it, f }) => ({
-        worker_id: it.worker_id, punch_in: f.punch || null, clock_out: f.out,
-        break_min: f.brk === "" ? null : Number(f.brk),
-        manager_id: f.mid === "" ? null : Number(f.mid), memo: f.memo.trim() || null,
-      }));
+      const body: WorkLogInput[] = toSave.map(({ it, f }) => ({ worker_id: it.worker_id, ...toInput(it.contract, f) }));
       const r = await saveWorkDay(view.date, body);
       await load(view.date);
       setResult({ at: nowHms(), saved: r.saved, unchanged: r.unchanged, warns: r.warns });
@@ -147,7 +135,11 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
           )}
         </>
       }
-      desc="퇴근(지문 시각)만 입력하면 됩니다. 출근은 지문이 지정 시각보다 늦은 날만 입력하세요 (빠르면 지정 시각으로 인정). 휴게를 비우면 계약 기준(무급만 차감)입니다. 기록이 없는 날은 비근무입니다."
+      desc={<>
+        출근·휴게는 계약 기본값이 <span className="wl-def-sample">회색</span>으로 채워져 있습니다.
+        퇴근(지문)만 입력하고, 지문 출근이 지정보다 늦은 날이나 휴게가 다른 날만 고치세요 (고친 값은 검정).
+        지문이 지정보다 빠르면 지정 시각으로 인정. 휴게 = 유급시간에서 빼는 분. 기록이 없는 날은 비근무입니다.
+      </>}
     >
       {error && <ErrorBox message={error} />}
       {result && (
@@ -166,17 +158,23 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
       ) : rows.length === 0 ? (
         <div className="muted small">이 날짜에 근무 대상(활성 시급 계약)이 없습니다.</div>
       ) : (
-        <DataTable columns={["이름", "지정 근무", "퇴근(지문)", "출근(지문)", "휴게(분)", "그날 계정", "메모",
+        <DataTable columns={["이름", "지정", "출근(지문)", "퇴근(지문)", "휴게(분)", "그날 계정", "메모",
           { label: "유급", num: true }, "상태", ""]}>
           {rows.map(({ it, f, dirty, pv, cleared }, i) => {
             const c = it.contract;
             const dis = locked || !c;
-            const defBrk = c ? (c.break_paid ? 0 : c.break_min) : 0;
             const cls = [it.active ? "" : "off", dirty ? "wl-dirty" : ""].filter(Boolean).join(" ");
             return (
               <tr key={it.worker_id} className={cls || undefined}>
                 <td>{it.name} <span className="muted small">{INCOME_LABEL[it.income_type]}</span></td>
-                <td className="small">{c ? `${c.work_start}–${c.work_end}` : <Chip tone="danger">계약 없음</Chip>}</td>
+                <td className="small">{c ? contractText(c) : <Chip tone="danger">계약 없음</Chip>}</td>
+                <td>
+                  <input type="time" className={`input input-sm wl-time${isDefaultIn(c, f.punch) ? " wl-def" : ""}`}
+                    value={f.punch} disabled={dis}
+                    onChange={(e) => set(it.worker_id, { punch: e.target.value })}
+                    onBlur={() => { if (!f.punch) set(it.worker_id, { punch: defaultIn(c) }); }} />
+                  {pv.cin != null && toMinSafe(f.punch) !== pv.cin && <div className="muted small">인정 {hmm(pv.cin)}</div>}
+                </td>
                 <td>
                   <input type="time" className="input input-sm wl-time" value={f.out} disabled={dis}
                     ref={(el) => { outRefs.current[it.worker_id] = el; }}
@@ -184,14 +182,10 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
                     onChange={(e) => set(it.worker_id, { out: e.target.value })} />
                 </td>
                 <td>
-                  <input type="time" className="input input-sm wl-time" value={f.punch} disabled={dis}
-                    title={c ? `비우면 지정 출근 ${c.work_start}` : undefined}
-                    onChange={(e) => set(it.worker_id, { punch: e.target.value })} />
-                  {f.punch && pv.cin != null && <div className="muted small">인정 {hmm(pv.cin)}</div>}
-                </td>
-                <td>
-                  <input type="number" min={0} max={600} className="input input-sm wl-num" value={f.brk} disabled={dis}
-                    placeholder={String(defBrk)} onChange={(e) => set(it.worker_id, { brk: e.target.value })} />
+                  <input type="number" min={0} max={600} className={`input input-sm wl-num${isDefaultBreak(c, f.brk) ? " wl-def" : ""}`}
+                    value={f.brk} disabled={dis}
+                    onChange={(e) => set(it.worker_id, { brk: e.target.value })}
+                    onBlur={() => { if (f.brk === "" && c) set(it.worker_id, { brk: String(defaultBreak(c)) }); }} />
                 </td>
                 <td>
                   <select className="input input-sm wl-sel" value={f.mid} disabled={dis}
@@ -205,7 +199,7 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
                     onChange={(e) => set(it.worker_id, { memo: e.target.value })} />
                 </td>
                 <td className="num">
-                  {pv.err ? <Chip tone="danger">{pv.err}</Chip> : hmm(pv.paid)}
+                  {pv.err ? <Chip tone="danger">{pv.err}</Chip> : f.out ? hmm(pv.paid) : ""}
                   {!dirty && it.log?.ot_min ? <div className="muted small">계약 외 {hmm(it.log.ot_min)}</div> : null}
                 </td>
                 <td>
@@ -222,4 +216,10 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
       )}
     </Panel>
   );
+}
+
+/** "06:41" → 401 (인정 출근 안내 표시 여부 판단용) */
+function toMinSafe(v: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})/.exec(v);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 }

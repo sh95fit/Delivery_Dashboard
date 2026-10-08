@@ -5,14 +5,15 @@ import Chip from "@/components/ui/Chip";
 import ErrorBox from "@/components/ui/ErrorBox";
 import type { ManagerRow } from "@/api/masters";
 import { INCOME_LABEL } from "@/api/workers";
-import { hmm, saveWorkPerson, spanOn } from "@/api/worklogs";
+import { hmm, saveWorkPerson, spanOn, toMin } from "@/api/worklogs";
 import type { WorkLogDateInput, WorkMonthPerson } from "@/api/worklogs";
 import { errText } from "@/lib/form";
 import { num, todayKst } from "@/lib/format";
-import { EMPTY_FORM, defaultBreak, logToForm, preview, sameForm } from "./calc";
+import { EMPTY_FORM, contractText, defaultBreak, defaultIn, isDefaultBreak, isDefaultIn, logToForm, preview, sameForm, toInput } from "./calc";
 import type { LogForm } from "./calc";
 
 const WD = "일월화수목금토";
+const isoOf = (month: string, d: number) => `${month}-${String(d).padStart(2, "0")}`;
 
 type Props = {
   person: WorkMonthPerson; month: string; lastDay: number; focusDay: number | null;
@@ -24,11 +25,12 @@ type Props = {
 export default function WorkPersonModal({ person, month, lastDay, focusDay, closed, isAdmin, managers, onClose, onSaved }: Props) {
   const today = todayKst();
   const [y, m] = month.split("-").map(Number);
+  const contractOn = (d: number) => spanOn(person.contracts, isoOf(month, d))?.contract ?? null;
   const init = useMemo(() => {
     const o: Record<number, LogForm> = {};
-    for (let d = 1; d <= lastDay; d++) o[d] = logToForm(person.days[String(d)] ?? null);
+    for (let d = 1; d <= lastDay; d++) o[d] = logToForm(person.days[String(d)] ?? null, contractOn(d));
     return o;
-  }, [person, lastDay]);
+  }, [person, lastDay, month]);
   const [forms, setForms] = useState<Record<number, LogForm>>(init);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -47,11 +49,11 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
 
   const rows = useMemo(() => Array.from({ length: lastDay }, (_, i) => {
     const d = i + 1;
-    const iso = `${month}-${String(d).padStart(2, "0")}`;
+    const iso = isoOf(month, d);
     const log = person.days[String(d)] ?? null;
-    const c = spanOn(person.contracts, iso)?.contract ?? null;
+    const c = contractOn(d);
     const acc = spanOn(person.accounts, iso);
-    const f = forms[d] ?? EMPTY_FORM;
+    const f = forms[d] ?? init[d] ?? EMPTY_FORM;
     const dirty = !sameForm(f, init[d] ?? EMPTY_FORM);
     return {
       d, iso, wd: new Date(`${iso}T00:00:00Z`).getUTCDay(), log, c, acc, f, dirty,
@@ -72,7 +74,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
   );
 
   const set = (d: number, patch: Partial<LogForm>) =>
-    setForms((s) => ({ ...s, [d]: { ...(s[d] ?? EMPTY_FORM), ...patch } }));
+    setForms((s) => ({ ...s, [d]: { ...(s[d] ?? init[d] ?? EMPTY_FORM), ...patch } }));
 
   function next(d: number) {
     for (let k = d + 1; k <= lastDay; k++) {
@@ -87,7 +89,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
     if (!confirm(`빈 평일 ${targets.length}일에 지정 퇴근 시각을 채웁니다. 저장 전에 실제와 다른 날만 고치세요.`)) return;
     setForms((s) => {
       const o = { ...s };
-      for (const r of targets) o[r.d] = { ...(o[r.d] ?? EMPTY_FORM), out: r.c!.work_end! };
+      for (const r of targets) o[r.d] = { ...(o[r.d] ?? init[r.d] ?? EMPTY_FORM), out: r.c!.work_end! };
       return o;
     });
   }
@@ -102,11 +104,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
     setBusy(true);
     setError("");
     try {
-      const items: WorkLogDateInput[] = saves.map(({ iso, f }) => ({
-        work_date: iso, punch_in: f.punch || null, clock_out: f.out,
-        break_min: f.brk === "" ? null : Number(f.brk),
-        manager_id: f.mid === "" ? null : Number(f.mid), memo: f.memo.trim() || null,
-      }));
+      const items: WorkLogDateInput[] = saves.map(({ iso, c, f }) => ({ work_date: iso, ...toInput(c, f) }));
       const r = await saveWorkPerson(person.worker_id, items, dels.map((x) => x.log!.id));
       const w = Object.entries(r.warns).map(([k, v]) => `${k} ${v.join(", ")}`);
       onSaved(`${person.name}: 저장 ${num(r.saved)}건${r.deleted ? ` · 삭제 ${num(r.deleted)}건` : ""}`
@@ -120,7 +118,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
 
   const contractsText = person.contracts
     .filter((s) => s.contract)
-    .map((s, i) => `${i === 0 ? "" : `${Number(s.from.slice(5, 7))}/${Number(s.from.slice(8))}~ `}${s.contract!.work_start}–${s.contract!.work_end}`)
+    .map((s, i) => `${i === 0 ? "" : `${Number(s.from.slice(5, 7))}/${Number(s.from.slice(8))}~ `}${contractText(s.contract)}`)
     .join(" / ");
 
   return (
@@ -151,14 +149,14 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
         </>}
       </div>
       <div className="muted small mb">
-        퇴근(지문)만 입력하고 Enter → 다음 날. 출근은 지문이 지정 시각보다 늦은 날만, 휴게는 비우면 계약 기준.
-        저장된 날의 퇴근을 지우면 삭제됩니다.
+        출근·휴게는 계약 기본값(<span className="wl-def-sample">회색</span>)이 채워져 있습니다. 퇴근(지문)만 입력하고 Enter → 다음 날.
+        지문 출근이 지정보다 늦은 날·휴게가 다른 날만 고치세요. 저장된 날의 퇴근을 지우면 삭제됩니다.
       </div>
       <div className="wp-wrap">
         <table className="tbl wp-tbl">
           <thead>
             <tr>
-              <th>날짜</th><th>지정</th><th>퇴근(지문)</th><th>출근(지문)</th><th>휴게(분)</th>
+              <th>날짜</th><th>지정</th><th>출근(지문)</th><th>퇴근(지문)</th><th>휴게(분)</th>
               <th>그날 계정</th><th>메모</th><th className="num">유급</th><th>상태</th>
             </tr>
           </thead>
@@ -170,7 +168,14 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
               return (
                 <tr key={r.d} ref={(el) => { rowRefs.current[r.d] = el; }} className={cls || undefined}>
                   <td>{r.d}일 ({WD[r.wd]})</td>
-                  <td className="small">{r.c ? `${r.c.work_start}–${r.c.work_end}` : <Chip tone="danger">계약 없음</Chip>}</td>
+                  <td className="small">{r.c ? contractText(r.c) : <Chip tone="danger">계약 없음</Chip>}</td>
+                  <td>
+                    <input type="time" className={`input input-sm wl-time${isDefaultIn(r.c, r.f.punch) ? " wl-def" : ""}`}
+                      value={r.f.punch} disabled={dis}
+                      onChange={(e) => set(r.d, { punch: e.target.value })}
+                      onBlur={() => { if (!r.f.punch) set(r.d, { punch: defaultIn(r.c) }); }} />
+                    {r.pv.cin != null && toMin(r.f.punch) !== r.pv.cin && <div className="muted small">인정 {hmm(r.pv.cin)}</div>}
+                  </td>
                   <td>
                     <input type="time" className="input input-sm wl-time" value={r.f.out} disabled={dis}
                       ref={(el) => { outRefs.current[r.d] = el; }}
@@ -178,14 +183,10 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
                       onChange={(e) => set(r.d, { out: e.target.value })} />
                   </td>
                   <td>
-                    <input type="time" className="input input-sm wl-time" value={r.f.punch} disabled={dis}
-                      title={r.c ? `비우면 지정 출근 ${r.c.work_start}` : undefined}
-                      onChange={(e) => set(r.d, { punch: e.target.value })} />
-                    {r.f.punch && r.pv.cin != null && <div className="muted small">인정 {hmm(r.pv.cin)}</div>}
-                  </td>
-                  <td>
-                    <input type="number" min={0} max={600} className="input input-sm wl-num" value={r.f.brk} disabled={dis}
-                      placeholder={String(defaultBreak(r.c))} onChange={(e) => set(r.d, { brk: e.target.value })} />
+                    <input type="number" min={0} max={600} className={`input input-sm wl-num${isDefaultBreak(r.c, r.f.brk) ? " wl-def" : ""}`}
+                      value={r.f.brk} disabled={dis}
+                      onChange={(e) => set(r.d, { brk: e.target.value })}
+                      onBlur={() => { if (r.f.brk === "" && r.c) set(r.d, { brk: String(defaultBreak(r.c)) }); }} />
                   </td>
                   <td>
                     <select className="input input-sm wl-sel" value={r.f.mid} disabled={dis}
