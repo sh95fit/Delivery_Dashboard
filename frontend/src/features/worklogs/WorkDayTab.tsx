@@ -8,7 +8,7 @@ import Spinner from "@/components/ui/Spinner";
 import { nowHms } from "@/components/ui/SaveNote";
 import type { ManagerRow } from "@/api/masters";
 import { INCOME_LABEL } from "@/api/workers";
-import { deleteWorkLog, getWorkDay, hmm, saveWorkDay, toMin } from "@/api/worklogs";
+import { deleteWorkLog, getWorkDay, hmm, saveWorkDay } from "@/api/worklogs";
 import type { WorkDayItem, WorkDayView, WorkLogInput } from "@/api/worklogs";
 import { errText } from "@/lib/form";
 import { num, todayKst } from "@/lib/format";
