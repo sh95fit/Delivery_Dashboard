@@ -14,7 +14,6 @@ from app.services import dash_db
 from app.services.cost_calc import effective_on
 from app.services.manager_service import _hm, _iso, today
 from app.services.worker_service import _managers
-from app.services.worklog_calc import check_log, day_result, month_summary
 from app.services.timesheet_export import SHEET_TITLE, build_timesheet, schedule_note, verify_timesheet
 from app.services.worker_calc import pay_total
 from app.services.worklog_calc import check_log, day_result, month_summary, sheet_break

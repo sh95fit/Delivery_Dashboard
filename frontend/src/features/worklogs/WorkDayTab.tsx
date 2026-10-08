@@ -61,6 +61,7 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
 
   const toSave = rows.filter((r) => r.dirty && r.f.out !== "");
   const blocked = toSave.filter((r) => r.pv.err || !r.it.contract);
+  const needOut = rows.filter((r) => r.dirty && !r.it.log && r.f.out === "");
   const dirtyCount = rows.filter((r) => r.dirty).length;
   // 월 표 팝업에서 저장하면 다시 불러옴 (입력 중인 값이 있으면 덮어쓰지 않음)
   useEffect(() => { if (reloadKey && dirtyCount === 0) load(date); }, [reloadKey]);
@@ -129,8 +130,8 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
           <Button size="sm" onClick={() => go(todayKst())}>오늘</Button>
           {isAdmin && (
             <Button size="sm" variant="primary" onClick={save}
-              disabled={locked || busy || toSave.length === 0 || blocked.length > 0}>
-              {busy ? "저장 중…" : `변경 ${num(toSave.length)}건 저장`}
+              disabled={locked || busy || toSave.length === 0 || blocked.length > 0 || needOut.length > 0}>
+              {busy ? "저장 중…" : `${num(toSave.length)}건 저장`}
             </Button>
           )}
         </>
@@ -204,7 +205,8 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
                 </td>
                 <td>
                   {cleared ? <Chip tone="caution">퇴근 비움 · 삭제 버튼 사용</Chip>
-                    : dirty ? <Chip tone="caution">변경</Chip>
+                    : dirty && !it.log && f.out === "" ? <Chip tone="danger">퇴근 필요</Chip>
+                    : dirty ? <Chip tone="caution">{it.log ? "수정 · 저장 전" : "새 입력 · 저장 전"}</Chip>
                     : it.log ? <Chip tone="ok">저장됨</Chip>
                     : <span className="muted small">미입력</span>}
                 </td>

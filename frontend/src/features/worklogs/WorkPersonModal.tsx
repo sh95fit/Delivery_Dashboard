@@ -58,6 +58,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
   const saves = rows.filter((r) => r.dirty && r.f.out !== "");
   const dels = rows.filter((r) => r.del);
   const blocked = saves.filter((r) => r.pv.err || !r.c || r.future);
+  const needOut = rows.filter((r) => r.dirty && !r.log && r.f.out === "");   // 퇴근 없이 출근·메모만 고친 날 → 저장 안 됨
   const dirtyCount = rows.filter((r) => r.dirty).length;
   const worked = rows.filter((r) => r.f.out !== "" && r.pv.paid != null);
   const paidSum = worked.reduce((a, r) => a + (r.pv.paid ?? 0), 0);
@@ -99,7 +100,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
   }
 
   function close() {
-    if (dirtyCount > 0 && !confirm(`저장하지 않은 변경 ${dirtyCount}건이 있습니다. 버리고 닫을까요?`)) return;
+    if (dirtyCount > 0 && !confirm(`저장하지 않은 입력 ${dirtyCount}건이 있습니다. 취소하고 닫을까요?`)) return;
     onClose();
   }
 
@@ -132,12 +133,13 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
         <span className="muted small wp-sum">
           입력 기준 근무 {num(worked.length)}일 · 유급 {hmm(paidSum)}
           {blocked.length > 0 && <> · <b className="wl-bad-text">저장 불가 {blocked.length}건</b></>}
+          {needOut.length > 0 && <> · <b className="wl-bad-text">퇴근 시간 입력력 필요 {needOut.length}건</b></>}
         </span>
         <Button onClick={close}>닫기</Button>
         {!locked && (
           <Button variant="primary" onClick={save}
-            disabled={busy || (saves.length === 0 && dels.length === 0) || blocked.length > 0}>
-            {busy ? "저장 중…" : `변경 ${num(saves.length)}건${dels.length ? ` · 삭제 ${num(dels.length)}건` : ""} 저장`}
+            disabled={busy || (saves.length === 0 && dels.length === 0) || blocked.length > 0 || needOut.length > 0}>
+            {busy ? "저장 중…" : `${num(saves.length)}건 저장${dels.length ? ` · 삭제 ${num(dels.length)}건` : ""}`}
           </Button>
         )}
       </>}
@@ -214,8 +216,9 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
                   </td>
                   <td className="num">{r.pv.err ? <Chip tone="danger">{r.pv.err}</Chip> : r.f.out ? hmm(r.pv.paid) : ""}</td>
                   <td>
-                    {r.del ? <Chip tone="caution">삭제 예정</Chip>
-                      : r.dirty ? <Chip tone="caution">변경</Chip>
+                    {r.del ? <Chip tone="caution">삭제 · 저장 전</Chip>
+                      : r.dirty && !r.log && r.f.out === "" ? <Chip tone="danger">퇴근 필요</Chip>
+                      : r.dirty ? <Chip tone="caution">{r.log ? "수정 · 저장 전" : "새 입력 · 저장 전"}</Chip>
                       : r.log ? <Chip tone="ok">저장됨</Chip>
                       : r.future ? <span className="muted small">미래</span> : null}
                   </td>
