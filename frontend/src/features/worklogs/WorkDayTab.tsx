@@ -76,7 +76,7 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
   }
   function go(d: string) {
     if (d === date) return;
-    if (dirtyCount > 0 && !confirm(`저장하지 않은 변경 ${dirtyCount}건이 있습니다. 버리고 이동할까요?`)) return;
+    if (dirtyCount > 0 && !confirm(`저장하지 않은 입력 ${dirtyCount}건이 있습니다. 취소하고 이동할까요?`)) return;
     onDate(d);
   }
   function next(i: number) {
@@ -145,13 +145,19 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
       {error && <ErrorBox message={error} />}
       {result && (
         <div className="notice mt">
-          ✓ {result.at} 저장 {num(result.saved)}건{result.unchanged ? ` · 변경 없음 ${num(result.unchanged)}건` : ""}
+          ✓ {result.at} 저장 {num(result.saved)}건{result.unchanged ? ` · 기존과 같아 건너뜀 ${num(result.unchanged)}건` : ""}
           {Object.entries(result.warns).map(([n, ws]) => <div key={n} className="wl-warn">⚠ {n}: {ws.join(", ")}</div>)}
         </div>
       )}
       {blocked.length > 0 && (
         <div className="wl-block">
           저장 불가 {blocked.length}건: {blocked.map((r) => `${r.it.name}(${r.pv.err || "계약 없음"})`).join(", ")}
+        </div>
+      )}
+      {needOut.length > 0 && (
+        <div className="wl-block">
+          퇴근 입력 필요 {needOut.length}건: {needOut.map((r) => r.it.name).join(", ")}
+          {" "}(출근·휴게·메모만 바꾼 상태 — 퇴근을 넣거나 원래대로 되돌리세요)
         </div>
       )}
       {loading ? (

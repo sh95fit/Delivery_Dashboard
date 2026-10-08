@@ -113,7 +113,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
       const r = await saveWorkPerson(person.worker_id, items, dels.map((x) => x.log!.id));
       const w = Object.entries(r.warns).map(([k, v]) => `${k} ${v.join(", ")}`);
       onSaved(`${person.name}: 저장 ${num(r.saved)}건${r.deleted ? ` · 삭제 ${num(r.deleted)}건` : ""}`
-        + `${r.unchanged ? ` · 변경 없음 ${num(r.unchanged)}건` : ""}${w.length ? ` · ⚠ ${w.join(" / ")}` : ""}`);
+        + `${r.unchanged ? ` · 기존과 같아 건너뜀 ${num(r.unchanged)}건` : ""}${w.length ? ` · ⚠ ${w.join(" / ")}` : ""}`);
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -133,7 +133,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
         <span className="muted small wp-sum">
           입력 기준 근무 {num(worked.length)}일 · 유급 {hmm(paidSum)}
           {blocked.length > 0 && <> · <b className="wl-bad-text">저장 불가 {blocked.length}건</b></>}
-          {needOut.length > 0 && <> · <b className="wl-bad-text">퇴근 시간 입력력 필요 {needOut.length}건</b></>}
+          {needOut.length > 0 && <> · <b className="wl-bad-text">퇴근 입력 필요 {needOut.length}건</b></>}
         </span>
         <Button onClick={close}>닫기</Button>
         {!locked && (
@@ -151,7 +151,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
         {!isAdmin && <Chip>조회 전용</Chip>}
         {!locked && <>
           <Button size="sm" onClick={fillWeekdays}>빈 평일 → 지정 퇴근 채우기</Button>
-          <Button size="sm" variant="ghost" disabled={dirtyCount === 0} onClick={() => setForms(init)}>변경 되돌리기</Button>
+          <Button size="sm" variant="ghost" disabled={dirtyCount === 0} onClick={() => setForms(init)}>저장 전 입력 취소</Button>
         </>}
         <span className="muted small wp-help"
           title="출근·휴게는 계약 기본값(회색)이 채워져 있고 그대로 두면 계약을 따릅니다. 지문 출근이 지정보다 늦은 날·휴게가 다른 날만 고치세요. 저장된 날의 퇴근을 지우면 삭제됩니다.">
