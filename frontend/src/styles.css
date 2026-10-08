@@ -457,3 +457,20 @@ tr.wl-dirty td { background: #fffbeb; }
 .wp-tbl col.wp-c-acc { width: 180px; }
 .wp-tbl col.wp-c-paid { width: 130px; }
 .wp-tbl col.wp-c-st { width: 84px; }
+
+/* ---------- 근무표 다운로드 (S2-P4a-2b) ---------- */
+.ex-opts { display: grid; gap: 10px; margin-bottom: 12px; }
+.ex-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ex-label { width: 40px; flex: none; font-size: var(--fs-sm); font-weight: 600; color: var(--muted); }
+.ex-pick {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 4px 12px;
+  max-height: 180px; overflow-y: auto; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+}
+.ex-pick label { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); cursor: pointer; }
+.ex-issues { list-style: none; margin: 8px 0 4px; padding: 10px 14px; display: grid; gap: 4px;
+  font-size: var(--fs-sm); border: 1px solid var(--line); border-radius: var(--r-sm); }
+.ex-issues .ex-error { color: var(--danger); font-weight: 600; }
+.ex-issues .ex-warn { color: var(--caution); }
+.ex-issues .ex-info { color: var(--muted); }
+.ex-foot { margin-right: auto; }

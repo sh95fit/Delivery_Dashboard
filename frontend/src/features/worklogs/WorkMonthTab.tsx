@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Panel from "@/components/ui/Panel";
 import Chip from "@/components/ui/Chip";
+import Button from "@/components/ui/Button";
+import ExportModal from "./ExportModal";
 import ErrorBox from "@/components/ui/ErrorBox";
 import Spinner from "@/components/ui/Spinner";
 import type { ManagerRow } from "@/api/masters";
@@ -28,6 +30,7 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
   const [ver, setVer] = useState(0);
   const [edit, setEdit] = useState<{ wid: number; day: number | null } | null>(null);
   const [note, setNote] = useState("");
+  const [exp, setExp] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -38,7 +41,7 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [month, ver]);
-  useEffect(() => { setNote(""); setEdit(null); }, [month]);
+  useEffect(() => { setNote(""); setEdit(null); setExp(false); }, [month]);
 
   const [y, m] = month.split("-").map(Number);
   const all = view?.people ?? [];
@@ -66,6 +69,7 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
             ))}
           </div>
           <input type="month" className="input input-sm" value={month} onChange={(e) => e.target.value && onMonth(e.target.value)} />
+          {isAdmin && view && <Button size="sm" variant="primary" onClick={() => setExp(true)}>근무표 다운로드</Button>}
         </>
       }
       desc={<>
@@ -158,6 +162,9 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
           onClose={() => setEdit(null)}
           onSaved={(msg) => { setEdit(null); setNote(msg); setVer((v) => v + 1); onSaved(); }}
         />
+      )}
+      {exp && view && (
+        <ExportModal month={month} lastDay={view.last_day} people={all} onClose={() => setExp(false)} />
       )}
     </Panel>
   );

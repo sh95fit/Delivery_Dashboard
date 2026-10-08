@@ -1,4 +1,4 @@
-import { del, http, put } from "./client";
+import { ApiError, del, http, put } from "./client";
 import type { IncomeType } from "./workers";
 
 export interface WorkContract {
@@ -63,4 +63,68 @@ export function spanOn<T extends { from: string }>(spans: T[], d: string): T | n
   let hit: T | null = null;
   for (const s of spans) if (s.from <= d) hit = s;
   return hit;
+}
+
+/* ---------- S2-P4a-2b 근무표 엑셀 다운로드 ---------- */
+export type SheetKind = "labor" | "business";
+export type ExportKind = "all" | SheetKind;
+export interface ExportQuery {
+  month: string; sheet: ExportKind; start?: string; end?: string; ids?: number[];
+}
+export interface ExportPerson {
+  worker_id: number; name: string; active: boolean; rate: number; note: string | null;
+  work_days: number; paid_min: number; base: number; sheet_total: number;
+  incentive: number; weekend: number; vat: boolean;
+}
+export interface ExportIssue { level: "error" | "warn" | "info"; sheet: SheetKind | null; name: string | null; msg: string }
+export interface ExportPlan {
+  month: string; start: string; end: string; closed: boolean;
+  sheets: Record<SheetKind, ExportPerson[]>; issues: ExportIssue[]; ok: Record<SheetKind, boolean>;
+}
+
+function exportQs(q: ExportQuery, withSheet: boolean): string {
+  const p = new URLSearchParams({ month: q.month });
+  if (withSheet) p.set("sheet", q.sheet);
+  if (q.start) p.set("start", q.start);
+  if (q.end) p.set("end", q.end);
+  for (const id of q.ids ?? []) p.append("ids", String(id));   // 서버: ids=1&ids=2
+  return p.toString();
+}
+
+export const getExportPlan = (q: ExportQuery) => http<ExportPlan>(`/api/worklogs/export/plan?${exportQs(q, false)}`);
+
+/** 파일을 받아 브라우저 저장 → 저장된 파일명 반환 */
+export async function downloadTimesheet(q: ExportQuery): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/worklogs/export?${exportQs(q, true)}`, { credentials: "same-origin" });
+  } catch {
+    throw new ApiError(0, "network_error", "네트워크 연결에 실패했습니다. 잠시 후 다시 시도하세요.");
+  }
+  if (res.status === 401) {
+    window.location.href = "/login";
+    throw new ApiError(401, "unauthorized", "로그인이 필요합니다.");
+  }
+  if (res.status === 403) throw new ApiError(403, "forbidden", "근무표 다운로드는 관리자만 할 수 있습니다.");
+  if (!res.ok) {
+    let msg = res.statusText || "근무표 생성 실패";
+    try {
+      const j = JSON.parse(await res.text());
+      if (typeof j?.detail === "string") msg = j.detail;
+    } catch { /* JSON 아님 */ }
+    throw new ApiError(res.status, "server_error", msg);
+  }
+  const blob = await res.blob();
+  const cd = res.headers.get("Content-Disposition") ?? "";
+  const m = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+  const name = m ? decodeURIComponent(m[1]) : "근무시간표.xlsx";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return name;
 }

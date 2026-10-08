@@ -103,7 +103,7 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
 
   async function remove(it: WorkDayItem) {
     if (!view || !it.log) return;
-    if (!confirm(`${it.name}님의 ${view.date} 기록을 삭제할까요? (비근무 처리, 변경 기록은 남음)`)) return;
+    if (!confirm(`${it.name}님의 ${view.date} 기록을 삭제할까요? (비근무 처리 · 삭제 이력은 남음)`)) return;
     setBusy(true);
     try {
       await deleteWorkLog(it.log.id);
