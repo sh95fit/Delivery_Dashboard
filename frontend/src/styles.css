@@ -385,3 +385,29 @@ body {
 tr.ed-editing td { background: var(--warn-soft); }
 tr.ed-editing td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
 .ed-nowrap { white-space: nowrap; }
+
+/* S2-P4a-1b 근무 기록 */
+.wl-tabs { margin-bottom: 12px; }
+.wl-time { width: 104px; }
+.wl-num { width: 72px; }
+.wl-memo { width: 140px; }
+.wl-sel { max-width: 150px; }
+tr.wl-dirty td { background: #fffbeb; }
+.wl-warn { margin-top: 4px; color: #b45309; font-size: 12px; }
+.wl-block { margin: 8px 0; color: #b91c1c; font-size: 12px; }
+.wl-month { font-size: 12px; }
+.wl-month th, .wl-month td { white-space: nowrap; padding: 4px 6px; text-align: center; }
+.wl-month th.num, .wl-month td.num { text-align: right; }
+.wl-month .wl-name { position: sticky; left: 0; z-index: 1; min-width: 120px; background: #fff; text-align: left; }
+.wl-month th.wl-name { z-index: 2; }
+.wl-month th.wl-sat { color: #2563eb; }
+.wl-month th.wl-sun { color: #dc2626; }
+.wl-cell { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 40px; padding: 2px;
+  border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; font-size: 11px;
+  line-height: 1.2; cursor: pointer; }
+.wl-cell:hover { background: #eff6ff; }
+.wl-cell b { font-weight: 600; }
+.wl-cell.wl-bad { background: #fef2f2; color: #b91c1c; }
+.wl-cell.wl-empty { min-height: 40px; width: 100%; justify-content: center; color: #cbd5e1; }
+.wl-month .wl-exp { background: #f8fafc; color: #64748b; }
+.wl-month tr.wl-total td { font-weight: 600; border-top: 2px solid #e5e7eb; }

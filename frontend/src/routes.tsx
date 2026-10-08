@@ -6,6 +6,7 @@ import InternalTargetsPage from "./features/settings/InternalTargetsPage";
 import ManagersPage from "./features/settings/ManagersPage";
 import VehiclesPage from "./features/settings/VehiclesPage";
 import WorkersPage from "./features/settings/WorkersPage";
+import WorkLogPage from "./features/worklogs/WorkLogPage";
 
 
 export const router = createBrowserRouter([
@@ -18,6 +19,7 @@ export const router = createBrowserRouter([
       { path: "/settings/managers", element: <ManagersPage /> },
       { path: "/settings/workers", element: <WorkersPage /> },
       { path: "/settings/vehicles", element: <VehiclesPage /> },
+      { path: "/ops/work", element: <WorkLogPage /> },      
     ],
   },
   { path: "*", element: <Navigate to="/" replace /> },

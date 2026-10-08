@@ -10,7 +10,7 @@ export const NAV: NavSection[] = [
     items: [
       { to: "/", label: "대시보드", icon: "dashboard", ready: true },
       { to: "/ops/packing", label: "포장 그룹", icon: "box", ready: false, step: "P2" },
-      { to: "/ops/work", label: "근무 입력", icon: "clock", ready: false, step: "P4" },
+      { to: "/ops/work", label: "근무 기록", hint: "지문 시각 입력 · 월 근무표", icon: "clock", ready: true },
     ],
   },
   {
