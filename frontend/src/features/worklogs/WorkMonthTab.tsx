@@ -7,7 +7,7 @@ import ErrorBox from "@/components/ui/ErrorBox";
 import Spinner from "@/components/ui/Spinner";
 import type { ManagerRow } from "@/api/masters";
 import { INCOME_LABEL } from "@/api/workers";
-import { getWorkMonth, hmm } from "@/api/worklogs";
+import { OFF_LABEL, getWorkMonth, hmm } from "@/api/worklogs";
 import type { WorkMonthView } from "@/api/worklogs";
 import { errText } from "@/lib/form";
 import { num, won } from "@/lib/format";
@@ -51,7 +51,8 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
     days: a.days + p.summary.days, paid: a.paid + p.summary.paid_min, base: a.base + p.summary.base,
     sheet: a.sheet + p.pay.sheet.total, ot: a.ot + p.summary.ot_min, otPay: a.otPay + (p.pay.ot_allow ?? 0),
     exp: a.exp + (p.pay.expected?.total ?? p.pay.sheet.total),
-  }), { days: 0, paid: 0, base: 0, sheet: 0, ot: 0, otPay: 0, exp: 0 }), [people]);
+    wkd: a.wkd + p.summary.weekend_days, wkm: a.wkm + p.summary.weekend_min, off: a.off + Object.keys(p.offs).length,
+  }), { days: 0, paid: 0, base: 0, sheet: 0, ot: 0, otPay: 0, exp: 0, wkd: 0, wkm: 0, off: 0 }), [people]);
   const count = (f: Filter) => all.filter((p) => f === "all" || p.sheet === f).length;
   const editing = edit ? all.find((p) => p.worker_id === edit.wid) ?? null : null;
 
@@ -76,6 +77,7 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
         <b>이름</b>을 누르면 그 사람의 한 달 입력, <b>날짜 칸</b>을 누르면 같은 창이 그날로 열립니다.
         <b> 근무표 지급</b> = 엑셀 총지급액 (기본급 + 월 수당, 사업자는 부가세 포함, 초과수당 제외).
         회색 <b>예상</b> 칸은 초과 기준이 있는 사람만 참고로 표시하며 엑셀에는 들어가지 않습니다.
+        {" "}<b>휴</b> = 휴무(사유는 관리용, 엑셀 제외), <b>!</b> = 어제까지 근무 요일인데 근무·휴무가 없는 날, 파란 테두리 = 주말 근무.
       </>}
     >
       {error && <ErrorBox message={error} />}
@@ -95,6 +97,8 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
                   return <th key={d} className={w === 0 ? "wl-sun" : w === 6 ? "wl-sat" : undefined}>{d}<br />{WD[w]}</th>;
                 })}
                 <th className="num">근무일</th>
+                <th className="num">주말 근무</th>
+                <th className="num">휴무</th>                
                 <th className="num">유급시간</th>
                 <th className="num">기본급</th>
                 <th className="num">근무표 지급</th>
@@ -113,17 +117,29 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
                     </button>{" "}
                     <span className="muted small">{INCOME_LABEL[p.income_type]}</span>
                     {p.summary.nocontract > 0 && <> <Chip tone="danger">계약 없는 날 {p.summary.nocontract}</Chip></>}
+                    {p.missing_days.length > 0 && <> <Chip tone="caution">미입력 {p.missing_days.length}</Chip></>}
                   </td>
                   {days.map((d) => {
                     const lg = p.days[String(d)];
+                    const off = p.offs[String(d)];
+                    const w = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+                    const wk = w === 0 || w === 6;
                     const open = () => setEdit({ wid: p.worker_id, day: d });
                     return (
                       <td key={d}>
                         {lg ? (
-                          <button type="button" className={`wl-cell${lg.no_contract ? " wl-bad" : ""}`} onClick={open}
-                            title={`출근 ${lg.clock_in}${lg.punch_in ? ` (지문 ${lg.punch_in})` : ""} · 퇴근 ${lg.clock_out} · 휴게 ${lg.sheet_break ?? 0}분${lg.memo ? ` · ${lg.memo}` : ""}`}>
+                          <button type="button" className={`wl-cell${lg.no_contract ? " wl-bad" : ""}${wk ? " wl-wkend" : ""}`} onClick={open}
+                            title={`${wk ? "주말 근무 · " : ""}출근 ${lg.clock_in}${lg.punch_in ? ` (지문 ${lg.punch_in})` : ""} · 퇴근 ${lg.clock_out} · 휴게 ${lg.sheet_break ?? 0}분${lg.memo ? ` · ${lg.memo}` : ""}`}>
                             <span>{lg.clock_in}</span><span>{lg.clock_out}</span><b>{hmm(lg.paid_min)}</b>
                           </button>
+                        ) : off ? (
+                          <button type="button" className="wl-cell wl-offcell" onClick={open}
+                            title={`휴무 · ${OFF_LABEL[off.reason]}${off.memo ? ` · ${off.memo}` : ""}`}>
+                            <span>휴</span><span>{OFF_LABEL[off.reason].slice(0, 2)}</span>
+                          </button>
+                        ) : p.missing_days.includes(d) ? (
+                          <button type="button" className="wl-cell wl-empty wl-miss" onClick={open}
+                            aria-label={`${d}일 미입력`} title="근무 요일인데 근무·휴무 기록이 없습니다">!</button>
                         ) : (
                           <button type="button" className="wl-cell wl-empty" onClick={open} aria-label={`${d}일 입력`}>·</button>
                         )}
@@ -131,6 +147,8 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
                     );
                   })}
                   <td className="num">{num(p.summary.days)}</td>
+                  <td className="num">{p.summary.weekend_days ? `${num(p.summary.weekend_days)}일 · ${hmm(p.summary.weekend_min)}` : "-"}</td>
+                  <td className="num">{Object.keys(p.offs).length || "-"}</td>
                   <td className="num">{hmm(p.summary.paid_min)}</td>
                   <td className="num">{won(p.summary.base)}</td>
                   <td className="num" title={`공급가 ${won(p.pay.sheet.supply)} + 부가세 ${won(p.pay.sheet.vat)}`}><b>{won(p.pay.sheet.total)}</b></td>
@@ -143,6 +161,8 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
                 <td className="wl-name">합계</td>
                 <td colSpan={days.length} />
                 <td className="num">{num(tot.days)}</td>
+                <td className="num">{tot.wkd ? `${num(tot.wkd)}일 · ${hmm(tot.wkm)}` : "-"}</td>
+                <td className="num">{tot.off || "-"}</td>
                 <td className="num">{hmm(tot.paid)}</td>
                 <td className="num">{won(tot.base)}</td>
                 <td className="num">{won(tot.sheet)}</td>

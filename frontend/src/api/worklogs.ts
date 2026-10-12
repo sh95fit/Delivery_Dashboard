@@ -3,7 +3,7 @@ import type { IncomeType } from "./workers";
 
 export interface WorkContract {
   amount: number; work_start: string | null; work_end: string | null;
-  break_min: number; break_paid: boolean; has_ot_rule: boolean; vat_applied: boolean;
+  break_min: number; break_paid: boolean; has_ot_rule: boolean; vat_applied: boolean; work_days: number;
 }
 export interface WorkLog {
   id: number; work_date: string; punch_in: string | null; clock_in: string; clock_out: string;
@@ -11,18 +11,26 @@ export interface WorkLog {
   paid_min: number | null; ot_min: number | null; ot_pay: number | null; sheet_break: number | null;
   no_contract: boolean;
 }
+export type OffReason = "annual" | "sick" | "personal" | "factory" | "holiday" | "other";
+export const OFF_REASONS: Array<[OffReason, string]> = [
+  ["annual", "연차·휴가"], ["sick", "병가"], ["personal", "개인 사정"],
+  ["factory", "공장 휴무"], ["holiday", "공휴일"], ["other", "기타"],
+];
+export const OFF_LABEL = Object.fromEntries(OFF_REASONS) as Record<OffReason, string>;
+export interface WorkOff { id: number; work_date: string; reason: OffReason; memo: string | null }
+export type WorkOffInput = { work_date: string; reason: OffReason; memo: string | null };
 export interface WorkDayItem {
   worker_id: number; name: string; income_type: IncomeType; active: boolean;
   contract: WorkContract | null; fixed_manager_id: number | null; fixed_manager_name: string | null;
-  log: WorkLog | null;
+  log: WorkLog | null; off: WorkOff | null; workday: boolean;
 }
 export interface WorkDayView { date: string; closed: boolean; future: boolean; items: WorkDayItem[] }
 export interface PaySet { supply: number; vat: number; total: number }
 export interface WorkMonthPerson {
   worker_id: number; name: string; income_type: IncomeType; active: boolean;
   sheet: "labor" | "business" | null; contract: WorkContract | null; contracts: ContractSpan[]; accounts: AccountSpan[];
-  days: Record<string, WorkLog>;
-  summary: { days: number; nocontract: number; paid_min: number; ot_min: number; base: number; ot_allow: number };
+  days: Record<string, WorkLog>; offs: Record<string, WorkOff>; missing_days: number[];
+  summary: { days: number; nocontract: number; paid_min: number; ot_min: number; base: number; ot_allow: number; weekend_days: number; weekend_min: number };
   pay: { sheet: PaySet; ot_allow: number | null; expected: PaySet | null };
 }
 export interface WorkMonthView { month: string; last_day: number; closed: boolean; people: WorkMonthPerson[] }
@@ -53,10 +61,15 @@ export interface ContractSpan { from: string; contract: WorkContract | null }
 export interface AccountSpan { from: string; manager_id: number | null; manager_name: string | null }
 export type WorkLogDateInput = Omit<WorkLogInput, "worker_id"> & { work_date: string };
 export interface SavePersonResult {
-  ok: boolean; saved: number; unchanged: number; deleted: number; warns: Record<string, string[]>;
+  ok: boolean; saved: number; unchanged: number; deleted: number; off_saved: number; off_deleted: number; warns: Record<string, string[]>;
 }
-export const saveWorkPerson = (wid: number, items: WorkLogDateInput[], delete_ids: number[]) =>
-  put<SavePersonResult>(`/api/worklogs/person/${wid}`, { items, delete_ids });
+export const saveWorkPerson = (wid: number, items: WorkLogDateInput[], delete_ids: number[],
+  offs: WorkOffInput[] = [], off_delete_ids: number[] = []) =>
+  put<SavePersonResult>(`/api/worklogs/person/${wid}`, { items, delete_ids, offs, off_delete_ids });
+
+/** 근무 요일 판정 (서버 is_workday와 같은 규칙): 월=1 … 일=64 */
+export const dayBit = (iso: string) => 1 << ((new Date(`${iso}T00:00:00Z`).getUTCDay() + 6) % 7);
+export const isWorkday = (c: WorkContract | null, iso: string) => !!c && (c.work_days & dayBit(iso)) !== 0;
 
 /** 시작일 순 이력에서 d 날짜에 적용되는 항목 */
 export function spanOn<T extends { from: string }>(spans: T[], d: string): T | null {

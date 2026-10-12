@@ -1,6 +1,10 @@
 from datetime import date, time
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
+
+# 휴무 사유 (관리용, 근무표 엑셀에는 넣지 않음). 화면 표시는 frontend/src/api/worklogs.ts OFF_REASONS
+OffReason = Literal["annual", "sick", "personal", "factory", "holiday", "other"]
 
 
 class WorkLogItem(BaseModel):
@@ -26,12 +30,20 @@ class WorkLogDay(BaseModel):
     memo: str | None = Field(default=None, max_length=200)
 
 
+class WorkOffDay(BaseModel):
+    work_date: date
+    reason: OffReason
+    memo: str | None = Field(default=None, max_length=200)
+
+
 class WorkPersonIn(BaseModel):
     items: list[WorkLogDay] = Field(default_factory=list, max_length=31)
     delete_ids: list[int] = Field(default_factory=list, max_length=31)
+    offs: list[WorkOffDay] = Field(default_factory=list, max_length=31)          # 휴무 지정·사유 수정
+    off_delete_ids: list[int] = Field(default_factory=list, max_length=31)       # 휴무 해제
 
     @model_validator(mode="after")
     def _not_empty(self):
-        if not self.items and not self.delete_ids:
+        if not (self.items or self.delete_ids or self.offs or self.off_delete_ids):
             raise ValueError("저장하거나 삭제할 기록이 없습니다")
         return self

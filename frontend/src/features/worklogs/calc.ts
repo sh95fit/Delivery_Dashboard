@@ -1,10 +1,12 @@
 import { toMin } from "@/api/worklogs";
-import type { WorkContract, WorkLog, WorkLogInput } from "@/api/worklogs";
+import type { WorkContract, WorkLog, WorkLogInput, WorkOff } from "@/api/worklogs";
+import { workDaysText } from "@/api/workers";
 
 /** 화면 입력값. 출근·휴게는 그날 계약 기본값을 채워 보여주고,
- *  저장 시 기본값과 같으면 NULL(= 계약 따름)로 보냄 → 계약 수정 시 그날도 따라감 */
-export type LogForm = { punch: string; out: string; brk: string; mid: string; memo: string };
-export const EMPTY_FORM: LogForm = { punch: "", out: "", brk: "", mid: "", memo: "" };
+ *  저장 시 기본값과 같으면 NULL(= 계약 따름)로 보냄 → 계약 수정 시 그날도 따라감
+ *  off = 휴무 사유 코드 ("" = 근무일) */
+export type LogForm = { punch: string; out: string; brk: string; mid: string; memo: string; off: string };
+export const EMPTY_FORM: LogForm = { punch: "", out: "", brk: "", mid: "", memo: "", off: "" };
 
 /** 근무표 '휴게' 칸 기본값 = 유급시간에서 빼는 분 (무급 휴게만) */
 export const defaultBreak = (c: WorkContract | null) => (c ? (c.break_paid ? 0 : c.break_min) : 0);
@@ -15,18 +17,20 @@ export const isDefaultIn = (c: WorkContract | null, v: string) =>
 export const isDefaultBreak = (c: WorkContract | null, v: string) =>
   v === "" || (c != null && Number(v) === defaultBreak(c));
 
-export function logToForm(l: WorkLog | null, c: WorkContract | null): LogForm {
+export function logToForm(l: WorkLog | null, c: WorkContract | null, o: WorkOff | null = null): LogForm {
   return {
     punch: l?.punch_in ?? defaultIn(c),
     out: l?.clock_out ?? "",
     brk: l?.break_min != null ? String(l.break_min) : c ? String(defaultBreak(c)) : "",
     mid: l?.manager_id == null ? "" : String(l.manager_id),
-    memo: l?.memo ?? "",
+    memo: l?.memo ?? o?.memo ?? "",
+    off: o?.reason ?? "",
   };
 }
 
 export const sameForm = (a: LogForm, b: LogForm) =>
-  a.punch === b.punch && a.out === b.out && a.brk === b.brk && a.mid === b.mid && a.memo.trim() === b.memo.trim();
+  a.punch === b.punch && a.out === b.out && a.brk === b.brk && a.mid === b.mid &&
+  a.memo.trim() === b.memo.trim() && a.off === b.off;
 
 /** 저장 요청 값: 기본값과 같은 칸은 NULL */
 export function toInput(c: WorkContract | null, f: LogForm): Omit<WorkLogInput, "worker_id"> {
@@ -39,11 +43,12 @@ export function toInput(c: WorkContract | null, f: LogForm): Omit<WorkLogInput, 
   };
 }
 
-/** '07:00–12:30 · 휴게 30분(유급)' */
+/** '07:00–12:30 · 휴게 30분(유급)' (+ 월~금이 아니면 요일) */
 export function contractText(c: WorkContract | null): string {
   if (!c) return "";
   const b = c.break_min > 0 ? ` · 휴게 ${c.break_min}분${c.break_paid ? "(유급)" : ""}` : "";
-  return `${c.work_start}–${c.work_end}${b}`;
+  const d = c.work_days !== 31 ? ` · ${workDaysText(c.work_days)}` : "";
+  return `${c.work_start}–${c.work_end}${b}${d}`;
 }
 
 /** 화면 미리보기. 저장 시 서버가 같은 규칙으로 다시 계산·검증 */

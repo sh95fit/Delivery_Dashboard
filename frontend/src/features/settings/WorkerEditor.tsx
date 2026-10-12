@@ -8,7 +8,7 @@ import Spinner from "@/components/ui/Spinner";
 import SaveNote, { nowHms } from "@/components/ui/SaveNote";
 import type { SaveNoteState } from "@/components/ui/SaveNote";
 import * as api from "@/api/workers";
-import { INCOME_LABEL, INCOME_PAY, needsName, otText, rateText, workText } from "@/api/workers";
+import { DAY_BITS, INCOME_LABEL, INCOME_PAY, needsName, otText, rateText, workText } from "@/api/workers";
 import type { IncomeType, WorkerAccount, WorkerDetail, WorkerRate, WorkerRateInput, WorkerRow } from "@/api/workers";
 import type { ManagerRow } from "@/api/masters";
 import { errText, parseAmount } from "@/lib/form";
@@ -18,7 +18,7 @@ type Tab = "basic" | "rate" | "account";
 type Mode = { kind: "add" } | { kind: "edit"; id: number } | null;
 type RateForm = {
   amount: string; from: string; vat: boolean; ws: string; we: string;
-  brk: string; brkPaid: boolean; otMin: string; otAmt: string; memo: string;
+  brk: string; brkPaid: boolean; otMin: string; otAmt: string; memo: string; days: number;
 };
 type AccForm = { mgr: string; from: string };
 type Props = {
@@ -65,7 +65,7 @@ const toForm = (r: WorkerRate | null, from: string, defVat: boolean, memo = ""):
   ws: r?.work_start ?? "07:00", we: r?.work_end ?? "13:00",
   brk: String(r?.break_min ?? 0), brkPaid: r?.break_paid ?? true,
   otMin: r?.ot_unit_min ? String(r.ot_unit_min) : "", otAmt: r?.ot_unit_amount ? String(r.ot_unit_amount) : "",
-  memo,
+  memo, days: r?.work_days ?? 31,
 });
 
 export default function WorkerEditor({ row, workers, managers, isAdmin, justCreated, onChanged, onClose }: Props) {
@@ -204,10 +204,11 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
       if (!(span > 0)) return setError("지정 퇴근은 지정 출근보다 늦어야 합니다");
       if (brkMin < 0 || brkMin >= span) return setError("휴게시간을 확인하세요");
       if ((um > 0) !== (ua > 0)) return setError("초과수당 단위(분)와 금액은 둘 다 입력하거나 둘 다 비워 두세요");
+      if (rf.days === 0) return setError("근무 요일을 하나 이상 선택하세요");
     }
     const body: WorkerRateInput = {
       effective_from: rf.from, pay_type: payType, amount: amt, vat_applied: rf.vat, memo: rf.memo.trim() || null,
-      ...(hourly ? { work_start: rf.ws, work_end: rf.we, break_min: brkMin, break_paid: rf.brkPaid,
+      ...(hourly ? { work_start: rf.ws, work_end: rf.we, break_min: brkMin, break_paid: rf.brkPaid, work_days: rf.days,
         ot_unit_min: um, ot_unit_amount: ua } : {}),
     };
     const id = row.id;
@@ -431,6 +432,16 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
                         <option value="0">무급 (근무시간에서 차감)</option>
                       </select>
                     </label>
+                    <div className="field field-wide">근무 요일
+                      <span className="muted small"> 기본 월~금 · 체크 안 한 요일도 근무 입력 가능 (토·일 근무는 주말 근무로 분류)</span>
+                      <div className="wd-pick">
+                        {DAY_BITS.map(([b, l]) => (
+                          <label key={b} className={`wd-chk${rf.days & b ? " on" : ""}`}>
+                            <input type="checkbox" checked={(rf.days & b) !== 0} onChange={() => setR({ days: rf.days ^ b })} /> {l}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
                     <label className="field">초과수당 단위(분)
                       <input className="input" inputMode="numeric" value={rf.otMin} onChange={(e) => setR({ otMin: e.target.value })} placeholder="예: 30 (비우면 없음)" />
                     </label>

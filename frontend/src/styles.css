@@ -474,3 +474,14 @@ tr.wl-dirty td { background: #fffbeb; }
 .ex-issues .ex-warn { color: var(--caution); }
 .ex-issues .ex-info { color: var(--muted); }
 .ex-foot { margin-right: auto; }
+
+/* ---------- S2-P4b-1 근무 요일 · 휴무 · 주말 ---------- */
+.wd-pick { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.wd-chk { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--r-sm); cursor: pointer; font-size: var(--fs-sm); }
+.wd-chk.on { border-color: var(--brand); color: var(--brand); font-weight: 600; }
+.wl-cell.wl-wkend { box-shadow: inset 0 0 0 2px var(--brand); }
+.wl-cell.wl-offcell { color: var(--muted); background: var(--line-soft); }
+.wl-cell.wl-miss { color: var(--caution); background: var(--caution-soft); font-weight: 700; }
+.wp-tbl tr.wp-off td { background: var(--line-soft); }
+.wp-tbl tr.wp-miss td:first-child { box-shadow: inset 3px 0 0 var(--caution); }
+.wp-c-off { width: 128px; }

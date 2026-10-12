@@ -36,7 +36,11 @@ def save_person(wid: int, body: WorkPersonIn, email: str = Depends(require_admin
     items = [i.model_dump() for i in body.items]
     for i in items:
         i["memo"] = memo(i.get("memo"))
-    return guard(svc.save_person, wid, items, body.delete_ids, email, fail="근무 기록 저장 실패")
+    offs = [o.model_dump() for o in body.offs]
+    for o in offs:
+        o["memo"] = memo(o.get("memo"))
+    return guard(svc.save_person, wid, items, body.delete_ids, email, offs, body.off_delete_ids,
+                 fail="근무 기록 저장 실패")
 
 
 @router.delete("/{lid}")

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from datetime import time
 
+DEFAULT_WORK_DAYS = 31   # 월~금 (월=1 화=2 … 토=32 일=64)
 
 def _min(t: time | None) -> int | None:
     return None if t is None else t.hour * 60 + t.minute
@@ -114,6 +115,8 @@ def check_rate(income_type: str, r: dict) -> dict:
     out = {**r, "amount": int(r.get("amount") or 0), "vat_applied": bool(r.get("vat_applied")),
            "break_min": int(r.get("break_min") or 0), "break_paid": bool(r.get("break_paid")),
            "ot_unit_min": int(r.get("ot_unit_min") or 0), "ot_unit_amount": int(r.get("ot_unit_amount") or 0)}
+    wd = r.get("work_days")
+    out["work_days"] = DEFAULT_WORK_DAYS if wd is None else int(wd)
     if pt == "none":
         return {**out, "amount": 0, "vat_applied": False, "work_start": None, "work_end": None,
                 "break_min": 0, "ot_unit_min": 0, "ot_unit_amount": 0}
@@ -136,5 +139,7 @@ def check_rate(income_type: str, r: dict) -> dict:
         raise ValueError("휴게시간이 근무시간보다 깁니다")
     if (out["ot_unit_min"] > 0) != (out["ot_unit_amount"] > 0):
         raise ValueError("초과수당 단위(분)와 금액은 둘 다 입력하거나 둘 다 비워 두세요")
+    if not 1 <= out["work_days"] <= 127:
+        raise ValueError("근무 요일을 하나 이상 선택하세요")    
     return out
 

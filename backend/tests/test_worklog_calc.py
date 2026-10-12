@@ -2,7 +2,7 @@ from datetime import date, time
 
 import pytest
 
-from app.services.worklog_calc import check_log, day_result, month_summary, sheet_break
+from app.services.worklog_calc import check_log, day_result, is_weekend, is_workday, month_summary, sheet_break
 
 T = date(2026, 10, 7)
 D = date(2026, 10, 1)
@@ -75,3 +75,16 @@ def test_month_summary_no_rule_vat():
     s = month_summary([L(1, time(12))], [r])
     assert s["pay"]["expected"] is None
     assert s["pay"]["sheet"] == {"supply": 137500, "vat": 13750, "total": 151250}
+
+
+def test_workdays_default_mon_fri():
+    sat, mon = date(2026, 10, 3), date(2026, 10, 5)
+    assert is_workday(R, mon) and not is_workday(R, sat)        # work_days 없음 = 월~금
+    assert is_workday({**R, "work_days": 63}, sat)              # 월~토
+    assert not is_workday(None, mon)
+    assert is_weekend(sat) and not is_weekend(mon)
+
+
+def test_month_summary_weekend():
+    s = month_summary([L(2, time(12)), L(3, time(12))], [R])      # 10/2 금, 10/3 토
+    assert (s["days"], s["weekend_days"], s["weekend_min"]) == (2, 1, 300)

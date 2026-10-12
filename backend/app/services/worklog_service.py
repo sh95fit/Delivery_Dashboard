@@ -5,7 +5,7 @@ import calendar
 import io
 import os
 import zipfile
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import text
 
@@ -16,11 +16,12 @@ from app.services.manager_service import _hm, _iso, today
 from app.services.worker_service import _managers
 from app.services.timesheet_export import SHEET_TITLE, build_timesheet, schedule_note, verify_timesheet
 from app.services.worker_calc import pay_total
-from app.services.worklog_calc import check_log, day_result, month_summary, sheet_break
+from app.services.worklog_calc import check_log, day_result, is_workday, month_summary, sheet_break
 
 
 SQL_LOGS = "SELECT * FROM work_logs WHERE deleted_at IS NULL AND work_date BETWEEN :a AND :b"
 SQL_WORKERS = "SELECT id, name, income_type, active FROM workers WHERE deleted_at IS NULL ORDER BY name"
+SQL_OFFS = "SELECT * FROM work_offs WHERE deleted_at IS NULL AND work_date BETWEEN :a AND :b"
 SHEET_OF = {"employee": "labor", "business": "business", "freelancer": "business"}   # 근로소득 / 사업소득 파일
 
 
@@ -51,7 +52,12 @@ def contract_out(r: dict | None) -> dict | None:
     return {"amount": int(r["amount"]), "work_start": _hm(r.get("work_start")), "work_end": _hm(r.get("work_end")),
             "break_min": int(r.get("break_min") or 0), "break_paid": bool(r.get("break_paid")),
             "has_ot_rule": int(r.get("ot_unit_min") or 0) > 0 and int(r.get("ot_unit_amount") or 0) > 0,
-            "vat_applied": bool(r.get("vat_applied"))}
+            "vat_applied": bool(r.get("vat_applied")),
+            "work_days": 31 if r.get("work_days") is None else int(r["work_days"])}
+
+
+def off_out(o: dict) -> dict:
+    return {"id": o["id"], "work_date": _iso(o["work_date"]), "reason": o["reason"], "memo": o.get("memo")}
 
 
 def log_out(lg: dict, rate: dict | None) -> dict:
@@ -77,16 +83,22 @@ def month_view(month: date) -> dict:
     rates = _group(dash_db.rows("SELECT * FROM worker_pay_rates WHERE deleted_at IS NULL"), "worker_id")
     accs = _group(dash_db.rows("SELECT * FROM worker_accounts WHERE deleted_at IS NULL"), "worker_id")
     logs = _group(dash_db.rows(SQL_LOGS + " ORDER BY work_date", {"a": first, "b": last}), "worker_id")
+    offs = _group(dash_db.rows(SQL_OFFS, {"a": first, "b": last}), "worker_id")
     mgrs = _managers()
+    end = min(last, today() - timedelta(days=1))          # 미입력 판정은 어제까지 (오늘은 입력 전일 수 있음)
     with get_dash_engine().connect() as conn:
         closed = _closed(conn, first)
     people = []
     for w in dash_db.rows(SQL_WORKERS):
-        rs, mine = rates.get(w["id"], []), logs.get(w["id"], [])
+        rs, mine, off = rates.get(w["id"], []), logs.get(w["id"], []), offs.get(w["id"], [])
         cands = _spans(rs, "effective_from", first, last)
-        if not mine and not (w["active"] and any(_hourly(c) for c in cands)):
+        if not mine and not off and not (w["active"] and any(_hourly(c) for c in cands)):
             continue
         s = month_summary(mine, rs)
+        done = {lg["work_date"] for lg in mine} | {o["work_date"] for o in off}
+        missing = [] if not w["active"] else [
+            d.day for d in (first + timedelta(days=i) for i in range((end - first).days + 1))
+            if d not in done and is_workday(effective_on(rs, d, "effective_from"), d)]
         people.append({
             "worker_id": w["id"], "name": w["name"], "income_type": w["income_type"], "active": bool(w["active"]),
             "sheet": SHEET_OF.get(w["income_type"]),
@@ -98,7 +110,10 @@ def month_view(month: date) -> dict:
                          for a in _spans(accs.get(w["id"], []), "start_date", first, last)],
             "days": {lg["work_date"].day: log_out(lg, effective_on(rs, lg["work_date"], "effective_from"))
                      for lg in mine},
-            "summary": {k: s[k] for k in ("days", "nocontract", "paid_min", "ot_min", "base", "ot_allow")},
+            "offs": {o["work_date"].day: off_out(o) for o in off},
+            "missing_days": missing,
+            "summary": {k: s[k] for k in ("days", "nocontract", "paid_min", "ot_min", "base", "ot_allow",
+                                          "weekend_days", "weekend_min")},
             "pay": s["pay"],
         })
     return {"month": first.isoformat(), "last_day": last.day, "closed": closed, "people": people}
@@ -108,20 +123,22 @@ def day_view(d: date) -> dict:
     rates = _group(dash_db.rows("SELECT * FROM worker_pay_rates WHERE deleted_at IS NULL"), "worker_id")
     accs = _group(dash_db.rows("SELECT * FROM worker_accounts WHERE deleted_at IS NULL"), "worker_id")
     logs = {lg["worker_id"]: lg for lg in dash_db.rows(SQL_LOGS, {"a": d, "b": d})}
+    offs = {o["worker_id"]: o for o in dash_db.rows(SQL_OFFS, {"a": d, "b": d})}
     mgrs = _managers()
     items = []
     for w in dash_db.rows(SQL_WORKERS):
         r = effective_on(rates.get(w["id"], []), d, "effective_from")
-        lg = logs.get(w["id"])
-        if not lg and not (w["active"] and _hourly(r)):
+        lg, off = logs.get(w["id"]), offs.get(w["id"])
+        if not lg and not off and not (w["active"] and _hourly(r)):
             continue
         a = effective_on(accs.get(w["id"], []), d, "start_date")
         fixed = a["manager_id"] if a else None
         items.append({
             "worker_id": w["id"], "name": w["name"], "income_type": w["income_type"], "active": bool(w["active"]),
-            "contract": contract_out(r),
+            "contract": contract_out(r), "workday": is_workday(r, d),
             "fixed_manager_id": fixed, "fixed_manager_name": (mgrs.get(fixed) or {}).get("name"),
             "log": log_out(lg, r) if lg else None,
+            "off": off_out(off) if off else None,
         })
     with get_dash_engine().connect() as conn:
         closed = _closed(conn, d)
@@ -143,6 +160,9 @@ def _rates(conn, wid: int) -> list[dict]:
 
 def _write(conn, wid: int, d: date, it: dict, rs: list[dict], email: str, t: date) -> tuple[bool, list[str]]:
     """한 사람·하루 저장 → (새로 썼는지, 경고). 값이 같으면 다시 쓰지 않음. 수정 = 기존 행 삭제 표시 + 새 행."""
+    if conn.execute(text("SELECT 1 FROM work_offs WHERE worker_id = :w AND work_date = :d AND deleted_at IS NULL"),
+                    {"w": wid, "d": d}).fetchone():
+        raise ValueError("휴무로 지정된 날입니다 (월 표 한 달 입력에서 휴무를 해제한 뒤 입력하세요)")    
     v = check_log(it.get("punch_in"), it.get("clock_out"), it.get("break_min"),
                   effective_on(rs, d, "effective_from"), day=d, today=t)
     mid, memo = it.get("manager_id"), it.get("memo")
@@ -194,33 +214,80 @@ def save_day(d: date, items: list[dict], email: str) -> dict:
     return {"ok": True, "saved": saved, "unchanged": unchanged, "warns": warns}
 
 
-def save_person(wid: int, items: list[dict], delete_ids: list[int], email: str) -> dict:
-    """월 표 팝업: 한 사람 × 여러 날 저장·삭제 (한 트랜잭션, 하루라도 오류면 전체 취소)."""
+def _write_off(conn, wid: int, it: dict, email: str) -> bool:
+    """휴무 지정·사유 수정 → 새로 썼는지. 같은 값이면 다시 쓰지 않음. 수정 = 기존 행 삭제 표시 + 새 행."""
+    d = it["work_date"]
+    if conn.execute(text("SELECT 1 FROM work_logs WHERE worker_id = :w AND work_date = :d AND deleted_at IS NULL"),
+                    {"w": wid, "d": d}).fetchone():
+        raise ValueError("근무 기록이 있는 날은 휴무로 지정할 수 없습니다 (퇴근을 지워 근무를 삭제한 뒤 지정)")
+    old = conn.execute(text("""
+        SELECT id, reason, memo FROM work_offs
+        WHERE worker_id = :w AND work_date = :d AND deleted_at IS NULL
+    """), {"w": wid, "d": d}).mappings().fetchone()
+    if old and (old["reason"], old["memo"]) == (it["reason"], it.get("memo")):
+        return False
+    if old:
+        conn.execute(text("UPDATE work_offs SET deleted_at = NOW(), deleted_by = :e WHERE id = :i"),
+                     {"i": old["id"], "e": email})
+    conn.execute(text("""
+        INSERT INTO work_offs (worker_id, work_date, reason, memo, created_by)
+        VALUES (:w, :d, :r, :m, :e)
+    """), {"w": wid, "d": d, "r": it["reason"], "m": it.get("memo"), "e": email})
+    return True
+
+
+def save_person(wid: int, items: list[dict], delete_ids: list[int], email: str,
+                offs: list[dict] | None = None, off_delete_ids: list[int] | None = None) -> dict:
+    """월 표 팝업: 한 사람 × 여러 날 근무·휴무 저장/삭제 (한 트랜잭션, 하루라도 오류면 전체 취소).
+    순서: 근무 삭제 → 휴무 해제 → 휴무 지정 → 근무 저장 (같은 날 근무↔휴무 전환을 한 번에 처리)"""
+    offs, off_delete_ids = offs or [], off_delete_ids or []
     t = today()
     warns: dict[str, list[str]] = {}
-    saved = unchanged = deleted = 0
+    saved = unchanged = deleted = off_saved = off_deleted = 0
     days = [it["work_date"] for it in items]
-    if len(set(days)) != len(days):
+    off_days = [o["work_date"] for o in offs]
+    if len(set(days)) != len(days) or len(set(off_days)) != len(off_days):
         raise ValueError("같은 날짜가 두 번 들어 있습니다")
+    both = set(days) & set(off_days)
+    if both:
+        d = min(both)
+        raise ValueError(f"{d.month}/{d.day}: 같은 날을 근무와 휴무로 함께 저장할 수 없습니다")
     with get_dash_engine().begin() as conn:
         w = _worker(conn, wid)
         targets: list[tuple[int, date]] = []
         for lid in dict.fromkeys(delete_ids):
             row = conn.execute(text("""SELECT work_date FROM work_logs
-                                       WHERE id = :i AND worker_id = :w AND deleted_at IS NULL"""),
-                               {"i": lid, "w": wid}).fetchone()
+                WHERE id = :i AND worker_id = :w AND deleted_at IS NULL"""), {"i": lid, "w": wid}).fetchone()
             if not row:
                 raise ValueError("삭제할 기록을 찾을 수 없습니다 (이미 수정·삭제됨 — 새로고침하세요)")
             if row[0] in days:
                 raise ValueError(f"{row[0]}: 같은 날을 저장과 삭제에 함께 넣을 수 없습니다")
             targets.append((lid, row[0]))
-        for m in sorted({d.replace(day=1) for d in days} | {d.replace(day=1) for _, d in targets}):
+        off_targets: list[tuple[int, date]] = []
+        for oid in dict.fromkeys(off_delete_ids):
+            row = conn.execute(text("""SELECT work_date FROM work_offs
+                WHERE id = :i AND worker_id = :w AND deleted_at IS NULL"""), {"i": oid, "w": wid}).fetchone()
+            if not row:
+                raise ValueError("해제할 휴무를 찾을 수 없습니다 (이미 수정·삭제됨 — 새로고침하세요)")
+            off_targets.append((oid, row[0]))
+        touched = set(days) | set(off_days) | {d for _, d in targets} | {d for _, d in off_targets}
+        for m in sorted({d.replace(day=1) for d in touched}):
             if _closed(conn, m):
                 raise ValueError(f"{m.year}년 {m.month}월은 마감되었습니다. 마감 해제 후 수정하세요")
         for lid, _ in targets:
             conn.execute(text("UPDATE work_logs SET deleted_at = NOW(), deleted_by = :e WHERE id = :i"),
                          {"i": lid, "e": email})
             deleted += 1
+        for oid, _ in off_targets:
+            conn.execute(text("UPDATE work_offs SET deleted_at = NOW(), deleted_by = :e WHERE id = :i"),
+                         {"i": oid, "e": email})
+            off_deleted += 1
+        for o in sorted(offs, key=lambda x: x["work_date"]):
+            d = o["work_date"]
+            try:
+                off_saved += int(_write_off(conn, wid, o, email))
+            except ValueError as e:
+                raise ValueError(f"{d.month}/{d.day}: {e}") from None
         rs = _rates(conn, wid)
         for it in sorted(items, key=lambda x: x["work_date"]):
             d = it["work_date"]
@@ -235,7 +302,8 @@ def save_person(wid: int, items: list[dict], delete_ids: list[int], email: str) 
             ws = ws + ([] if w[1] else ["비활성 인력"])
             if ws:
                 warns[f"{d.month}/{d.day}"] = ws
-    return {"ok": True, "saved": saved, "unchanged": unchanged, "deleted": deleted, "warns": warns}
+    return {"ok": True, "saved": saved, "unchanged": unchanged, "deleted": deleted,
+            "off_saved": off_saved, "off_deleted": off_deleted, "warns": warns}
 
 
 def delete_log(lid: int, email: str) -> None:

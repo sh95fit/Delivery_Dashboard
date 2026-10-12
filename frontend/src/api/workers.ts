@@ -14,7 +14,7 @@ export const INCOME_PAY: Record<IncomeType, PayType> = {
 export interface WorkerRate {
   id: number; effective_from: string; pay_type: PayType; amount: number; vat_applied: boolean;
   work_start: string | null; work_end: string | null; break_min: number; break_paid: boolean;
-  ot_unit_min: number; ot_unit_amount: number; paid_min: number; daily_base: number | null;
+  work_days: number; ot_unit_min: number; ot_unit_amount: number; paid_min: number; daily_base: number | null;
   memo?: string | null; created_by?: string | null;
 }
 export interface WorkerAccount {
@@ -32,7 +32,7 @@ export type WorkerInput = { name: string; income_type: IncomeType; active: boole
 export type WorkerRateInput = {
   effective_from: string; pay_type: PayType; amount: number; vat_applied: boolean; memo: string | null;
   work_start?: string; work_end?: string; break_min?: number; break_paid?: boolean;
-  ot_unit_min?: number; ot_unit_amount?: number;
+  work_days?: number; ot_unit_min?: number; ot_unit_amount?: number;
 };
 type Ok = { ok: boolean; id?: number };
 
@@ -51,10 +51,15 @@ export const updateWorkerAccount = (aid: number, body: { manager_id: number | nu
 
 export const rateText = (r: WorkerRate) =>
   r.pay_type === "none" ? "인건비 없음" : `${r.pay_type === "monthly" ? "월급" : "시급"} ${won(r.amount)}`;
+/** 근무 요일 비트: 월=1 화=2 수=4 목=8 금=16 토=32 일=64 (기본 월~금 = 31) */
+export const DAY_BITS: Array<[number, string]> = [[1, "월"], [2, "화"], [4, "수"], [8, "목"], [16, "금"], [32, "토"], [64, "일"]];
+export const workDaysText = (mask: number) =>
+  mask === 31 ? "월~금" : mask === 63 ? "월~토" : mask === 127 ? "매일"
+    : DAY_BITS.filter(([b]) => mask & b).map(([, l]) => l).join("·") || "없음";
 export const workText = (r: WorkerRate) => {
   if (!r.work_start || !r.work_end) return "-";
   const brk = r.break_min ? ` · 휴게 ${r.break_min}분 ${r.break_paid ? "유급" : "무급"}` : "";
-  return `${r.work_start}–${r.work_end}${brk}`;
+  return `${r.work_start}–${r.work_end}${brk} · ${workDaysText(r.work_days ?? 31)}`;
 };
 export const otText = (r: WorkerRate) =>
   r.ot_unit_min > 0 && r.ot_unit_amount > 0 ? `${r.ot_unit_min}분당 ${won(r.ot_unit_amount)}` : "없음";

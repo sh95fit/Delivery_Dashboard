@@ -8,7 +8,7 @@ import Spinner from "@/components/ui/Spinner";
 import { nowHms } from "@/components/ui/SaveNote";
 import type { ManagerRow } from "@/api/masters";
 import { INCOME_LABEL } from "@/api/workers";
-import { deleteWorkLog, getWorkDay, hmm, saveWorkDay } from "@/api/worklogs";
+import { OFF_LABEL, deleteWorkLog, getWorkDay, hmm, saveWorkDay } from "@/api/worklogs";
 import type { WorkDayItem, WorkDayView, WorkLogInput } from "@/api/worklogs";
 import { errText } from "@/lib/form";
 import { num, todayKst } from "@/lib/format";
@@ -22,7 +22,7 @@ function shift(d: string, n: number) {
   t.setUTCDate(t.getUTCDate() + n);
   return t.toISOString().slice(0, 10);
 }
-const initOf = (it: WorkDayItem) => logToForm(it.log, it.contract);
+const initOf = (it: WorkDayItem) => logToForm(it.log, it.contract, it.off);
 
 type Props = { date: string; onDate: (d: string) => void; managers: ManagerRow[]; isAdmin: boolean; reloadKey?: number };
 type Result = { at: string; saved: number; unchanged: number; warns: Record<string, string[]> };
@@ -140,6 +140,7 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
         출근·휴게는 계약 기본값이 <span className="wl-def-sample">회색</span>으로 채워져 있습니다.
         퇴근(지문)만 입력하고, 지문 출근이 지정보다 늦은 날이나 휴게가 다른 날만 고치세요 (고친 값은 검정).
         지문이 지정보다 빠르면 지정 시각으로 인정. 휴게 = 유급시간에서 빼는 분. 기록이 없는 날은 비근무입니다.
+        휴무 지정·해제는 월 표 → 한 달 입력의 근무/휴무 칸에서 합니다.
       </>}
     >
       {error && <ErrorBox message={error} />}
@@ -169,7 +170,7 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
           { label: "유급", num: true }, "상태", ""]}>
           {rows.map(({ it, f, dirty, pv, cleared }, i) => {
             const c = it.contract;
-            const dis = locked || !c;
+            const dis = locked || !c || !!it.off;
             const cls = [it.active ? "" : "off", dirty ? "wl-dirty" : ""].filter(Boolean).join(" ");
             return (
               <tr key={it.worker_id} className={cls || undefined}>
@@ -210,11 +211,12 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
                   {!dirty && it.log?.ot_min ? <div className="muted small">계약 외 {hmm(it.log.ot_min)}</div> : null}
                 </td>
                 <td>
-                  {cleared ? <Chip tone="caution">퇴근 비움 · 삭제 버튼 사용</Chip>
+                  {it.off ? <Chip>휴무 · {OFF_LABEL[it.off.reason]}</Chip>
+                    : cleared ? <Chip tone="caution">퇴근 비움 · 삭제 버튼 사용</Chip>
                     : dirty && !it.log && f.out === "" ? <Chip tone="danger">퇴근 필요</Chip>
                     : dirty ? <Chip tone="caution">{it.log ? "수정 · 저장 전" : "새 입력 · 저장 전"}</Chip>
                     : it.log ? <Chip tone="ok">저장됨</Chip>
-                    : <span className="muted small">미입력</span>}
+                    : <span className="muted small">{it.workday ? "미입력" : "쉬는 요일"}</span>}
                 </td>
                 <td>{it.log && !locked && <Button size="sm" variant="ghost" disabled={busy} onClick={() => remove(it)}>삭제</Button>}</td>
               </tr>

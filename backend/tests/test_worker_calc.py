@@ -99,3 +99,10 @@ def test_pay_summary_sheet_excludes_overtime():
     assert s["expected"]["total"] == 1155000
     s = pay_summary(2000000, 0, 0, False, False)    # 초과 기준 없음
     assert s["ot_allow"] is None and s["expected"] is None
+
+
+def test_check_rate_work_days():
+    assert check_rate("employee", RATE)["work_days"] == 31
+    assert check_rate("employee", {**RATE, "work_days": 63})["work_days"] == 63
+    with pytest.raises(ValueError, match="근무 요일"):
+        check_rate("employee", {**RATE, "work_days": 0})

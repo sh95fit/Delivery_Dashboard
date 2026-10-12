@@ -24,6 +24,7 @@ class WorkerRateIn(BaseModel):
     break_paid: bool = True
     ot_unit_min: int = Field(default=0, ge=0, le=600)
     ot_unit_amount: int = Field(default=0, ge=0, le=1_000_000)
+    work_days: int = Field(default=31, ge=0, le=127)   # 근무 요일 비트, 기본 월~금 (0은 check_rate가 안내 문구로 거절)    
     memo: str | None = Field(default=None, max_length=200)
 
 

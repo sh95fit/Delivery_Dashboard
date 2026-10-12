@@ -13,6 +13,25 @@ from app.services.cost_calc import effective_on
 from app.services.worker_calc import day_calc, month_pay, pay_summary, recognized_in
 
 
+DEFAULT_WORK_DAYS = 31
+
+
+def day_bit(d: date) -> int:
+    return 1 << d.weekday()            # 월=1 … 일=64
+
+
+def is_weekend(d: date) -> bool:
+    """토·일 = 주말 근무 (계약 근무 요일과 무관, 지급 기준 구분용)"""
+    return d.weekday() >= 5
+
+
+def is_workday(rate: dict | None, d: date) -> bool:
+    """그날 계약의 근무 요일인지. 시급 계약이 없으면 False (미입력 판정에서 제외)"""
+    if rate is None or rate.get("pay_type") != "hourly":
+        return False
+    wd = rate.get("work_days")
+    return bool((DEFAULT_WORK_DAYS if wd is None else int(wd)) & day_bit(d))
+
 def _m(t: time | None) -> int | None:
     return None if t is None else t.hour * 60 + t.minute
 
@@ -60,16 +79,22 @@ def day_result(log: dict, rate: dict) -> dict:
 
 
 def month_summary(logs: list[dict], rates: list[dict], extras: int = 0) -> dict:
-    """한 사람의 그 달 기록 + 계약 이력 전체 → 월 합계. 날짜마다 그날 적용 계약으로 계산."""
+    """한 사람의 그 달 기록 + 계약 이력 전체 → 월 합계. 날짜마다 그날 적용 계약으로 계산.
+    weekend_* = 토·일 근무 (기본급에는 포함, 주말 지급 기준 확인용으로 따로 표시)"""
     days, nocontract, has_rule, vat = [], 0, False, False
+    wk_days = wk_min = 0
     for lg in sorted(logs, key=lambda x: x["work_date"]):
         r = effective_on(rates, lg["work_date"], "effective_from")
         if r is None or r.get("pay_type") != "hourly":
             nocontract += 1                         # 저장 뒤 계약이 바뀐 경우 → 화면에 경고
             continue
-        days.append(day_result(lg, r))
+        d = day_result(lg, r)
+        days.append(d)
+        if is_weekend(lg["work_date"]):
+            wk_days += 1
+            wk_min += d["paid"]
         has_rule = has_rule or (int(r.get("ot_unit_min") or 0) > 0 and int(r.get("ot_unit_amount") or 0) > 0)
         vat = bool(r.get("vat_applied"))            # 그 달 마지막 근무일 계약 기준
     m = month_pay(days)
-    return {**m, "days": len(days), "nocontract": nocontract,
+    return {**m, "days": len(days), "nocontract": nocontract, "weekend_days": wk_days, "weekend_min": wk_min,
             "pay": pay_summary(m["base"], m["ot_allow"], extras, vat, has_rule)}

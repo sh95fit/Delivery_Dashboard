@@ -34,6 +34,7 @@ def rate_out(r: dict) -> dict:
         "vat_applied": bool(r.get("vat_applied")),
         "work_start": _hm(r.get("work_start")), "work_end": _hm(r.get("work_end")),
         "break_min": int(r.get("break_min") or 0), "break_paid": bool(r.get("break_paid")),
+        "work_days": 31 if r.get("work_days") is None else int(r["work_days"]),        
         "ot_unit_min": int(r.get("ot_unit_min") or 0), "ot_unit_amount": int(r.get("ot_unit_amount") or 0),
         "paid_min": d["paid"],
         "daily_base": (amount * d["paid"] + 30) // 60 if pt == "hourly" else None,
@@ -113,12 +114,12 @@ def insert_rate(conn, wid: int, r: dict, email: str) -> int:
     return int(conn.execute(text("""
         INSERT INTO worker_pay_rates
             (worker_id, effective_from, pay_type, amount, vat_applied, work_start, work_end,
-             break_min, break_paid, ot_unit_min, ot_unit_amount, memo, created_by)
-        VALUES (:w, :f, :t, :a, :v, :ws, :we, :bm, :bp, :um, :ua, :memo, :e) RETURNING id
+             break_min, break_paid, ot_unit_min, ot_unit_amount, work_days, memo, created_by)
+        VALUES (:w, :f, :t, :a, :v, :ws, :we, :bm, :bp, :um, :ua, :wd, :memo, :e) RETURNING id
     """), {"w": wid, "f": r["effective_from"], "t": r["pay_type"], "a": r["amount"],
            "v": r["vat_applied"], "ws": r.get("work_start"), "we": r.get("work_end"),
            "bm": r["break_min"], "bp": r["break_paid"], "um": r["ot_unit_min"],
-           "ua": r["ot_unit_amount"], "memo": r.get("memo"), "e": email}).scalar_one())
+           "ua": r["ot_unit_amount"], "wd": r.get("work_days", 31), "memo": r.get("memo"), "e": email}).scalar_one())
 
 
 def add_rate(wid: int, body: dict, email: str) -> int:

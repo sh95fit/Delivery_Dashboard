@@ -17,3 +17,9 @@ def test_person_in_requires_something():
 def test_person_in_limits():
     with pytest.raises(ValidationError):
         WorkPersonIn(items=[{"work_date": "2026-10-07", "clock_out": "12:40", "break_min": 601}])
+
+
+def test_person_in_offs_only():
+    from app.schemas.worklogs import WorkPersonIn
+    p = WorkPersonIn(offs=[{"work_date": "2026-10-05", "reason": "annual"}])
+    assert p.offs[0].reason == "annual" and p.items == []
