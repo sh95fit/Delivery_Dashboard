@@ -12,6 +12,7 @@ import type { WorkMonthView } from "@/api/worklogs";
 import { errText } from "@/lib/form";
 import { num, todayKst, won } from "@/lib/format";
 import BulkOffModal from "./BulkOffModal";
+import CloseModal from "./CloseModal";
 import WorkPersonModal from "./WorkPersonModal";
 
 type Filter = "all" | "labor" | "business";
@@ -33,6 +34,7 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
   const [note, setNote] = useState("");
   const [exp, setExp] = useState(false);
   const [bulk, setBulk] = useState<number | null>(null);   // 휴무 일괄 창: 열린 날짜
+  const [closing, setClosing] = useState(false);   // 마감 관리 창
 
   useEffect(() => {
     let alive = true;
@@ -43,7 +45,7 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [month, ver]);
-  useEffect(() => { setNote(""); setEdit(null); setExp(false); setBulk(null); }, [month]);
+  useEffect(() => { setNote(""); setEdit(null); setExp(false); setBulk(null); setClosing(false); }, [month]);
   const canBulk = isAdmin && !!view && !view.closed;
 
   const [y, m] = month.split("-").map(Number);
@@ -64,7 +66,11 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
       title={`${y}년 ${m}월 · ${num(people.length)}명`}
       right={
         <>
-          {view && (view.closed ? <Chip tone="ok">마감</Chip> : <Chip>미마감</Chip>)}
+          {view && (
+            <Button size="sm" onClick={() => setClosing(true)} title="마감 점검·마감·해제·이력">
+              {view.closed ? "✓ 마감됨 · 이력" : "마감 점검"}
+            </Button>
+          )}
           <div className="seg">
             {FILTERS.map(([k, label]) => (
               <button key={k} type="button" className={filter === k ? "on" : undefined} onClick={() => setFilter(k)}>
@@ -215,6 +221,13 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
           month={month} lastDay={view.last_day} day={bulk} people={all} closed={view.closed}
           onClose={() => setBulk(null)}
           onSaved={(msg) => { setBulk(null); setNote(msg); setVer((v) => v + 1); onSaved(); }}
+        />
+      )}
+      {closing && view && (
+        <CloseModal month={month} isAdmin={isAdmin}
+          onClose={() => setClosing(false)}
+          onJump={(wid, day) => { setClosing(false); setEdit({ wid, day }); }}
+          onChanged={(msg) => { setClosing(false); setNote(msg); setVer((v) => v + 1); onSaved(); }}
         />
       )}
     </Panel>

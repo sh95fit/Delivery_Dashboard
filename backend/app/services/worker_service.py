@@ -3,7 +3,7 @@
 insert_rate / account_holder / insert_account 는 일괄 등록(worker_import)과 공용."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import text
 
@@ -12,6 +12,8 @@ from app.services import dash_db
 from app.services.cost_calc import latest_by
 from app.services.manager_service import _hm, _iso, _rds_managers, today
 from app.services.worker_calc import check_rate, day_calc
+from app.services.worklog_calc import lock_end
+
 
 SQL_RATES = "SELECT * FROM worker_pay_rates WHERE deleted_at IS NULL"
 SQL_ACCOUNTS = "SELECT * FROM worker_accounts WHERE deleted_at IS NULL"
@@ -22,6 +24,17 @@ def _managers() -> dict[int, dict]:
         return {m["manager_id"]: m for m in _rds_managers()}
     except Exception:  # noqa: BLE001
         return {}
+
+
+def check_unlocked(conn, d, what: str) -> None:
+    """마감된 마지막 달 말일 이전에 시작하는 이력은 추가·수정·삭제 불가 (마감된 달 금액이 바뀌므로)."""
+    if isinstance(d, str):
+        d = date.fromisoformat(d)
+    end = lock_end([r[0] for r in conn.execute(
+        text("SELECT month FROM month_closings WHERE reopened_at IS NULL")).fetchall()])
+    if end is not None and d <= end:
+        raise ValueError(f"{end.year}년 {end.month}월까지 마감되어 {d} 시작 {what}은 추가·수정·삭제할 수 없습니다. "
+                         f"{end + timedelta(days=1)} 이후 시작으로 새로 추가하거나, 근무 기록 > 월 표 > 마감 관리에서 해제 후 수정하세요")
 
 
 def rate_out(r: dict) -> dict:
@@ -105,6 +118,7 @@ def save_worker(wid: int | None, name: str, income_type: str, active: bool, memo
 
 def insert_rate(conn, wid: int, r: dict, email: str) -> int:
     """check_rate를 통과한 값 r 저장. 같은 적용 시작일이 있으면 ValueError."""
+    check_unlocked(conn, r["effective_from"], "계약 조건")    
     dup = conn.execute(text("""
         SELECT 1 FROM worker_pay_rates
         WHERE worker_id = :w AND effective_from = :f AND deleted_at IS NULL
@@ -144,6 +158,7 @@ def account_holder(conn, wid: int | None, manager_id: int, start_date: date) -> 
 
 
 def insert_account(conn, wid: int, manager_id: int | None, start_date: date, email: str) -> int:
+    check_unlocked(conn, start_date, "고정 계정 이력")    
     conn.execute(text("""
         UPDATE worker_accounts SET deleted_at = NOW(), deleted_by = :e
         WHERE worker_id = :w AND start_date = :s AND deleted_at IS NULL
@@ -172,13 +187,14 @@ def update_rate(rid: int, body: dict, email: str) -> int:
     """계약 이력 수정 = 기존 행 삭제 표시 + 새 행 저장 (한 트랜잭션 → 변경 기록 보존). 새 행 id 반환."""
     with get_dash_engine().begin() as conn:
         old = conn.execute(text("""
-            SELECT r.worker_id, w.income_type FROM worker_pay_rates r
+            SELECT r.worker_id, w.income_type, r.effective_from FROM worker_pay_rates r
             JOIN workers w ON w.id = r.worker_id AND w.deleted_at IS NULL
             WHERE r.id = :r AND r.deleted_at IS NULL
         """), {"r": rid}).fetchone()
         if not old:
             raise ValueError("계약 이력을 찾을 수 없습니다 (이미 수정·삭제됨 — 새로고침하세요)")
         wid = int(old[0])
+        check_unlocked(conn, old[2], "계약 조건")        
         r = check_rate(old[1], body)
         dup = conn.execute(text("""
             SELECT 1 FROM worker_pay_rates
@@ -195,13 +211,14 @@ def update_account(aid: int, manager_id: int | None, start_date: date, email: st
     """고정 계정 이력 수정 (계정·시작일). 방식은 update_rate와 같음."""
     with get_dash_engine().begin() as conn:
         old = conn.execute(text("""
-            SELECT a.worker_id FROM worker_accounts a
+            SELECT a.worker_id, a.start_date FROM worker_accounts a
             JOIN workers w ON w.id = a.worker_id AND w.deleted_at IS NULL
             WHERE a.id = :a AND a.deleted_at IS NULL
         """), {"a": aid}).fetchone()
         if not old:
             raise ValueError("계정 이력을 찾을 수 없습니다 (이미 수정·삭제됨 — 새로고침하세요)")
         wid = int(old[0])
+        check_unlocked(conn, old[1], "고정 계정 이력")        
         dup = conn.execute(text("""
             SELECT 1 FROM worker_accounts
             WHERE worker_id = :w AND start_date = :s AND deleted_at IS NULL AND id <> :a
@@ -216,3 +233,25 @@ def update_account(aid: int, manager_id: int | None, start_date: date, email: st
         conn.execute(text("UPDATE worker_accounts SET deleted_at = NOW(), deleted_by = :e WHERE id = :a"),
                      {"a": aid, "e": email})
         return insert_account(conn, wid, manager_id, start_date, email)
+
+
+def delete_rate(rid: int, email: str) -> None:
+    with get_dash_engine().begin() as conn:
+        row = conn.execute(text("SELECT effective_from FROM worker_pay_rates WHERE id = :r AND deleted_at IS NULL"),
+                           {"r": rid}).fetchone()
+        if not row:
+            raise ValueError("대상을 찾을 수 없거나 이미 삭제되었습니다")
+        check_unlocked(conn, row[0], "계약 조건")
+        conn.execute(text("UPDATE worker_pay_rates SET deleted_at = NOW(), deleted_by = :e WHERE id = :r"),
+                     {"r": rid, "e": email})
+
+
+def delete_account(aid: int, email: str) -> None:
+    with get_dash_engine().begin() as conn:
+        row = conn.execute(text("SELECT start_date FROM worker_accounts WHERE id = :a AND deleted_at IS NULL"),
+                           {"a": aid}).fetchone()
+        if not row:
+            raise ValueError("대상을 찾을 수 없거나 이미 삭제되었습니다")
+        check_unlocked(conn, row[0], "고정 계정 이력")
+        conn.execute(text("UPDATE worker_accounts SET deleted_at = NOW(), deleted_by = :e WHERE id = :a"),
+                     {"a": aid, "e": email})

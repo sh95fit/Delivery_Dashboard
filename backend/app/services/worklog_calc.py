@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from datetime import date, time
+import calendar
 
 from app.services.cost_calc import effective_on
 from app.services.worker_calc import day_calc, month_pay, pay_summary, recognized_in
@@ -18,6 +19,15 @@ DEFAULT_WORK_DAYS = 31
 
 def day_bit(d: date) -> int:
     return 1 << d.weekday()            # 월=1 … 일=64
+
+
+def lock_end(closed_months: list[date]) -> date | None:
+    """마감된 달 중 가장 늦은 달의 말일. 이 날 이전에 시작하는 계약·계정 이력은 잠김
+    (마감된 달 계산에 쓰일 수 있으므로). 마감이 없으면 None"""
+    if not closed_months:
+        return None
+    m = max(closed_months)
+    return m.replace(day=calendar.monthrange(m.year, m.month)[1])
 
 
 def is_weekend(d: date) -> bool:

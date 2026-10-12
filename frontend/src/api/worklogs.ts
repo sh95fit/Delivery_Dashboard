@@ -1,4 +1,4 @@
-import { ApiError, del, http, put } from "./client";
+import { ApiError, del, http, post, put } from "./client";
 import type { IncomeType } from "./workers";
 
 export interface WorkContract {
@@ -68,9 +68,29 @@ export const saveWorkPerson = (wid: number, items: WorkLogDateInput[], delete_id
   put<SavePersonResult>(`/api/worklogs/person/${wid}`, { items, delete_ids, offs, off_delete_ids });
 
 export interface BulkOffResult { ok: boolean; saved: number; released: number; unchanged: number; skipped: string[] }
+
 /** 하루 × 여러 사람 휴무 지정(reason) / 해제(reason=null) */
 export const saveWorkOffs = (d: string, worker_ids: number[], reason: OffReason | null, memo: string | null) =>
   put<BulkOffResult>(`/api/worklogs/offs/${d}`, { worker_ids, reason, memo });    
+
+/* ---------- S2-P4b-2 월 마감 ---------- */
+export interface CloseIssue {
+  level: "error" | "warn" | "info"; worker_id: number | null; name: string | null; day: number | null; msg: string;
+}
+export interface CloseTotals { people: number; days: number; paid_min: number; sheet_total: number }
+export interface ClosingRow {
+  id: number; closed_at: string | null; closed_by: string | null; memo: string | null;
+  reopened_at: string | null; reopened_by: string | null; reopen_reason: string | null; summary: CloseTotals | null;
+}
+export interface CloseCheck {
+  month: string; closed: boolean; ended: boolean; can_close: boolean;
+  issues: CloseIssue[]; totals: CloseTotals; history: ClosingRow[];
+}
+export const getCloseCheck = (month: string) => http<CloseCheck>(`/api/worklogs/close/check?month=${month}`);
+export const closeMonth = (month: string, memo: string | null) =>
+  post<{ ok: boolean; totals: CloseTotals }>("/api/worklogs/close", { month, memo });
+export const reopenMonth = (month: string, reason: string) =>
+  post<{ ok: boolean }>("/api/worklogs/reopen", { month, reason });
 
 /** 근무 요일 판정 (서버 is_workday와 같은 규칙): 월=1 … 일=64 */
 export const dayBit = (iso: string) => 1 << ((new Date(`${iso}T00:00:00Z`).getUTCDay() + 6) % 7);

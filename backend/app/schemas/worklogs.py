@@ -54,3 +54,13 @@ class WorkOffBulkIn(BaseModel):
     worker_ids: list[int] = Field(min_length=1, max_length=200)
     reason: OffReason | None = None
     memo: str | None = Field(default=None, max_length=200)
+
+
+class MonthCloseIn(BaseModel):
+    month: date                                             # 그 달 1일
+    memo: str | None = Field(default=None, max_length=200)
+
+
+class MonthReopenIn(BaseModel):
+    month: date
+    reason: str = Field(min_length=2, max_length=200)       # 해제 사유 필수

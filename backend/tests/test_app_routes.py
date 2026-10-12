@@ -4,4 +4,6 @@ def test_app_starts_with_worklog_routes():
     from app.main import app
     paths = set(app.openapi()["paths"])
     assert {"/worklogs/day", "/worklogs/month", "/worklogs/day/{d}", "/worklogs/{lid}",
-            "/worklogs/export", "/worklogs/export/plan"} <= paths
+            "/worklogs/export", "/worklogs/export/plan", "/worklogs/offs/{d}",
+            "/worklogs/close/check", "/worklogs/close", "/worklogs/reopen"} <= paths
+

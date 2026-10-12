@@ -506,3 +506,11 @@ tr.wl-dirty td { background: #fffbeb; }
 .bo-tbl thead th { position: sticky; top: 0; z-index: 1; background: #f8fafc; }
 .bo-tbl td { padding: 6px 10px; }
 .bo-chk { width: 36px; text-align: center; }
+
+/* S2-P4b-2 마감 관리 창 */
+.cm-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 4px; }
+.cm-title { font-weight: 600; margin: 14px 0 6px; }
+.cm-wrap { max-height: 36vh; overflow: auto; border: 1px solid var(--line); border-radius: var(--r-sm); }
+.cm-wrap thead th { position: sticky; top: 0; z-index: 1; background: #f8fafc; }
+.cm-form { display: flex; gap: 8px; margin-top: 10px; }
+.cm-form .input { flex: 1; }

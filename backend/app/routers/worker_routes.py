@@ -67,7 +67,7 @@ def update_rate(rid: int, body: WorkerRateIn, email: str = Depends(require_admin
 
 @router.delete("/rates/{rid}")
 def delete_rate(rid: int, email: str = Depends(require_admin)):
-    guard(dash_db.soft_delete, "worker_pay_rates", rid, email, fail="삭제 실패")
+    guard(svc.delete_rate, rid, email, fail="삭제 실패")
     return {"ok": True}
 
 
@@ -85,5 +85,5 @@ def update_account(aid: int, body: WorkerAccountIn, email: str = Depends(require
 
 @router.delete("/accounts/{aid}")
 def delete_account(aid: int, email: str = Depends(require_admin)):
-    guard(dash_db.soft_delete, "worker_accounts", aid, email, fail="삭제 실패")
+    guard(svc.delete_account, aid, email, fail="삭제 실패")
     return {"ok": True}

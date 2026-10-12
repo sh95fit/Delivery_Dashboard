@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import calendar
 import io
+import json
 import os
 import zipfile
 from datetime import date, timedelta
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from app.database import get_dash_engine
 from app.services import dash_db
@@ -348,6 +350,106 @@ def delete_log(lid: int, email: str) -> None:
             raise ValueError("마감된 달의 기록은 삭제할 수 없습니다")
         conn.execute(text("UPDATE work_logs SET deleted_at = NOW(), deleted_by = :e WHERE id = :i"),
                      {"i": lid, "e": email})
+
+
+# ---------- S2-P4b-2 월 마감 ----------
+def _closing_out(r: dict) -> dict:
+    return {"id": r["id"], "closed_at": _iso(r.get("closed_at")), "closed_by": r.get("closed_by"),
+            "memo": r.get("memo"), "reopened_at": _iso(r.get("reopened_at")),
+            "reopened_by": r.get("reopened_by"), "reopen_reason": r.get("reopen_reason"),
+            "summary": r.get("summary")}
+
+
+def _short_days(days: list[int]) -> str:
+    s = ", ".join(f"{d}일" for d in days[:8])
+    return s + (f" 외 {len(days) - 8}일" if len(days) > 8 else "")
+
+
+def close_check(month: date) -> dict:
+    """마감 점검. error = 마감 차단, warn = 확인, info = 안내. 끝나지 않은 달은 어제까지 진행 현황."""
+    first, last = month_bounds(month)
+    t = today()
+    rates = _group(dash_db.rows("SELECT * FROM worker_pay_rates WHERE deleted_at IS NULL"), "worker_id")
+    logs = _group(dash_db.rows(SQL_LOGS + " ORDER BY work_date", {"a": first, "b": last}), "worker_id")
+    offs = _group(dash_db.rows(SQL_OFFS, {"a": first, "b": last}), "worker_id")
+    history = [_closing_out(r) for r in dash_db.rows(
+        "SELECT * FROM month_closings WHERE month = :m ORDER BY closed_at DESC", {"m": first})]
+    closed = any(h["reopened_at"] is None for h in history)
+    ended = t > last
+    end = min(last, t - timedelta(days=1))
+    issues: list[dict] = []
+    totals = {"people": 0, "days": 0, "paid_min": 0, "sheet_total": 0}
+
+    def add(level: str, w: dict | None, day: int | None, msg: str) -> None:
+        issues.append({"level": level, "worker_id": w["id"] if w else None,
+                       "name": w["name"] if w else None, "day": day, "msg": msg})
+
+    if not ended:
+        nxt = last + timedelta(days=1)
+        add("error", None, None, f"아직 끝나지 않은 달입니다 ({nxt.month}월 {nxt.day}일부터 마감 가능) — 아래는 어제까지 현황")
+    for w in dash_db.rows(SQL_WORKERS):
+        rs, mine, off = rates.get(w["id"], []), logs.get(w["id"], []), offs.get(w["id"], [])
+        cands = _spans(rs, "effective_from", first, last)
+        if not mine and not off and not (w["active"] and any(_hourly(c) for c in cands)):
+            continue
+        done = {lg["work_date"] for lg in mine} | {o["work_date"] for o in off}
+        if w["active"]:
+            miss = [d.day for d in (first + timedelta(days=i) for i in range((end - first).days + 1))
+                    if d not in done and is_workday(effective_on(rs, d, "effective_from"), d)]
+            if miss:
+                add("error", w, miss[0], f"미입력 {len(miss)}일 ({_short_days(miss)}) — 근무 또는 휴무를 입력하세요")
+        elif mine:
+            add("info", w, None, f"비활성 인력 — 미입력 검사 제외 (기록 {len(mine)}일은 근무표에 포함)")
+        bad = [lg["work_date"].day for lg in mine
+               if not _hourly(effective_on(rs, lg["work_date"], "effective_from"))]
+        if bad:
+            add("error", w, bad[0], f"계약 없는 날 근무 {len(bad)}일 ({_short_days(bad)}) — 계약 시작일 확인")
+        long = [lg["work_date"].day for lg in mine if _mins(lg["clock_out"]) - _mins(lg["clock_in"]) > 720]
+        if long:
+            add("warn", w, long[0], f"12시간 넘는 근무 {len(long)}일 ({_short_days(long)}) — 시각 오기 확인")
+        s = month_summary(mine, rs)
+        if s["days"]:
+            totals["people"] += 1
+            totals["days"] += s["days"]
+            totals["paid_min"] += s["paid_min"]
+            totals["sheet_total"] += int(s["pay"]["sheet"]["total"])
+    return {"month": first.isoformat(), "closed": closed, "ended": ended,
+            "can_close": not closed and not any(i["level"] == "error" for i in issues),
+            "issues": issues, "totals": totals, "history": history}
+
+
+def close_month(month: date, memo: str | None, email: str) -> dict:
+    chk = close_check(month)
+    if chk["closed"]:
+        raise ValueError("이미 마감된 달입니다 (새로고침하세요)")
+    errs = [i for i in chk["issues"] if i["level"] == "error"]
+    if errs:
+        parts = [(f"{i['name']}: " if i["name"] else "") + i["msg"] for i in errs[:3]]
+        more = f" 외 {len(errs) - 3}건" if len(errs) > 3 else ""
+        raise ValueError("마감할 수 없습니다 — " + " / ".join(parts) + more)
+    try:
+        with get_dash_engine().begin() as conn:
+            conn.execute(text("""
+                INSERT INTO month_closings (month, closed_by, memo, summary)
+                VALUES (:m, :e, :memo, CAST(:s AS JSONB))
+            """), {"m": month.replace(day=1), "e": email, "memo": memo, "s": json.dumps(chk["totals"])})
+    except IntegrityError:
+        raise ValueError("이미 마감된 달입니다 (새로고침하세요)") from None
+    return {"ok": True, "totals": chk["totals"]}
+
+
+def reopen_month(month: date, reason: str, email: str) -> dict:
+    reason = (reason or "").strip()
+    if len(reason) < 2:
+        raise ValueError("해제 사유를 2자 이상 입력하세요")
+    with get_dash_engine().begin() as conn:
+        res = conn.execute(text("""
+            UPDATE month_closings SET reopened_at = NOW(), reopened_by = :e, reopen_reason = :r
+            WHERE month = :m AND reopened_at IS NULL
+        """), {"m": month.replace(day=1), "e": email, "r": reason})
+    if res.rowcount == 0:
+        raise ValueError("마감되지 않은 달입니다 (새로고침하세요)")
+    return {"ok": True}
 
 
 # ---------- S2-P4a-2 근무표 엑셀 내보내기 ----------
