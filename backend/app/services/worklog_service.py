@@ -306,6 +306,37 @@ def save_person(wid: int, items: list[dict], delete_ids: list[int], email: str,
             "off_saved": off_saved, "off_deleted": off_deleted, "warns": warns}
 
 
+def save_offs_bulk(d: date, ids: list[int], reason: str | None, memo: str | None, email: str) -> dict:
+    """하루 × 여러 사람 휴무 지정(reason) / 해제(None). 한 트랜잭션.
+    근무 기록이 있는 사람은 건너뛰고 이름을 돌려줌 (근무 기록은 건드리지 않음)."""
+    saved = released = unchanged = 0
+    skipped: list[str] = []
+    with get_dash_engine().begin() as conn:
+        if _closed(conn, d):
+            raise ValueError(f"{d.year}년 {d.month}월은 마감되었습니다. 마감 해제 후 수정하세요")
+        for wid in dict.fromkeys(ids):
+            name = _worker(conn, wid)[0]
+            if reason is None:
+                row = conn.execute(text("""SELECT id FROM work_offs
+                    WHERE worker_id = :w AND work_date = :d AND deleted_at IS NULL"""), {"w": wid, "d": d}).fetchone()
+                if row:
+                    conn.execute(text("UPDATE work_offs SET deleted_at = NOW(), deleted_by = :e WHERE id = :i"),
+                                 {"i": row[0], "e": email})
+                    released += 1
+                else:
+                    unchanged += 1
+                continue
+            if conn.execute(text("""SELECT 1 FROM work_logs
+                WHERE worker_id = :w AND work_date = :d AND deleted_at IS NULL"""), {"w": wid, "d": d}).fetchone():
+                skipped.append(name)
+                continue
+            if _write_off(conn, wid, {"work_date": d, "reason": reason, "memo": memo}, email):
+                saved += 1
+            else:
+                unchanged += 1
+    return {"ok": True, "saved": saved, "released": released, "unchanged": unchanged, "skipped": skipped}
+
+
 def delete_log(lid: int, email: str) -> None:
     """그날 기록 삭제 = 비근무. 변경 기록은 남김."""
     with get_dash_engine().begin() as conn:

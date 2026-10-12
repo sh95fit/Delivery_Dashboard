@@ -10,7 +10,8 @@ import { INCOME_LABEL } from "@/api/workers";
 import { OFF_LABEL, getWorkMonth, hmm } from "@/api/worklogs";
 import type { WorkMonthView } from "@/api/worklogs";
 import { errText } from "@/lib/form";
-import { num, won } from "@/lib/format";
+import { num, todayKst, won } from "@/lib/format";
+import BulkOffModal from "./BulkOffModal";
 import WorkPersonModal from "./WorkPersonModal";
 
 type Filter = "all" | "labor" | "business";
@@ -31,6 +32,7 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
   const [edit, setEdit] = useState<{ wid: number; day: number | null } | null>(null);
   const [note, setNote] = useState("");
   const [exp, setExp] = useState(false);
+  const [bulk, setBulk] = useState<number | null>(null);   // 휴무 일괄 창: 열린 날짜
 
   useEffect(() => {
     let alive = true;
@@ -41,7 +43,8 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [month, ver]);
-  useEffect(() => { setNote(""); setEdit(null); setExp(false); }, [month]);
+  useEffect(() => { setNote(""); setEdit(null); setExp(false); setBulk(null); }, [month]);
+  const canBulk = isAdmin && !!view && !view.closed;
 
   const [y, m] = month.split("-").map(Number);
   const all = view?.people ?? [];
@@ -70,6 +73,11 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
             ))}
           </div>
           <input type="month" className="input input-sm" value={month} onChange={(e) => e.target.value && onMonth(e.target.value)} />
+          {canBulk && (
+            <Button size="sm" onClick={() => { const t = todayKst(); setBulk(t.startsWith(month) ? Number(t.slice(8)) : 1); }}>
+              휴무 일괄 지정
+            </Button>
+          )}
           {isAdmin && view && <Button size="sm" variant="primary" onClick={() => setExp(true)}>근무표 다운로드</Button>}
         </>
       }
@@ -78,6 +86,7 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
         <b> 근무표 지급</b> = 엑셀 총지급액 (기본급 + 월 수당, 사업자는 부가세 포함, 초과수당 제외).
         회색 <b>예상</b> 칸은 초과 기준이 있는 사람만 참고로 표시하며 엑셀에는 들어가지 않습니다.
         {" "}<b>휴</b> = 휴무(사유는 관리용, 엑셀 제외), <b>!</b> = 어제까지 근무 요일인데 근무·휴무가 없는 날, 파란 테두리 = 주말 근무.
+        {" "}<b>날짜 머리글</b>을 누르면 그날 여러 명의 휴무를 한 번에 지정·해제합니다 (공휴일·공장 휴무).
       </>}
     >
       {error && <ErrorBox message={error} />}
@@ -94,7 +103,15 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
                 <th className="wl-name">이름</th>
                 {days.map((d) => {
                   const w = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-                  return <th key={d} className={w === 0 ? "wl-sun" : w === 6 ? "wl-sat" : undefined}>{d}<br />{WD[w]}</th>;
+                  return (
+                    <th key={d} className={w === 0 ? "wl-sun" : w === 6 ? "wl-sat" : undefined}>
+                      {canBulk ? (
+                        <button type="button" className="wl-dayhead" onClick={() => setBulk(d)}
+                          title={`${d}일 여러 명 휴무 지정·해제`}>{d}<br />{WD[w]}</button>
+                      ) : <>{d}<br />{WD[w]}</>}
+                    </th>
+                  );
+                  
                 })}
                 <th className="num">근무일</th>
                 <th className="num">주말 근무</th>
@@ -111,13 +128,19 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
               {people.map((p) => (
                 <tr key={p.worker_id} className={p.active ? undefined : "off"}>
                   <td className="wl-name">
-                    <button type="button" className="wl-namebtn" onClick={() => setEdit({ wid: p.worker_id, day: null })}
-                      title="한 달 입력 열기">
-                      {p.name}
-                    </button>{" "}
-                    <span className="muted small">{INCOME_LABEL[p.income_type]}</span>
-                    {p.summary.nocontract > 0 && <> <Chip tone="danger">계약 없는 날 {p.summary.nocontract}</Chip></>}
-                    {p.missing_days.length > 0 && <> <Chip tone="caution">미입력 {p.missing_days.length}</Chip></>}
+                    <div className="wl-namecell">
+                      <span className="wl-who">
+                        <button type="button" className="wl-namebtn" onClick={() => setEdit({ wid: p.worker_id, day: null })}
+                          title="한 달 입력 열기">{p.name}</button>
+                        <span className="muted small">{INCOME_LABEL[p.income_type]}</span>
+                      </span>
+                      {(p.summary.nocontract > 0 || p.missing_days.length > 0) && (
+                        <span className="wl-flags">
+                          {p.summary.nocontract > 0 && <Chip tone="danger">계약 없는 날 {p.summary.nocontract}</Chip>}
+                          {p.missing_days.length > 0 && <Chip tone="caution">미입력 {p.missing_days.length}</Chip>}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   {days.map((d) => {
                     const lg = p.days[String(d)];
@@ -185,6 +208,14 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
       )}
       {exp && view && (
         <ExportModal month={month} lastDay={view.last_day} people={all} onClose={() => setExp(false)} />
+      )}
+      {bulk != null && view && (
+        <BulkOffModal
+          key={`${month}-${bulk}`}
+          month={month} lastDay={view.last_day} day={bulk} people={all} closed={view.closed}
+          onClose={() => setBulk(null)}
+          onSaved={(msg) => { setBulk(null); setNote(msg); setVer((v) => v + 1); onSaved(); }}
+        />
       )}
     </Panel>
   );

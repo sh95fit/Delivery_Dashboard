@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from app.auth import get_current_email
 from app.deps import guard, memo, require_admin
-from app.schemas.worklogs import WorkDayIn, WorkPersonIn
+from app.schemas.worklogs import WorkDayIn, WorkOffBulkIn, WorkPersonIn
 from app.services import worklog_service as svc
 
 router = APIRouter(prefix="/worklogs", tags=["worklogs"])
@@ -41,6 +41,12 @@ def save_person(wid: int, body: WorkPersonIn, email: str = Depends(require_admin
         o["memo"] = memo(o.get("memo"))
     return guard(svc.save_person, wid, items, body.delete_ids, email, offs, body.off_delete_ids,
                  fail="근무 기록 저장 실패")
+
+
+@router.put("/offs/{d}")
+def save_offs(d: date, body: WorkOffBulkIn, email: str = Depends(require_admin)):
+    return guard(svc.save_offs_bulk, d, body.worker_ids, body.reason, memo(body.memo), email,
+                 fail="휴무 일괄 저장 실패")
 
 
 @router.delete("/{lid}")

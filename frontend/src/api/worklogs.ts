@@ -67,6 +67,11 @@ export const saveWorkPerson = (wid: number, items: WorkLogDateInput[], delete_id
   offs: WorkOffInput[] = [], off_delete_ids: number[] = []) =>
   put<SavePersonResult>(`/api/worklogs/person/${wid}`, { items, delete_ids, offs, off_delete_ids });
 
+export interface BulkOffResult { ok: boolean; saved: number; released: number; unchanged: number; skipped: string[] }
+/** 하루 × 여러 사람 휴무 지정(reason) / 해제(reason=null) */
+export const saveWorkOffs = (d: string, worker_ids: number[], reason: OffReason | null, memo: string | null) =>
+  put<BulkOffResult>(`/api/worklogs/offs/${d}`, { worker_ids, reason, memo });    
+
 /** 근무 요일 판정 (서버 is_workday와 같은 규칙): 월=1 … 일=64 */
 export const dayBit = (iso: string) => 1 << ((new Date(`${iso}T00:00:00Z`).getUTCDay() + 6) % 7);
 export const isWorkday = (c: WorkContract | null, iso: string) => !!c && (c.work_days & dayBit(iso)) !== 0;

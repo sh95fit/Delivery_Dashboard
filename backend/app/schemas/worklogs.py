@@ -47,3 +47,10 @@ class WorkPersonIn(BaseModel):
         if not (self.items or self.delete_ids or self.offs or self.off_delete_ids):
             raise ValueError("저장하거나 삭제할 기록이 없습니다")
         return self
+
+
+class WorkOffBulkIn(BaseModel):
+    """월 표 날짜 머리글: 하루 × 여러 사람 휴무 지정(reason) / 해제(reason=None)"""
+    worker_ids: list[int] = Field(min_length=1, max_length=200)
+    reason: OffReason | None = None
+    memo: str | None = Field(default=None, max_length=200)

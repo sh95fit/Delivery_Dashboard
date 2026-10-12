@@ -485,3 +485,24 @@ tr.wl-dirty td { background: #fffbeb; }
 .wp-tbl tr.wp-off td { background: var(--line-soft); }
 .wp-tbl tr.wp-miss td:first-child { box-shadow: inset 3px 0 0 var(--caution); }
 .wp-c-off { width: 128px; }
+
+/* S2-P4b-1a 월 표 이름 칸: 이름·구분 왼쪽 묶음, 뱃지 오른쪽 끝 정렬 */
+.wl-month .wl-name { min-width: 190px; }
+.wl-namecell { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.wl-who { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; }
+.wl-flags { display: inline-flex; gap: 4px; margin-left: auto; }
+.wl-flags .chip { padding: 1px 6px; font-size: 11px; }
+
+/* 날짜 머리글 = 휴무 일괄 버튼 (토·일 글자색 유지) */
+.wl-dayhead { display: block; width: 100%; padding: 2px 4px; border: 0; border-radius: 4px; background: none;
+  font: inherit; color: inherit; line-height: 1.2; cursor: pointer; }
+.wl-dayhead:hover { background: #eff6ff; color: var(--brand); }
+
+/* 휴무 일괄 창 */
+.bo-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.bo-seg { margin-left: 0; }
+.bo-memo { width: 200px; }
+.bo-wrap { max-height: 50vh; overflow: auto; border: 1px solid var(--line); border-radius: var(--r-sm); }
+.bo-tbl thead th { position: sticky; top: 0; z-index: 1; background: #f8fafc; }
+.bo-tbl td { padding: 6px 10px; }
+.bo-chk { width: 36px; text-align: center; }
