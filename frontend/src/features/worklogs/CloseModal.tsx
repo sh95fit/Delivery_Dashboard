@@ -12,14 +12,15 @@ import { num, won } from "@/lib/format";
 type Props = {
   month: string; isAdmin: boolean;
   onClose: () => void; onJump: (wid: number, day: number | null) => void; onChanged: (msg: string) => void;
+  note?: string;   // 바로가기 입력 창에서 저장하고 돌아왔을 때 결과
 };
 
 const ts = (s: string | null) => (s ? new Date(s).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", hour12: false }) : "-");
 const totText = (t: CloseTotals | null) =>
   t ? `${num(t.people)}명 · ${num(t.days)}일 · 유급 ${hmm(t.paid_min)} · 근무표 지급 ${won(t.sheet_total)}` : "-";
 
-/** 월 표 → 마감 점검 / 마감 / 해제 / 이력. 점검 항목의 [입력 창]을 누르면 그 사람·그날 입력 창으로 이동 */
-export default function CloseModal({ month, isAdmin, onClose, onJump, onChanged }: Props) {
+/** 월 표 → 마감 점검 / 마감 / 해제 / 이력. [입력 바로가기] → 그 사람 입력 창 → 저장·닫기 후 이 창으로 돌아와 다시 점검 */
+export default function CloseModal({ month, isAdmin, onClose, onJump, onChanged, note }: Props) {
   const [chk, setChk] = useState<CloseCheck | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -90,6 +91,7 @@ export default function CloseModal({ month, isAdmin, onClose, onJump, onChanged 
       </>}
     >
       {error && <ErrorBox message={error} />}
+      {note && <div className="notice">✓ {note}</div>}
       {loading ? <Spinner /> : chk && (
         <>
           <div className="cm-head">
@@ -113,8 +115,9 @@ export default function CloseModal({ month, isAdmin, onClose, onJump, onChanged 
                       <td>{i.name ?? "-"}</td>
                       <td className="small">{i.msg}</td>
                       <td>{i.worker_id != null && (
-                        <Button size="sm" variant="ghost" onClick={() => onJump(i.worker_id!, i.day)}>
-                          입력 창{i.day ? ` (${i.day}일)` : ""}
+                        <Button size="sm" variant="ghost" onClick={() => onJump(i.worker_id!, i.day)}
+                          title={i.day ? `${i.day}일로 이동` : "한 달 입력 열기"}>
+                          입력 바로가기
                         </Button>
                       )}</td>
                     </tr>

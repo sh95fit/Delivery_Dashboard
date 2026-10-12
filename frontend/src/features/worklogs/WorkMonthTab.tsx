@@ -35,6 +35,7 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
   const [exp, setExp] = useState(false);
   const [bulk, setBulk] = useState<number | null>(null);   // 휴무 일괄 창: 열린 날짜
   const [closing, setClosing] = useState(false);   // 마감 관리 창
+  const [closeNote, setCloseNote] = useState("");   // 마감 창 바로가기 → 저장 결과 (마감 창에 표시)
 
   useEffect(() => {
     let alive = true;
@@ -45,7 +46,7 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [month, ver]);
-  useEffect(() => { setNote(""); setEdit(null); setExp(false); setBulk(null); setClosing(false); }, [month]);
+  useEffect(() => { setNote(""); setEdit(null); setExp(false); setBulk(null); setClosing(false); setCloseNote(""); }, [month]);
   const canBulk = isAdmin && !!view && !view.closed;
 
   const [y, m] = month.split("-").map(Number);
@@ -209,7 +210,7 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
           person={editing} month={month} lastDay={view.last_day} focusDay={edit?.day ?? null}
           closed={view.closed} isAdmin={isAdmin} managers={managers}
           onClose={() => setEdit(null)}
-          onSaved={(msg) => { setEdit(null); setNote(msg); setVer((v) => v + 1); onSaved(); }}
+          onSaved={(msg) => { setEdit(null); if (closing) setCloseNote(msg); else setNote(msg); setVer((v) => v + 1); onSaved(); }}
         />
       )}
       {exp && view && (
@@ -223,11 +224,11 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
           onSaved={(msg) => { setBulk(null); setNote(msg); setVer((v) => v + 1); onSaved(); }}
         />
       )}
-      {closing && view && (
-        <CloseModal month={month} isAdmin={isAdmin}
-          onClose={() => setClosing(false)}
-          onJump={(wid, day) => { setClosing(false); setEdit({ wid, day }); }}
-          onChanged={(msg) => { setClosing(false); setNote(msg); setVer((v) => v + 1); onSaved(); }}
+      {closing && view && !editing && (
+        <CloseModal month={month} isAdmin={isAdmin} note={closeNote}
+          onClose={() => { setClosing(false); setCloseNote(""); }}
+          onJump={(wid, day) => { setCloseNote(""); setEdit({ wid, day }); }}
+          onChanged={(msg) => { setClosing(false); setCloseNote(""); setNote(msg); setVer((v) => v + 1); onSaved(); }}
         />
       )}
     </Panel>
