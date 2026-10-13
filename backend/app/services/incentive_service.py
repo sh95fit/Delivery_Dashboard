@@ -21,7 +21,7 @@ from sqlalchemy import bindparam, text
 from app.database import get_dash_engine, get_engine
 from app.services import dash_db
 from app.services.cost_calc import effective_on
-from app.services.incentive_calc import ADJ_LINEUPS, check_bands, day_row
+from app.services.incentive_calc import ADJ_LINEUPS, assign_owner, check_bands, day_row
 from app.services.manager_service import _iso, _rds_managers, today
 from app.services.worker_service import check_unlocked
 
@@ -579,3 +579,61 @@ def release_hold(hid: int, reason: str, email: str) -> dict:
         conn.execute(text("""UPDATE incentive_holds SET released_at = NOW(), released_by = :e, release_reason = :r
             WHERE id = :i"""), {"i": hid, "e": email, "r": reason})
     return {"ok": True}
+
+
+# ---------- S2-P4c-2 계정 → 사람 (근무표 '인센티브' 칸 = 데일리 지급액 + 특수 수당) ----------
+def person_month(month: date) -> dict:
+    """그 달 계정×일자 금액을 사람에게 배정. 배정 규칙은 incentive_calc.assign_owner."""
+    s = month.replace(day=1)
+    e = s.replace(day=calendar.monthrange(s.year, s.month)[1])
+    rows = _build(s, e, detail=False)
+    p = {"s": s, "e": e}
+    logs = dash_db.rows("""SELECT worker_id, work_date, manager_id FROM work_logs
+                           WHERE deleted_at IS NULL AND work_date BETWEEN :s AND :e""", p)
+    offs = dash_db.rows("""SELECT worker_id, work_date FROM work_offs
+                           WHERE deleted_at IS NULL AND work_date BETWEEN :s AND :e""", p)
+    accs: dict[int, list[dict]] = {}
+    for a in dash_db.rows("SELECT worker_id, manager_id, start_date FROM worker_accounts WHERE deleted_at IS NULL"):
+        accs.setdefault(int(a["worker_id"]), []).append(a)
+
+    day_acc: dict[date, dict[int, int | None]] = {}
+    logged: dict[tuple[date, int], list[int]] = {}
+    for lg in logs:
+        wid, d = int(lg["worker_id"]), lg["work_date"]
+        mid = None if lg["manager_id"] is None else int(lg["manager_id"])
+        day_acc.setdefault(d, {})[wid] = mid
+        if mid is not None:
+            logged.setdefault((d, mid), []).append(wid)
+    off_by: dict[date, set[int]] = {}
+    for o in offs:
+        off_by.setdefault(o["work_date"], set()).add(int(o["worker_id"]))
+
+    def fixed_on(d: date, mid: int) -> list[int]:
+        out = []
+        for wid, lst in accs.items():
+            a = effective_on(lst, d, "start_date")
+            if a and a["manager_id"] is not None and int(a["manager_id"]) == mid:
+                out.append(wid)
+        return out
+
+    mgrs, t = _managers(), today()
+    people: dict[int, dict] = {}
+    unassigned: list[dict] = []
+    for (d, mid), r in sorted(rows.items()):
+        pay, ext = int(r["payable"] or 0), int(r["extras"])
+        pending = r["status"] == "need_accounts" and int(r.get("stops") or 0) > 0 and d <= t
+        if not (pay or ext or pending):
+            continue
+        wid, why = assign_owner(mid, logged.get((d, mid), []), fixed_on(d, mid),
+                                day_acc.get(d, {}), off_by.get(d, set()))
+        if wid is None:
+            unassigned.append({"date": d.isoformat(), "manager_id": mid,
+                               "manager_name": (mgrs.get(mid) or {}).get("name") or f"계정 {mid}",
+                               "amount": pay + ext, "pending": pending, "why": why})
+            continue
+        pp = people.setdefault(wid, {"incentive": 0, "extras": 0, "pending_days": 0, "days": 0})
+        pp["incentive"] += pay
+        pp["extras"] += ext
+        pp["pending_days"] += 1 if pending else 0
+        pp["days"] += 1
+    return {"month": s.isoformat(), "people": people, "unassigned": unassigned}

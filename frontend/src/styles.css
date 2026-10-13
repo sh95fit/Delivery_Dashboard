@@ -583,3 +583,4 @@ tr.wl-dirty td { background: #fffbeb; }
 .inc-seg { margin-left: 0; }
 .inc-lu { max-width: 520px; margin-bottom: 8px; }
 .inc-mini .ed-editing .input-sm { width: 100%; }
+.inc-legend .lg-extra::before { content: none; }

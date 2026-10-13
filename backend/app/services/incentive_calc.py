@@ -174,3 +174,21 @@ def day_row(stops: list[dict], excluded: dict, adjs: list[dict], accounts: int |
         "extras": extras_total, "total": (payable or 0) + extras_total,
         "status": status, "warns": warns,
     }
+
+def assign_owner(mid: int, logged: list[int], fixed: list[int],
+                 day_acc: dict[int, int | None], off: set[int]) -> tuple[int | None, str | None]:
+    """S2-P4c-2 계정(mid)의 그날 인센티브를 받을 인력 → (worker_id, 못 찾은 사유).
+    logged  = 그날 근무 기록의 '그날 계정'이 mid 인 인력
+    fixed   = 그날 mid 를 고정 계정으로 가진 인력
+    day_acc = 그날 근무 기록이 있는 인력 → 그날 계정 (None = 고정 계정으로 근무)
+    off     = 그날 휴무 인력"""
+    if len(logged) == 1:
+        return logged[0], None
+    if len(logged) > 1:
+        return None, "같은 날 이 계정으로 근무 기록된 인력이 여러 명입니다"
+    cands = [w for w in fixed if w not in off and day_acc.get(w, mid) in (None, mid)]
+    if len(cands) == 1:
+        return cands[0], None
+    if cands:
+        return None, "이 계정의 고정 보유자가 여러 명입니다"
+    return None, "담당 인력을 찾지 못했습니다 (근무 기록의 '그날 계정' 또는 고정 계정 확인)"

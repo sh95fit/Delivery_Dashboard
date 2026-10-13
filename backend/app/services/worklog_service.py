@@ -472,7 +472,9 @@ def _range(month: date, start: date | None, end: date | None) -> tuple[date, dat
 
 def export_plan(month: date, start: date | None = None, end: date | None = None,
                 ids: list[int] | None = None) -> dict:
-    """다운로드 전 점검 + 엑셀에 들어갈 값. error가 있는 구분은 파일을 만들지 않음."""
+    """다운로드 전 점검 + 엑셀에 들어갈 값. error가 있는 구분은 파일을 만들지 않음 (sheet=None error는 두 파일 모두 차단).
+    대상 = 시급 계약자(근로소득 시급제·사업자·프리랜서). 월급제(정규직)는 제외.
+    인센티브 칸 = 그 달 데일리 인센티브 지급액 + 특수 수당 (계정 → 사람, S2-P4c-2) + 월 수당 수기 입력분"""
     first, a, b = _range(month, start, end)
     full = (a, b) == month_bounds(first)
     rates = _group(dash_db.rows("SELECT * FROM worker_pay_rates WHERE deleted_at IS NULL"), "worker_id")
@@ -489,15 +491,31 @@ def export_plan(month: date, start: date | None = None, end: date | None = None,
     def add(level: str, sheet: str | None, name: str | None, msg: str) -> None:
         issues.append({"level": level, "sheet": sheet, "name": name, "msg": msg})
 
+    incm = None
+    try:
+        from app.services.incentive_service import person_month   # 함수 안 import = 서비스 간 순환 import 방지
+        incm = person_month(first)
+    except Exception as e:  # noqa: BLE001
+        add("error", None, None, f"인센티브를 불러오지 못해 근무표를 만들 수 없습니다 ({type(e).__name__}) — 잠시 후 다시 시도하세요")
+    inc_people = incm["people"] if incm else {}
+
     for w in dash_db.rows(SQL_WORKERS):
-        sheet = SHEET_OF.get(w["income_type"])             # 정규직 = 근무표 대상 아님
+        sheet = SHEET_OF.get(w["income_type"])
         if sheet is None or (want is not None and w["id"] not in want):
             continue
         name = w["name"]
         rs, mine = rates.get(w["id"], []), logs.get(w["id"], [])
-        spans = [r for r in _spans(rs, "effective_from", a, b) if _hourly(r)]
-        if not mine and not (spans and (w["active"] or want is not None)):
+        cands = _spans(rs, "effective_from", a, b)
+        if cands and not any(_hourly(r) for r in cands):
             if want is not None:
+                add("info", sheet, name, "월급제(정규직) 계약이라 근무표 대상이 아닙니다")
+            continue
+        pi = inc_people.get(w["id"], {})
+        spans = [r for r in cands if _hourly(r)]
+        if not mine and not (spans and (w["active"] or want is not None)):
+            if pi.get("incentive") or pi.get("extras"):
+                add("warn", sheet, name, "기간 안 근무 기록이 없는데 인센티브가 배정되어 빠집니다 (고정 계정·그날 계정 확인)")
+            elif want is not None:
                 add("warn", sheet, name, "기간 안에 근무 기록·시급 계약이 없어 제외")
             continue
         days: dict[int, dict] = {}
@@ -515,15 +533,23 @@ def export_plan(month: date, start: date | None = None, end: date | None = None,
             ok_logs.append(lg)
         rate = amounts[-1] if amounts else (int(spans[-1]["amount"]) if spans else 0)
         if rate <= 0:
-            continue                                        # 위에서 error 등록됨
+            continue                                  # 위에서 error 등록됨
         base = month_summary(ok_logs, rs)["base"]
         pay_value = None
         if len(set(amounts)) > 1:
             pay_value = base
             add("warn", sheet, name, f"월 중 시급 변경({amounts[0]:,}→{amounts[-1]:,}원): "
-                                     "시급 칸은 마지막 시급, 월급여 칸은 날짜별 시급 합계 값(수식 아님)")
+                "시급 칸은 마지막 시급, 월급여 칸은 날짜별 시급 합계 값(수식 아님)")
         ex = extras.get(w["id"], {})
-        inc, wk, other = ex.get("incentive", 0), ex.get("weekend", 0), ex.get("other", 0)
+        manual, wk, other = ex.get("incentive", 0), ex.get("weekend", 0), ex.get("other", 0)
+        daily, special = int(pi.get("incentive", 0)), int(pi.get("extras", 0))
+        inc = daily + special + manual
+        if manual:
+            add("warn", sheet, name, f"월 수당에 수기 인센티브 {manual:,}원이 있어 시스템 금액 "
+                f"{daily + special:,}원과 합산됩니다 — 중복 입력이 아닌지 확인")
+        if pi.get("pending_days"):
+            add("warn", sheet, name, f"고객사 수 미입력 {pi['pending_days']}일은 데일리 인센티브 0원으로 들어갑니다 "
+                "(인센티브 > 일자별 입력에서 입력 후 다시 받기)")
         if other:
             add("warn", sheet, name, f"기타 수당 {other:,}원은 근무표에 칸이 없어 빠집니다")
         if (inc or wk) and not full:
@@ -535,19 +561,27 @@ def export_plan(month: date, start: date | None = None, end: date | None = None,
         note = schedule_note([(r["effective_from"], _hm(r["work_start"]), _hm(r["work_end"]), int(r["amount"]))
                               for r in spans])
         sheets[sheet].append({
-            "worker_id": w["id"], "name": name, "active": bool(w["active"]),
-            "rate": rate, "note": note, "days": days, "pay_value": pay_value,
-            "incentive": inc, "weekend": wk, "vat": vat,
+            "worker_id": w["id"], "name": name, "active": bool(w["active"]), "rate": rate, "note": note,
+            "days": days, "pay_value": pay_value, "incentive": inc, "weekend": wk, "vat": vat,
+            "inc_daily": daily, "inc_extras": special, "inc_manual": manual,
             "work_days": len(days), "paid_min": sum(v["out"] - v["in"] - v["break"] for v in days.values()),
             "base": base, "sheet_total": pay_total(base, 0, inc + wk, vat)["total"],
         })
+    if incm and want is None:
+        un = incm["unassigned"]
+        for u in un[:10]:
+            d = date.fromisoformat(u["date"])
+            what = "고객사 수 미입력" if u["pending"] and not u["amount"] else f"{u['amount']:,}원"
+            add("warn", None, u["manager_name"], f"{d.month}/{d.day} 인센티브 {what} — {u['why']}")
+        if len(un) > 10:
+            add("warn", None, None, f"담당 인력 미확인 인센티브 외 {len(un) - 10}건")
     if b > today():
         add("warn", None, None, "오늘 이후 날짜가 포함되어 있습니다 (아직 입력되지 않은 날)")
     if not closed:
         add("info", None, None, "마감 전 기록입니다. 이후 수정되면 다시 받아야 합니다")
     return {"month": first.isoformat(), "start": a.isoformat(), "end": b.isoformat(), "closed": closed,
             "sheets": sheets, "issues": issues,
-            "ok": {s: not any(i["level"] == "error" and i["sheet"] == s for i in issues) for s in sheets}}
+            "ok": {s: not any(i["level"] == "error" and i["sheet"] in (s, None) for i in issues) for s in sheets}}
 
 
 def _fname(sheet: str, first: date, a: date, b: date, people: list[dict], ids, dept: str) -> str:
@@ -565,10 +599,11 @@ def export_file(sheet: str, month: date, start: date | None = None, end: date | 
     first, a, b = _range(month, start, end)
     plan = export_plan(month, start, end, ids)
     targets = ["labor", "business"] if sheet == "all" else [sheet]
-    errs = [i for i in plan["issues"] if i["level"] == "error" and i["sheet"] in targets]
+    errs = [i for i in plan["issues"] if i["level"] == "error" and (i["sheet"] in targets or i["sheet"] is None)]
     if errs:
         more = f" 외 {len(errs) - 5}건" if len(errs) > 5 else ""
-        raise ValueError("근무표를 만들 수 없습니다 — " + " / ".join(f"{e['name']}: {e['msg']}" for e in errs[:5]) + more)
+        raise ValueError("근무표를 만들 수 없습니다 — " + " / ".join(
+            (f"{e['name']}: " if e["name"] else "") + e["msg"] for e in errs[:5]) + more)
     factory, dept = os.getenv("TIMESHEET_FACTORY", ""), os.getenv("TIMESHEET_DEPT", "물류팀")
     files: list[tuple[str, bytes]] = []
     for s in targets:

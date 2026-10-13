@@ -91,3 +91,18 @@ def test_lineup_below_zero_warns():
     st = [{"address_id": 1, "gajung_qty": 10, "fresh_qty": 0, "light_qty": 0}]
     r = day_row(st, {}, [{"product_id": 29, "qty": -2}], 41, RATE, False, 0)
     assert r["product_total"] == 8 and any("라이트밀" in w for w in r["warns"])
+
+
+def test_assign_owner_rules():
+    from app.services.incentive_calc import assign_owner
+    # ① 그날 계정 기록이 우선
+    assert assign_owner(5, [11], [12], {11: 5, 12: None}, set()) == (11, None)
+    # ② 기록 없으면 고정 계정 보유자
+    assert assign_owner(5, [], [12], {}, set()) == (12, None)
+    assert assign_owner(5, [], [12], {12: None}, set()) == (12, None)
+    # 고정 보유자가 휴무 / 다른 계정으로 근무 → 미배정
+    assert assign_owner(5, [], [12], {}, {12})[0] is None
+    assert assign_owner(5, [], [12], {12: 7}, set())[0] is None
+    # 여러 명 → 미배정 (사유 포함)
+    wid, why = assign_owner(5, [11, 13], [], {11: 5, 13: 5}, set())
+    assert wid is None and "여러 명" in why
