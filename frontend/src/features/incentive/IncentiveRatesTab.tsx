@@ -9,7 +9,7 @@ import { deleteRates, getExtraItems, getRates, saveExtraItem, saveRates } from "
 import type { Band, BandKind, ExtraItem, RateSet } from "@/api/incentive";
 import { errText } from "@/lib/form";
 import { num, todayKst } from "@/lib/format";
-import { bandText } from "./util";
+import { bandText, parseAmt } from "./util";
 
 type Row = { end: string; amount: string };
 const KIND: Record<BandKind, string> = { product: "제품 수 (개당)", account: "고객사 수 (곳당)" };
@@ -94,7 +94,8 @@ export default function IncentiveRatesTab({ isAdmin }: { isAdmin: boolean }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<{ id: number | null; set: RateSet | null } | null>(null);
-  const [newItem, setNewItem] = useState("");
+  type IForm = { id: number | null; name: string; mode: "fixed" | "free"; unit: string; memo: string };
+  const [iform, setIform] = useState<IForm | null>(null);
 
   async function load() {
     try {
@@ -115,19 +116,27 @@ export default function IncentiveRatesTab({ isAdmin }: { isAdmin: boolean }) {
     if (!confirm(`${s.effective_from} 단가표를 삭제할까요? (그 기간은 이전 단가표로 계산됩니다)`)) return;
     try { await deleteRates(s.id); await load(); } catch (e) { setError(errText(e)); }
   }
-  async function toggle(i: ExtraItem) {
-    try {
-      await saveExtraItem(i.id, { name: i.name, unit_amount: null, active: !i.active, sort_order: i.sort_order, memo: i.memo });
-      await load();
-    } catch (e) { setError(errText(e)); }
+  function itemBody(i: ExtraItem, patch: Partial<ExtraItem>) {
+    return { name: i.name, unit_amount: i.unit_amount, active: i.active, sort_order: i.sort_order, memo: i.memo, ...patch };
   }
-  async function addItem() {
-    const name = newItem.trim();
-    if (!name) return;
+  async function toggle(i: ExtraItem) {
+    try { await saveExtraItem(i.id, itemBody(i, { active: !i.active })); await load(); } catch (e) { setError(errText(e)); }
+  }
+  const fUnit = iform ? parseAmt(iform.unit) : null;
+  async function saveItem() {
+    if (!iform || !iform.name.trim()) return;
+    if (iform.mode === "fixed" && fUnit == null) { setError("고정 금액은 1원~100만 원 숫자로 입력하세요"); return; }
+    const old = items.find((x) => x.id === iform.id);
+    const unit = iform.mode === "fixed" ? fUnit : null;
+    if (old && old.unit_amount !== unit
+      && !confirm(`'${old.name}' 금액 방식을 바꿉니다.\n이미 입력한 특수 수당은 그대로이고, 앞으로 입력할 때만 적용됩니다.`)) return;
     try {
-      await saveExtraItem(null, { name, unit_amount: null, active: true,
-        sort_order: Math.max(0, ...items.map((x) => x.sort_order)) + 1, memo: null });
-      setNewItem("");
+      await saveExtraItem(iform.id, {
+        name: iform.name.trim(), unit_amount: unit, active: old?.active ?? true, memo: iform.memo.trim() || null,
+        sort_order: old?.sort_order ?? Math.max(0, ...items.map((x) => x.sort_order)) + 1,
+      });
+      setIform(null);
+      setError("");
       await load();
     } catch (e) { setError(errText(e)); }
   }
@@ -162,24 +171,56 @@ export default function IncentiveRatesTab({ isAdmin }: { isAdmin: boolean }) {
           ))}
         </div>
       </Panel>
-      <Panel title="특수 수당 품목" desc="금액은 지급할 때마다 입력합니다 (품목에 고정 금액 없음). 쓰지 않는 품목은 '사용 안 함'으로 두면 이력은 유지되고 선택 목록에서만 빠집니다.">
+      <Panel title="특수 수당 품목"
+        right={isAdmin && !iform && <Button size="sm" variant="primary"
+          onClick={() => setIform({ id: null, name: "", mode: "free", unit: "", memo: "" })}>품목 추가</Button>}
+        desc="고정 금액 = 기본 단가가 자동으로 채워집니다(그날만 다르면 바꿔서 저장 가능). 수시 입력 = 매번 단가를 입력합니다. 수당은 단가 × 건수로 계산하고, 단가를 바꿔도 이미 입력한 수당은 그대로입니다.">
         <table className="tbl inc-mini">
-          <thead><tr><th>품목</th><th>상태</th><th /></tr></thead>
+          <thead><tr><th>품목</th><th>금액 방식</th><th className="num">기본 단가</th><th>메모</th><th>상태</th><th /></tr></thead>
           <tbody>
             {items.map((i) => (
               <tr key={i.id} className={i.active ? undefined : "off"}>
                 <td>{i.name}</td>
+                <td>{i.unit_amount ? <Chip tone="ok">고정 금액</Chip> : <Chip>수시 입력</Chip>}</td>
+                <td className="num">{i.unit_amount ? `${num(i.unit_amount)}원` : "-"}</td>
+                <td className="inc-ref">{i.memo ?? ""}</td>
                 <td>{i.active ? <Chip tone="ok">사용</Chip> : <Chip>사용 안 함</Chip>}</td>
-                <td>{isAdmin && <Button size="sm" onClick={() => toggle(i)}>{i.active ? "사용 안 함" : "다시 사용"}</Button>}</td>
+                <td className="inc-row">{isAdmin && <>
+                  <Button size="sm" disabled={!!iform} onClick={() => setIform({ id: i.id, name: i.name,
+                    mode: i.unit_amount ? "fixed" : "free", unit: i.unit_amount ? String(i.unit_amount) : "", memo: i.memo ?? "" })}>수정</Button>
+                  <Button size="sm" variant="ghost" onClick={() => toggle(i)}>{i.active ? "사용 안 함" : "다시 사용"}</Button>
+                </>}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        {isAdmin && (
-          <div className="inc-row mt">
-            <input className="input input-sm" placeholder="새 품목 이름 (예: 오전 추가 배송)" maxLength={50} value={newItem}
-              onChange={(e) => setNewItem(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addItem(); }} />
-            <Button size="sm" disabled={!newItem.trim()} onClick={addItem}>품목 추가</Button>
+        {iform && (
+          <div className={`ed-form${iform.id ? " is-edit" : ""}`}>
+            <div className="inc-xform">
+              <label className="inc-f">품목 이름
+                <input className="input input-sm" maxLength={50} value={iform.name} placeholder="예: 오후 수거"
+                  onChange={(e) => setIform({ ...iform, name: e.target.value })} />
+              </label>
+              <div className="inc-f">금액 방식
+                <span className="seg inc-seg">
+                  <button type="button" className={iform.mode === "fixed" ? "on" : undefined} onClick={() => setIform({ ...iform, mode: "fixed" })}>고정 금액</button>
+                  <button type="button" className={iform.mode === "free" ? "on" : undefined} onClick={() => setIform({ ...iform, mode: "free", unit: "" })}>수시 입력</button>
+                </span>
+              </div>
+              {iform.mode === "fixed" && (
+                <label className="inc-f">기본 단가 (원)
+                  <input className="input input-sm inc-n" inputMode="numeric" value={iform.unit}
+                    onChange={(e) => setIform({ ...iform, unit: e.target.value })} />
+                </label>
+              )}
+              <label className="inc-f">메모 (선택)
+                <input className="input input-sm inc-f-wide" maxLength={200} value={iform.memo}
+                  onChange={(e) => setIform({ ...iform, memo: e.target.value })} />
+              </label>
+              <Button size="sm" variant="primary" disabled={!iform.name.trim() || (iform.mode === "fixed" && fUnit == null)} onClick={saveItem}>
+                {iform.id ? "수정 저장" : "품목 저장"}</Button>
+              <Button size="sm" variant="ghost" onClick={() => setIform(null)}>취소</Button>
+            </div>
           </div>
         )}
       </Panel>

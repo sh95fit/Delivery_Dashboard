@@ -37,3 +37,6 @@ export function adjText(r: Pick<IncDayRow, "excluded_qty" | "delta">) {
   if (r.delta) p.push(`${r.delta > 0 ? "+" : "−"}${num(Math.abs(r.delta))}`);
   return p.length ? p.join(" ") : "-";
 }
+
+/** +3 / −2 / 0 */
+export const signed = (n: number) => (n > 0 ? `+${num(n)}` : n < 0 ? `−${num(-n)}` : "0");

@@ -557,3 +557,29 @@ tr.wl-dirty td { background: #fffbeb; }
 .inc-card-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
 .inc-bands { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 900px) { .inc-bands { grid-template-columns: 1fr; } .inc-rates { grid-template-columns: 1fr; } }
+
+/* S2-P4c-1c 인센티브 보완: 월 보드 범례·칸, 상세 입력 줄 정렬 */
+.inc-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin: 4px 0 8px; font-size: var(--fs-sm); color: var(--muted); }
+.inc-legend > span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.inc-legend .lg-need::before, .inc-legend .lg-held::before { content: ""; width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--line); }
+.inc-legend .lg-need::before { background: var(--caution-soft); border-color: #fed7aa; }
+.inc-legend .lg-held::before { background: var(--danger-soft); border-color: #fecaca; }
+.inc-legend .inc-dot { position: static; margin: 0; }
+.inc-month td.cell { position: relative; }
+.inc-cv { position: relative; display: inline-block; padding-right: 6px; white-space: nowrap; }
+.inc-dot { position: absolute; top: -2px; right: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--internal); }
+.inc-cw { font-style: normal; color: #b45309; margin-left: 2px; }
+
+.inc-xform { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; margin-top: 10px; padding: 10px 12px;
+  border: 1px dashed var(--line); border-radius: var(--r-sm); background: var(--bg); }
+.inc-f { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-xs); color: var(--muted); }
+.inc-f .input-sm { min-width: 110px; }
+.inc-f .inc-n { width: 110px; min-width: 0; text-align: right; }
+.inc-f .inc-n-sm { width: 64px; min-width: 0; text-align: right; }
+.inc-f-wide { min-width: 240px; }
+.inc-op { padding-bottom: 5px; color: var(--muted); font-weight: 700; }
+.inc-total-amt { display: inline-flex; align-items: center; height: 26px; min-width: 90px; font-size: var(--fs); color: var(--text); }
+.inc-xhint { flex-basis: 100%; font-size: var(--fs-sm); color: #b45309; }
+.inc-seg { margin-left: 0; }
+.inc-lu { max-width: 520px; margin-bottom: 8px; }
+.inc-mini .ed-editing .input-sm { width: 100%; }

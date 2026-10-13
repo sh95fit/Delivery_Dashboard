@@ -36,10 +36,13 @@ class AccountsIn(BaseModel):
     items: list[AccountItem] = Field(min_length=1, max_length=200)
 
 
-class DeltaIn(BaseModel):
+class QtyAdjIn(BaseModel):
+    work_date: date
     manager_id: int
-    value: int = Field(ge=-2000, le=2000)                     # 0 = 조정 지우기
-    reason: str | None = Field(default=None, max_length=200)
+    product_id: int | None = None                              # None = 제품 총량
+    qty: int = Field(ge=-2000, le=2000)                        # 0은 서버에서 거절
+    reason: str = Field(max_length=200)
+    _r = field_validator("reason")(classmethod(lambda cls, v: _need(v)))
 
 
 class ExclusionIn(BaseModel):

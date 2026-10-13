@@ -42,13 +42,13 @@ export default function IncentiveMonthTab({ month, onMonth, onPick }: Props) {
         {view?.closed && <Chip tone="warn">마감된 달</Chip>}
         <input type="month" className="input input-sm" value={month} onChange={(e) => e.target.value && onMonth(e.target.value)} />
       </>}
-      desc="칸 = 그날 지급 합계(데일리 인센티브 + 특수 수당). 칸을 누르면 그 날짜의 일자 입력으로 이동합니다."
+      desc="칸 = 그날 지급 합계(데일리 인센티브 + 특수 수당). 칸을 누르면 그 날짜의 일자별 입력으로 이동합니다."
     >
       {error && <ErrorBox message={error} />}
       <div className="inc-legend">
-        <span className="need">고객사 수 입력 필요</span>
-        <span className="held">미지급 (숫자 = 특수 수당만)</span>
-        <span className="dot">특수 수당 있음</span>
+        <span className="lg-need">고객사 수 입력 필요</span>
+        <span className="lg-held">미지급 (숫자 = 특수 수당만)</span>
+        <span className="lg-extra"><i className="inc-dot" />특수 수당 있음</span>
       </div>
       {view && (
         <div className="muted small">
@@ -82,7 +82,7 @@ export default function IncentiveMonthTab({ month, onMonth, onPick }: Props) {
                     return (
                       <td key={d} className={`cell ${cls}`} onClick={() => onPick(iso(d))}
                         title={`제품 ${num(c.product_total)} · 고객사 ${c.accounts ?? "미입력"} · 특수 수당 ${num(c.extras)}원${c.warn ? " · ⚠ 확인 필요" : ""}`}>
-                        {label}{c.extras > 0 && <i className="inc-dot" />}{c.warn && "⚠"}
+                        <span className="inc-cv">{label}{c.extras > 0 && <i className="inc-dot" />}{c.warn && <em className="inc-cw">⚠</em>}</span>
                       </td>
                     );
                   })}

@@ -1,10 +1,12 @@
 """S2-P4c-1 인센티브 계산 순수 함수 (DB 없음 → 단위 테스트 대상).
 
-구간표 = [{"start": 300, "end": 370, "amount": 50}, ...]   amount = 1개(1곳)당 원
+구간표 = [{"start": 300, "end": 370, "amount": 50}, ...]  amount = 1개(1곳)당 원
 - 구간은 start 초과 ~ end 이하. 마지막 구간만 end 비움(None) 가능 = start 초과 전부
 - 초과 기준 = 단가가 0보다 큰 첫 구간의 start (현재 제품 300, 고객사 40)
 - 인센티브 = (수량 − 초과 기준) × 수량이 들어간 구간의 단가
 - 마지막 구간에 끝값이 있는데 수량이 넘으면 → 마지막 구간 단가 적용 + 경고
+- 제품 수 = 자동(가정식+프레시밀+라이트밀) − 제외 배송지 + 조정 목록 합 (S2-P4c-1c)
+  조정은 라인업별(product_id) 또는 제품 총량(product_id=None). 금액 계산은 합계만 사용
 - 미지급은 데일리 인센티브만 0원. 특수 수당(extras)은 별도로 더함
 """
 from __future__ import annotations
@@ -12,6 +14,8 @@ from __future__ import annotations
 MAX_BANDS = 20
 KIND_LABEL = {"product": "제품 수", "account": "고객사 수"}
 OVER_MAX_MSG = "해당 구간에 지정된 단가가 없어 최대 구간 단가를 적용합니다"
+# 조정 가능한 라인업 = 집계 대상만. product_id → (배송지 수량 키, 표시명)
+ADJ_LINEUPS = {4: ("gajung_qty", "가정식"), 23: ("fresh_qty", "프레시밀"), 29: ("light_qty", "라이트밀")}
 
 
 def check_bands(kind: str, bands: list[dict]) -> list[dict]:
@@ -64,40 +68,75 @@ def band_pay(q: int, bands: list[dict]) -> dict:
     return {"amount": (q - th) * last["amount"], "excess": q - th, "unit": last["amount"], "over_max": True}
 
 
-def day_row(stops: list[dict], excluded: dict, delta: int, accounts: int | None, rate: dict | None,
-            held: bool, extras_total: int, shared: set | frozenset = frozenset()) -> dict:
+def _lineup_qty(s: dict) -> dict[int, int]:
+    """배송지 한 곳의 라인업별 수량. 프레시·라이트 구분이 없으면(이전 형식) mil_qty를 프레시 칸에 둔다."""
+    out = {pid: int(s.get(key) or 0) for pid, (key, _) in ADJ_LINEUPS.items()}
+    if s.get("fresh_qty") is None and s.get("light_qty") is None:
+        out[23] = int(s.get("mil_qty") or 0)
+    return out
+
+
+def day_row(stops: list[dict], excluded: dict, adjs: list[dict], accounts: int | None,
+            rate: dict | None, held: bool, extras_total: int,
+            shared: set | frozenset = frozenset()) -> dict:
     """계정 하루 계산.
-    stops: [{"address_id", "gajung_qty", "mil_qty", "dinner_qty"}]  excluded: {address_id: 제외 기록}
-    delta: ± 조정  accounts: 입력한 고객사 수(None = 미입력)  rate: {"product": 구간, "account": 구간} 또는 None
+    stops: [{"address_id", "gajung_qty", "fresh_qty", "light_qty", "dinner_qty", "pilot_qty"}]
+    excluded: {address_id: 제외 기록}   adjs: [{"product_id": 4|23|29|None, "qty": ±n}] (None = 제품 총량)
+    accounts: 입력한 고객사 수(None = 미입력)   rate: {"product": 구간, "account": 구간} 또는 None
     shared: 그날 '제외하지 않은' 계정 2곳 이상에 배정된 배송지 id"""
-    gajung = mil = dinner = pilot = excl = 0
+    auto_by = {pid: 0 for pid in ADJ_LINEUPS}
+    excl_by = {pid: 0 for pid in ADJ_LINEUPS}
+    dinner = pilot = 0
     here: set[int] = set()
     shared_left = False
     for s in stops:
         aid = int(s["address_id"])
         here.add(aid)
-        g, m = int(s.get("gajung_qty") or 0), int(s.get("mil_qty") or 0)
-        gajung += g
-        mil += m
+        for pid, v in _lineup_qty(s).items():
+            auto_by[pid] += v
+            if aid in excluded:
+                excl_by[pid] += v
         dinner += int(s.get("dinner_qty") or 0)
         pilot += int(s.get("pilot_qty") or 0)
-        if aid in excluded:
-            excl += g + m
-        elif aid in shared:
+        if aid not in excluded and aid in shared:
             shared_left = True
-    auto = gajung + mil
+
     warns: list[str] = []
+    adj_by = {pid: 0 for pid in ADJ_LINEUPS}
+    adj_total = 0
+    for a in adjs or []:
+        pid, v = a.get("product_id"), int(a.get("qty") or 0)
+        if pid is None:
+            adj_total += v
+        elif int(pid) in adj_by:
+            adj_by[int(pid)] += v
+        else:
+            adj_total += v
+            warns.append(f"조정 대상이 아닌 상품({pid}) 조정은 제품 총량으로 계산했습니다")
+
     orphan = len(set(excluded) - here)
     if orphan:
         warns.append(f"제외한 배송지 {orphan}곳이 이 계정 배정에 없습니다 (배정이 바뀌었는지 확인)")
     if shared_left:
         warns.append("다른 계정과 함께 배정된 배송지가 있습니다 — 실제로 처리하지 않은 계정에서 배송지를 제외하세요")
-    raw = auto - excl + int(delta or 0)
+
+    lineups = []
+    for pid, (_, label) in ADJ_LINEUPS.items():
+        final = auto_by[pid] - excl_by[pid] + adj_by[pid]
+        lineups.append({"product_id": pid, "label": label, "auto": auto_by[pid],
+                        "excluded": excl_by[pid], "adjust": adj_by[pid], "final": final})
+        if final < 0:
+            warns.append(f"{label} 조정 후 수량이 {final}입니다 — 조정 목록을 확인하세요")
+
+    auto = sum(auto_by.values())
+    excl = sum(excl_by.values())
+    delta = adj_total + sum(adj_by.values())
+    raw = auto - excl + delta
     product_total = max(0, raw)
     if raw < 0:
         warns.append("조정 후 제품 수가 0보다 작아 0으로 계산했습니다")
 
-    need_accounts = accounts is None and bool(stops)       # 배송이 없는 날(특수 수당만)은 입력 불필요
+    need_accounts = accounts is None and bool(stops)      # 배송이 없는 날(특수 수당만)은 입력 불필요
     has_rate = bool(rate and rate.get("product") and rate.get("account"))
     prod = acc = None
     if has_rate:
@@ -123,9 +162,12 @@ def day_row(stops: list[dict], excluded: dict, delta: int, accounts: int | None,
         status, payable = "ok", incentive
     extras_total = int(extras_total or 0)
     return {
-        "stops": len(stops), "gajung_qty": gajung, "mil_qty": mil, "dinner_qty": dinner, "pilot_qty": pilot,
-        "auto_qty": auto, "excluded_qty": excl, "delta": int(delta or 0), "product_total": product_total,
-        "accounts": accounts,
+        "stops": len(stops),
+        "gajung_qty": auto_by[4], "fresh_qty": auto_by[23], "light_qty": auto_by[29],
+        "mil_qty": auto_by[23] + auto_by[29],
+        "dinner_qty": dinner, "pilot_qty": pilot,
+        "auto_qty": auto, "excluded_qty": excl, "adj_total": adj_total, "delta": delta,
+        "lineups": lineups, "product_total": product_total, "accounts": accounts,
         "product_incentive": prod["amount"] if prod else None, "product_unit": prod["unit"] if prod else None,
         "account_incentive": acc["amount"] if acc else None, "account_unit": acc["unit"] if acc else None,
         "incentive": incentive, "held": held, "payable": payable,

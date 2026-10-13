@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, Query
 
 from app.auth import get_current_email
 from app.deps import guard, memo, require_admin
-from app.schemas.incentive import (AccountsIn, DeltaIn, ExclusionIn, ExtraIn, ExtraItemIn, ExtraUpdateIn,
-                                   HoldIn, RateSetIn, ReasonIn)
+from app.schemas.incentive import (AccountsIn, ExclusionIn, ExtraIn, ExtraItemIn, ExtraUpdateIn,
+                                   HoldIn, QtyAdjIn, RateSetIn, ReasonIn)
 from app.services import incentive_service as svc
 
 router = APIRouter(prefix="/incentive", tags=["incentive"])
@@ -50,9 +50,14 @@ def save_accounts(d: date, body: AccountsIn, email: str = Depends(require_admin)
     return guard(svc.save_accounts, d, [i.model_dump() for i in body.items], email, fail="고객사 수 저장 실패")
 
 
-@router.put("/delta/{d}")
-def set_delta(d: date, body: DeltaIn, email: str = Depends(require_admin)):
-    return guard(svc.set_delta, d, body.manager_id, body.value, body.reason, email, fail="제품 수 조정 실패")
+@router.post("/qty-adjustments")
+def add_qty_adj(body: QtyAdjIn, email: str = Depends(require_admin)):
+    return guard(svc.add_qty_adj, body.model_dump(), email, fail="제품 수 조정 저장 실패")
+
+
+@router.post("/qty-adjustments/{aid}/delete")
+def delete_qty_adj(aid: int, body: ReasonIn, email: str = Depends(require_admin)):
+    return guard(svc.delete_qty_adj, aid, body.reason, email, fail="제품 수 조정 삭제 실패")
 
 
 @router.post("/exclusions")
