@@ -70,7 +70,7 @@ def day_row(stops: list[dict], excluded: dict, delta: int, accounts: int | None,
     stops: [{"address_id", "gajung_qty", "mil_qty", "dinner_qty"}]  excluded: {address_id: 제외 기록}
     delta: ± 조정  accounts: 입력한 고객사 수(None = 미입력)  rate: {"product": 구간, "account": 구간} 또는 None
     shared: 그날 '제외하지 않은' 계정 2곳 이상에 배정된 배송지 id"""
-    gajung = mil = dinner = excl = 0
+    gajung = mil = dinner = pilot = excl = 0
     here: set[int] = set()
     shared_left = False
     for s in stops:
@@ -80,6 +80,7 @@ def day_row(stops: list[dict], excluded: dict, delta: int, accounts: int | None,
         gajung += g
         mil += m
         dinner += int(s.get("dinner_qty") or 0)
+        pilot += int(s.get("pilot_qty") or 0)
         if aid in excluded:
             excl += g + m
         elif aid in shared:
@@ -122,7 +123,7 @@ def day_row(stops: list[dict], excluded: dict, delta: int, accounts: int | None,
         status, payable = "ok", incentive
     extras_total = int(extras_total or 0)
     return {
-        "stops": len(stops), "gajung_qty": gajung, "mil_qty": mil, "dinner_qty": dinner,
+        "stops": len(stops), "gajung_qty": gajung, "mil_qty": mil, "dinner_qty": dinner, "pilot_qty": pilot,
         "auto_qty": auto, "excluded_qty": excl, "delta": int(delta or 0), "product_total": product_total,
         "accounts": accounts,
         "product_incentive": prod["amount"] if prod else None, "product_unit": prod["unit"] if prod else None,

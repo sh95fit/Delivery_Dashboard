@@ -1,7 +1,7 @@
 """S2-P4c-1 인센티브 (일 단위 · 운영 계정 기준. 계정 → 사람 배정은 P4c-2).
 
 확정 규칙 (2026-10-13)
-- 제품 수 = 중식 가정식(4) + 중식 프레시밀·라이트밀(23, 29). 석식(2, 31, 30)은 참고 표시만 (집계 제외)
+- 제품 수 = 중식 가정식(4) + 중식 프레시밀·라이트밀(23, 29). 석식(2, 31, 30)·파일럿 가정식(21)은 참고 표시만 (집계 제외)
 - 제품 수 보정 ① 배송지 제외 = 그 배송지 수량 전부 빼기 (퀵·다른 매니저 처리·미배송 등)
               ② ± 조정 = 일부만 빠지는 경우, 사유 필수
 - 고객사 수 = 관리자 입력 (수거 포함). 배송지 수·주문 고객사 수는 참고. 미입력이면 고객사 인센티브 보류
@@ -26,7 +26,8 @@ from app.services.worker_service import check_unlocked
 GAJUNG_IDS = (4,)
 MIL_IDS = (23, 29)
 DINNER_REF_IDS = (2, 31, 30)      # 석식 가정식·프레시밀·라이트밀 — 참고 표시만
-ALL_IDS = GAJUNG_IDS + MIL_IDS + DINNER_REF_IDS
+PILOT_REF_IDS = (21,)             # 파일럿 가정식 — 참고 표시만
+ALL_IDS = GAJUNG_IDS + MIL_IDS + DINNER_REF_IDS + PILOT_REF_IDS
 
 EXCLUDE_REASONS = {"quick": "퀵 발송", "other_manager": "다른 매니저 처리",
                    "not_delivered": "미배송·취소", "other": "기타"}
@@ -35,7 +36,8 @@ EXCLUDE_REASONS = {"quick": "퀵 발송", "other_manager": "다른 매니저 처
 SQL_STOPS = """
 SELECT x.work_date, x.manager_id, x.address_id, a.name AS address_name,
        COALESCE(q.gajung_qty, 0) AS gajung_qty, COALESCE(q.mil_qty, 0) AS mil_qty,
-       COALESCE(q.dinner_qty, 0) AS dinner_qty, COALESCE(q.order_accounts, 0) AS order_accounts
+       COALESCE(q.dinner_qty, 0) AS dinner_qty, COALESCE(q.pilot_qty, 0) AS pilot_qty,
+       COALESCE(q.order_accounts, 0) AS order_accounts
 FROM (
     SELECT d.date AS work_date, d.manager_id, d.address_id
     FROM delivery d
@@ -47,6 +49,7 @@ LEFT JOIN (
            SUM(CASE WHEN od.product_id IN :gajung THEN od.quantity ELSE 0 END) AS gajung_qty,
            SUM(CASE WHEN od.product_id IN :mil THEN od.quantity ELSE 0 END) AS mil_qty,
            SUM(CASE WHEN od.product_id IN :dinner THEN od.quantity ELSE 0 END) AS dinner_qty,
+           SUM(CASE WHEN od.product_id IN :pilot THEN od.quantity ELSE 0 END) AS pilot_qty,           
            COUNT(DISTINCT o.account_id) AS order_accounts
     FROM orders o
     LEFT JOIN `order-details` od
@@ -76,9 +79,10 @@ FROM incentive_holds WHERE released_at IS NULL AND hold_date BETWEEN :s AND :e O
 
 # ---------- 운영 DB (RDS) ----------
 def _fetch_stops(s: date, e: date) -> list[dict]:
-    stmt = text(SQL_STOPS).bindparams(*(bindparam(k, expanding=True) for k in ("gajung", "mil", "dinner", "all_ids")))
+    stmt = text(SQL_STOPS).bindparams(*(bindparam(k, expanding=True)
+                                        for k in ("gajung", "mil", "dinner", "pilot", "all_ids")))
     p = {"s": s, "e": e, "gajung": list(GAJUNG_IDS), "mil": list(MIL_IDS),
-         "dinner": list(DINNER_REF_IDS), "all_ids": list(ALL_IDS)}
+         "dinner": list(DINNER_REF_IDS), "pilot": list(PILOT_REF_IDS), "all_ids": list(ALL_IDS)}
     with get_engine().connect() as conn:
         return [dict(r) for r in conn.execute(stmt, p).mappings().all()]
 
@@ -250,6 +254,7 @@ def _build(s: date, e: date, *, detail: bool) -> dict[tuple[date, int], dict]:
                 "address_id": int(st["address_id"]), "address_name": st.get("address_name"),
                 "gajung_qty": int(st.get("gajung_qty") or 0), "mil_qty": int(st.get("mil_qty") or 0),
                 "dinner_qty": int(st.get("dinner_qty") or 0), "order_accounts": int(st.get("order_accounts") or 0),
+                "pilot_qty": int(st.get("pilot_qty") or 0),                
                 "shared": int(st["address_id"]) in sh,
                 "exclusion": _excl_out(ex[int(st["address_id"])]) if int(st["address_id"]) in ex else None,
             } for st in lst]

@@ -68,3 +68,10 @@ def test_over_max_warning_text():
                                             {"start": 300, "end": 360, "amount": 50}]), "account": A}
     r = day_row(STOPS, {}, 0, 41, b, False, 0)
     assert any(OVER_MAX_MSG in w for w in r["warns"])
+
+
+def test_pilot_reference_only():
+    st = [{"address_id": 1, "gajung_qty": 310, "mil_qty": 0, "dinner_qty": 5, "pilot_qty": 40}]
+    r = day_row(st, {}, 0, 41, RATE, False, 0)
+    assert r["pilot_qty"] == 40 and r["dinner_qty"] == 5
+    assert r["product_total"] == 310 and r["product_incentive"] == 500

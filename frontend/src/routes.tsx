@@ -7,6 +7,7 @@ import ManagersPage from "./features/settings/ManagersPage";
 import VehiclesPage from "./features/settings/VehiclesPage";
 import WorkersPage from "./features/settings/WorkersPage";
 import WorkLogPage from "./features/worklogs/WorkLogPage";
+import IncentivePage from "./features/incentive/IncentivePage";
 
 
 export const router = createBrowserRouter([
@@ -19,7 +20,8 @@ export const router = createBrowserRouter([
       { path: "/settings/managers", element: <ManagersPage /> },
       { path: "/settings/workers", element: <WorkersPage /> },
       { path: "/settings/vehicles", element: <VehiclesPage /> },
-      { path: "/ops/work", element: <WorkLogPage /> },      
+      { path: "/ops/work", element: <WorkLogPage /> }, 
+      { path: "/finance/incentive", element: <IncentivePage /> },           
     ],
   },
   { path: "*", element: <Navigate to="/" replace /> },
