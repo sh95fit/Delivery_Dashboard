@@ -1,79 +1,84 @@
-from pydantic import BaseModel, field_validator
+"""S2-P4c-1 인센티브 입력 스키마."""
+from __future__ import annotations
+
+from datetime import date
+from typing import Literal
+
+from pydantic import BaseModel, Field, field_validator
 
 
-class AdjustRequest(BaseModel):
-    field: str
-    value: int
-    reason: str
-
-    @field_validator("reason")
-    @classmethod
-    def reason_required(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("사유는 필수입니다")
-        return v.strip()
+def _need(v: str) -> str:
+    v = (v or "").strip()
+    if not v:
+        raise ValueError("사유는 필수입니다")
+    return v
 
 
-class HoldRequest(BaseModel):
-    reason: str
-
-    @field_validator("reason")
-    @classmethod
-    def reason_required(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("사유는 필수입니다")
-        return v.strip()
+class Band(BaseModel):
+    start: int = Field(ge=0)
+    end: int | None = Field(default=None, ge=1)
+    amount: int = Field(ge=0, le=1_000_000)
 
 
-class AdjustmentLog(BaseModel):
-    field: str
-    value: int
-    reason: str
-    created_by: str | None = None
-    created_at: str | None = None
+class RateSetIn(BaseModel):
+    effective_from: date
+    product: list[Band] = Field(min_length=1, max_length=20)
+    account: list[Band] = Field(min_length=1, max_length=20)
+    memo: str | None = Field(default=None, max_length=200)
 
 
-class IncentiveRow(BaseModel):
+class AccountItem(BaseModel):
     manager_id: int
-    stops: int
-    gajung_qty: int
-    mil_qty: int
-    seoksik_qty: int = 0        # 석식 — 현재 미포함. SEOKSIK_IDS 활성화 시 자동 채워짐
-    collection_count: int
-    accounts: int
-    product_total: int
-    product_incentive: int
-    account_incentive: int
-    total_incentive: int
-    is_held: bool
-    hold_reason: str | None = None
-    payable_incentive: int
-    adjustments: list[AdjustmentLog] = []
-    auto: dict
+    value: int | None = Field(default=None, ge=0, le=500)    # None = 입력 지우기
 
 
-class IncentiveOne(BaseModel):
-    date: str
+class AccountsIn(BaseModel):
+    items: list[AccountItem] = Field(min_length=1, max_length=200)
+
+
+class DeltaIn(BaseModel):
     manager_id: int
-    stops: int
-    gajung_qty: int
-    mil_qty: int
-    seoksik_qty: int = 0
-    collection_count: int
-    accounts: int
-    product_total: int
-    product_incentive: int
-    account_incentive: int
-    total_incentive: int
-    is_held: bool
-    hold_reason: str | None = None
-    payable_incentive: int
-    adjustments: list[AdjustmentLog] = []
-    auto: dict
+    value: int = Field(ge=-2000, le=2000)                     # 0 = 조정 지우기
+    reason: str | None = Field(default=None, max_length=200)
 
 
-class IncentiveAll(BaseModel):
-    date: str
-    managers: list[IncentiveRow]
-    total_incentive_sum: int
-    payable_incentive_sum: int
+class ExclusionIn(BaseModel):
+    work_date: date
+    manager_id: int
+    address_id: int
+    reason: Literal["quick", "other_manager", "not_delivered", "other"]
+    memo: str | None = Field(default=None, max_length=200)
+
+
+class ExtraItemIn(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+    unit_amount: int | None = Field(default=None, gt=0, le=1_000_000)
+    active: bool = True
+    sort_order: int = 0
+    memo: str | None = Field(default=None, max_length=200)
+
+
+class ExtraIn(BaseModel):
+    work_date: date
+    manager_id: int
+    item_id: int
+    qty: int = Field(default=1, ge=1, le=50)
+    unit_amount: int | None = Field(default=None, gt=0, le=1_000_000)   # 비우면 품목 기본 금액
+    memo: str | None = Field(default=None, max_length=200)
+
+
+class ExtraUpdateIn(BaseModel):
+    qty: int = Field(ge=1, le=50)
+    unit_amount: int | None = Field(default=None, gt=0, le=1_000_000)
+    memo: str | None = Field(default=None, max_length=200)
+
+
+class ReasonIn(BaseModel):
+    reason: str = Field(max_length=200)
+    _r = field_validator("reason")(classmethod(lambda cls, v: _need(v)))
+
+
+class HoldIn(BaseModel):
+    manager_id: int
+    reason: str = Field(max_length=200)
+    _r = field_validator("reason")(classmethod(lambda cls, v: _need(v)))

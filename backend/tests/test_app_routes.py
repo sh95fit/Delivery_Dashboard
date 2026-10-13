@@ -7,3 +7,10 @@ def test_app_starts_with_worklog_routes():
             "/worklogs/export", "/worklogs/export/plan", "/worklogs/offs/{d}",
             "/worklogs/close/check", "/worklogs/close", "/worklogs/reopen"} <= paths
 
+
+def test_app_starts_with_incentive_routes():
+    from app.main import app
+    paths = set(app.openapi()["paths"])
+    assert {"/incentive/day", "/incentive/month", "/incentive/rates", "/incentive/accounts/{d}",
+            "/incentive/exclusions", "/incentive/extras", "/incentive/extra-items",
+            "/incentive/holds/{d}", "/incentive/holds/{hid}/release"} <= paths

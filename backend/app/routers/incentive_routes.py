@@ -1,71 +1,111 @@
-from datetime import date as date_type
+from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Query
 
-from app.auth import get_current_email, is_admin_email
-from app.schemas.incentive import AdjustRequest, HoldRequest, IncentiveAll, IncentiveOne
-from app.services import incentive_service
+from app.auth import get_current_email
+from app.deps import guard, memo, require_admin
+from app.schemas.incentive import (AccountsIn, DeltaIn, ExclusionIn, ExtraIn, ExtraItemIn, ExtraUpdateIn,
+                                   HoldIn, RateSetIn, ReasonIn)
+from app.services import incentive_service as svc
 
 router = APIRouter(prefix="/incentive", tags=["incentive"])
 
 
-@router.get("/{target_date}", response_model=IncentiveAll)
-def get_incentive_all(target_date: date_type, _: str = Depends(get_current_email)):
-    try:
-        return incentive_service.get_incentive_all(target_date)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"인센티브 조회 실패: {exc}") from exc
+@router.get("/day")
+def day_view(d: date = Query(...), _: str = Depends(get_current_email)):
+    return guard(svc.day_view, d, fail="인센티브 조회 실패")
 
 
-@router.get("/{target_date}/{manager_id}", response_model=IncentiveOne)
-def get_incentive_one(target_date: date_type, manager_id: int,
-                      _: str = Depends(get_current_email)):
-    try:
-        return incentive_service.get_incentive(target_date, manager_id)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"인센티브 조회 실패: {exc}") from exc
+@router.get("/month")
+def month_board(month: date = Query(...), _: str = Depends(get_current_email)):
+    return guard(svc.month_board, month, fail="인센티브 월 조회 실패")
 
 
-@router.post("/{target_date}/{manager_id}/adjust")
-def adjust_incentive(target_date: date_type, manager_id: int, body: AdjustRequest,
-                     email: str = Depends(get_current_email)):
-    """수기 조정 — 수거 건수·수량·배송지·고객사 (사유 필수, 이력 보존)."""
-    if not is_admin_email(email):
-        raise HTTPException(status_code=403, detail="관리자만 가능합니다")
-    try:
-        incentive_service.set_adjustment(target_date, manager_id, body.field,
-                                         body.value, body.reason, email)
-        return {"ok": True, "manager_id": manager_id,
-                "date": target_date.isoformat(), "field": body.field, "value": body.value}
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"조정 실패: {exc}") from exc
+@router.get("/rates")
+def rates(_: str = Depends(get_current_email)):
+    return guard(svc.list_rate_sets, fail="단가표 조회 실패")
 
 
-@router.post("/{target_date}/{manager_id}/hold")
-def hold_incentive(target_date: date_type, manager_id: int, body: HoldRequest,
-                   email: str = Depends(get_current_email)):
-    """미지급 등록 — 배송 이슈 등 (사유 필수, 계산값은 유지·기록 보존)."""
-    if not is_admin_email(email):
-        raise HTTPException(status_code=403, detail="관리자만 가능합니다")
-    try:
-        incentive_service.set_hold(target_date, manager_id, body.reason, email)
-        return {"ok": True, "manager_id": manager_id,
-                "date": target_date.isoformat(), "is_held": True, "reason": body.reason}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"미지급 처리 실패: {exc}") from exc
+@router.post("/rates")
+def add_rates(body: RateSetIn, email: str = Depends(require_admin)):
+    b = body.model_dump()
+    b["memo"] = memo(b.get("memo"))
+    return guard(svc.save_rate_set, None, b, email, fail="단가표 저장 실패")
 
 
-@router.delete("/{target_date}/{manager_id}/hold")
-def release_incentive(target_date: date_type, manager_id: int,
-                      email: str = Depends(get_current_email)):
-    """미지급 해제 — 이력 행은 유지(released_at 기록)."""
-    if not is_admin_email(email):
-        raise HTTPException(status_code=403, detail="관리자만 가능합니다")
-    try:
-        incentive_service.release_hold(target_date, manager_id)
-        return {"ok": True, "manager_id": manager_id,
-                "date": target_date.isoformat(), "is_held": False}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"미지급 해제 실패: {exc}") from exc
+@router.put("/rates/{sid}")
+def update_rates(sid: int, body: RateSetIn, email: str = Depends(require_admin)):
+    b = body.model_dump()
+    b["memo"] = memo(b.get("memo"))
+    return guard(svc.save_rate_set, sid, b, email, fail="단가표 저장 실패")
+
+
+@router.delete("/rates/{sid}")
+def delete_rates(sid: int, email: str = Depends(require_admin)):
+    return guard(svc.delete_rate_set, sid, email, fail="단가표 삭제 실패")
+
+
+@router.put("/accounts/{d}")
+def save_accounts(d: date, body: AccountsIn, email: str = Depends(require_admin)):
+    return guard(svc.save_accounts, d, [i.model_dump() for i in body.items], email, fail="고객사 수 저장 실패")
+
+
+@router.put("/delta/{d}")
+def set_delta(d: date, body: DeltaIn, email: str = Depends(require_admin)):
+    return guard(svc.set_delta, d, body.manager_id, body.value, body.reason, email, fail="제품 수 조정 실패")
+
+
+@router.post("/exclusions")
+def add_exclusion(body: ExclusionIn, email: str = Depends(require_admin)):
+    b = body.model_dump()
+    b["memo"] = memo(b.get("memo"))
+    return guard(svc.add_exclusion, b, email, fail="배송지 제외 실패")
+
+
+@router.delete("/exclusions/{xid}")
+def delete_exclusion(xid: int, email: str = Depends(require_admin)):
+    return guard(svc.delete_exclusion, xid, email, fail="배송지 제외 해제 실패")
+
+
+@router.get("/extra-items")
+def extra_items(_: str = Depends(get_current_email)):
+    return guard(svc.list_extra_items, fail="특수 수당 품목 조회 실패")
+
+
+@router.post("/extra-items")
+def add_extra_item(body: ExtraItemIn, email: str = Depends(require_admin)):
+    return guard(svc.save_extra_item, None, body.model_dump(), email, fail="품목 저장 실패")
+
+
+@router.put("/extra-items/{iid}")
+def update_extra_item(iid: int, body: ExtraItemIn, email: str = Depends(require_admin)):
+    return guard(svc.save_extra_item, iid, body.model_dump(), email, fail="품목 저장 실패")
+
+
+@router.post("/extras")
+def add_extra(body: ExtraIn, email: str = Depends(require_admin)):
+    b = body.model_dump()
+    b["memo"] = memo(b.get("memo"))
+    return guard(svc.add_extra, b, email, fail="특수 수당 저장 실패")
+
+
+@router.put("/extras/{xid}")
+def update_extra(xid: int, body: ExtraUpdateIn, email: str = Depends(require_admin)):
+    b = body.model_dump()
+    b["memo"] = memo(b.get("memo"))
+    return guard(svc.update_extra, xid, b, email, fail="특수 수당 수정 실패")
+
+
+@router.post("/extras/{xid}/delete")
+def delete_extra(xid: int, body: ReasonIn, email: str = Depends(require_admin)):
+    return guard(svc.delete_extra, xid, body.reason, email, fail="특수 수당 삭제 실패")
+
+
+@router.post("/holds/{d}")
+def add_hold(d: date, body: HoldIn, email: str = Depends(require_admin)):
+    return guard(svc.add_hold, d, body.manager_id, body.reason, email, fail="미지급 등록 실패")
+
+
+@router.post("/holds/{hid}/release")
+def release_hold(hid: int, body: ReasonIn, email: str = Depends(require_admin)):
+    return guard(svc.release_hold, hid, body.reason, email, fail="미지급 해제 실패")
