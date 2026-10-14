@@ -301,7 +301,12 @@ def _named(mid: int, r: dict, mgrs: dict) -> dict:
 def day_view(d: date) -> dict:
     rows = _build(d, d, detail=True)
     mgrs = _managers()
-    items = [_named(mid, r, mgrs) for (_d, mid), r in rows.items()]
+    ctx, wk = _owner_ctx(d, d), _workers_on(d)
+    items = []
+    for (_d, mid), r in rows.items():
+        it = _named(mid, r, mgrs)
+        it["owner"] = _owner_out(ctx, wk, d, mid)
+        items.append(it)
     items.sort(key=lambda x: (x["stops"] == 0, x["manager_name"]))
     rs = effective_on(_rate_sets(), d, "effective_from")
     return {
@@ -312,6 +317,10 @@ def day_view(d: date) -> dict:
         "adj_lineups": [{"product_id": None, "label": TOTAL_LABEL}]
                        + [{"product_id": pid, "label": lbl} for pid, (_, lbl) in ADJ_LINEUPS.items()],
         "items": items,
+        # 담당 지정 후보 = 그날 계약(월급·시급)이 있는 활성 인력
+        "workers": [{"worker_id": v["worker_id"], "name": v["name"], "pay_type": v["pay_type"],
+                     "fixed_name": (mgrs.get(_fixed_mid(ctx, v["worker_id"], d)) or {}).get("name")}
+                    for v in wk.values() if v["active"] and v["pay_type"] in ("monthly", "hourly")],
         "totals": {
             "payable": sum(i["payable"] or 0 for i in items),
             "extras": sum(i["extras"] for i in items),
@@ -581,41 +590,101 @@ def release_hold(hid: int, reason: str, email: str) -> dict:
     return {"ok": True}
 
 
-# ---------- S2-P4c-2 계정 → 사람 (근무표 '인센티브' 칸 = 데일리 지급액 + 특수 수당) ----------
+# ---------- S2-P4c-2 계정 → 담당자 (정규직 포함 · 근무표 '인센티브' 칸은 시급제만) ----------
+SQL_OWNERS = """SELECT id, work_date, manager_id, worker_id, memo, created_by, created_at FROM incentive_owners
+WHERE deleted_at IS NULL AND work_date BETWEEN :s AND :e"""
+
+
+def _owner_ctx(s: date, e: date) -> dict:
+    """배정에 필요한 기록을 한 번에 읽음 (기간 s~e)."""
+    p = {"s": s, "e": e}
+    ctx: dict = {"day_acc": {}, "logged": {}, "off": {}, "accs": {}, "chosen": {}, "taken": {}}
+    for lg in dash_db.rows("""SELECT worker_id, work_date, manager_id FROM work_logs
+                              WHERE deleted_at IS NULL AND work_date BETWEEN :s AND :e""", p):
+        wid, d = int(lg["worker_id"]), lg["work_date"]
+        mid = None if lg["manager_id"] is None else int(lg["manager_id"])
+        ctx["day_acc"].setdefault(d, {})[wid] = mid
+        if mid is not None:
+            ctx["logged"].setdefault((d, mid), []).append(wid)
+    for o in dash_db.rows("""SELECT worker_id, work_date FROM work_offs
+                             WHERE deleted_at IS NULL AND work_date BETWEEN :s AND :e""", p):
+        ctx["off"].setdefault(o["work_date"], set()).add(int(o["worker_id"]))
+    for a in dash_db.rows("SELECT worker_id, manager_id, start_date FROM worker_accounts WHERE deleted_at IS NULL"):
+        ctx["accs"].setdefault(int(a["worker_id"]), []).append(a)
+    for c in dash_db.rows(SQL_OWNERS, p):
+        d, mid, wid = c["work_date"], int(c["manager_id"]), int(c["worker_id"])
+        ctx["chosen"][(d, mid)] = c
+        ctx["taken"].setdefault(d, {}).setdefault(wid, set()).add(mid)
+    return ctx
+
+
+def _fixed_mid(ctx: dict, wid: int, d: date) -> int | None:
+    a = effective_on(ctx["accs"].get(wid, []), d, "start_date")
+    return int(a["manager_id"]) if a and a["manager_id"] is not None else None
+
+
+def _owner(ctx: dict, d: date, mid: int) -> tuple[int | None, str | None, str | None]:
+    c = ctx["chosen"].get((d, mid))
+    fixed = [w for w in ctx["accs"] if _fixed_mid(ctx, w, d) == mid]
+    taken = {w for w, ms in ctx["taken"].get(d, {}).items() if mid not in ms}
+    return assign_owner(mid, ctx["logged"].get((d, mid), []), fixed, ctx["day_acc"].get(d, {}),
+                        ctx["off"].get(d, set()), int(c["worker_id"]) if c else None, taken)
+
+
+def _owner_out(ctx: dict, wk: dict, d: date, mid: int) -> dict:
+    wid, src, why = _owner(ctx, d, mid)
+    c = ctx["chosen"].get((d, mid))
+    return {"worker_id": wid, "name": (wk.get(wid) or {}).get("name") if wid is not None else None,
+            "source": src, "why": why, "memo": c.get("memo") if c else None}
+
+
+def _workers_on(d: date) -> dict[int, dict]:
+    """인력별 그날 계약 형태 (monthly / hourly / none / None=계약 없음)."""
+    rates: dict[int, list[dict]] = {}
+    for r in dash_db.rows("SELECT worker_id, pay_type, effective_from FROM worker_pay_rates WHERE deleted_at IS NULL"):
+        rates.setdefault(int(r["worker_id"]), []).append(r)
+    out: dict[int, dict] = {}
+    for w in dash_db.rows("SELECT id, name, income_type, active FROM workers WHERE deleted_at IS NULL ORDER BY name"):
+        r = effective_on(rates.get(int(w["id"]), []), d, "effective_from")
+        out[int(w["id"])] = {"worker_id": int(w["id"]), "name": w["name"], "income_type": w["income_type"],
+                             "active": bool(w["active"]), "pay_type": r["pay_type"] if r else None}
+    return out
+
+
+def save_owner(d: date, mid: int, wid: int | None, memo: str | None, email: str) -> dict:
+    """계정 그날 담당 지정 / 해제(wid=None → 기본 규칙). 수정 = 기존 행 삭제 표시 + 새 행.
+    미래 날짜 허용 (예정된 대체 근무), 마감된 달은 불가."""
+    with get_dash_engine().begin() as conn:
+        if conn.execute(text("SELECT 1 FROM month_closings WHERE month = :m AND reopened_at IS NULL"),
+                        {"m": d.replace(day=1)}).first():
+            raise ValueError(f"{d.year}년 {d.month}월은 마감되었습니다. 근무 기록 > 월 표 > 마감 관리에서 해제 후 수정하세요")
+        if wid is not None:
+            w = conn.execute(text("SELECT name, active FROM workers WHERE id = :w AND deleted_at IS NULL"),
+                             {"w": wid}).first()
+            if not w:
+                raise ValueError("인력을 찾을 수 없습니다 (새로고침하세요)")
+            if not w[1]:
+                raise ValueError(f"{w[0]}은(는) 비활성 인력입니다")
+        old = conn.execute(text("""SELECT id, worker_id, memo FROM incentive_owners
+            WHERE work_date = :d AND manager_id = :m AND deleted_at IS NULL"""), {"d": d, "m": mid}).first()
+        if (old is None and wid is None) or (old is not None and wid is not None
+                                              and (int(old[1]), old[2]) == (wid, memo)):
+            return {"ok": True, "changed": False}
+        if old:
+            conn.execute(text("UPDATE incentive_owners SET deleted_at = NOW(), deleted_by = :e WHERE id = :i"),
+                         {"i": old[0], "e": email})
+        if wid is not None:
+            conn.execute(text("""INSERT INTO incentive_owners (work_date, manager_id, worker_id, memo, created_by)
+                VALUES (:d, :m, :w, :memo, :e)"""), {"d": d, "m": mid, "w": wid, "memo": memo, "e": email})
+    return {"ok": True, "changed": True}
+
+
 def person_month(month: date) -> dict:
-    """그 달 계정×일자 금액을 사람에게 배정. 배정 규칙은 incentive_calc.assign_owner."""
+    """그 달 계정×일자 금액을 담당자에게 배정 (담당 지정 → 근무 기록 그날 계정 → 고정 계정)."""
     s = month.replace(day=1)
     e = s.replace(day=calendar.monthrange(s.year, s.month)[1])
     rows = _build(s, e, detail=False)
-    p = {"s": s, "e": e}
-    logs = dash_db.rows("""SELECT worker_id, work_date, manager_id FROM work_logs
-                           WHERE deleted_at IS NULL AND work_date BETWEEN :s AND :e""", p)
-    offs = dash_db.rows("""SELECT worker_id, work_date FROM work_offs
-                           WHERE deleted_at IS NULL AND work_date BETWEEN :s AND :e""", p)
-    accs: dict[int, list[dict]] = {}
-    for a in dash_db.rows("SELECT worker_id, manager_id, start_date FROM worker_accounts WHERE deleted_at IS NULL"):
-        accs.setdefault(int(a["worker_id"]), []).append(a)
-
-    day_acc: dict[date, dict[int, int | None]] = {}
-    logged: dict[tuple[date, int], list[int]] = {}
-    for lg in logs:
-        wid, d = int(lg["worker_id"]), lg["work_date"]
-        mid = None if lg["manager_id"] is None else int(lg["manager_id"])
-        day_acc.setdefault(d, {})[wid] = mid
-        if mid is not None:
-            logged.setdefault((d, mid), []).append(wid)
-    off_by: dict[date, set[int]] = {}
-    for o in offs:
-        off_by.setdefault(o["work_date"], set()).add(int(o["worker_id"]))
-
-    def fixed_on(d: date, mid: int) -> list[int]:
-        out = []
-        for wid, lst in accs.items():
-            a = effective_on(lst, d, "start_date")
-            if a and a["manager_id"] is not None and int(a["manager_id"]) == mid:
-                out.append(wid)
-        return out
-
+    ctx = _owner_ctx(s, e)
     mgrs, t = _managers(), today()
     people: dict[int, dict] = {}
     unassigned: list[dict] = []
@@ -624,42 +693,36 @@ def person_month(month: date) -> dict:
         pending = r["status"] == "need_accounts" and int(r.get("stops") or 0) > 0 and d <= t
         if not (pay or ext or pending):
             continue
-        wid, why = assign_owner(mid, logged.get((d, mid), []), fixed_on(d, mid),
-                                day_acc.get(d, {}), off_by.get(d, set()))
+        wid, src, why = _owner(ctx, d, mid)
         if wid is None:
             unassigned.append({"date": d.isoformat(), "manager_id": mid,
                                "manager_name": (mgrs.get(mid) or {}).get("name") or f"계정 {mid}",
                                "amount": pay + ext, "pending": pending, "why": why})
             continue
-        pp = people.setdefault(wid, {"incentive": 0, "extras": 0, "pending_days": 0, "days": 0})
+        pp = people.setdefault(wid, {"incentive": 0, "extras": 0, "pending_days": 0, "days": 0, "chosen_days": 0})
         pp["incentive"] += pay
         pp["extras"] += ext
         pp["pending_days"] += 1 if pending else 0
         pp["days"] += 1
+        pp["chosen_days"] += 1 if src == "chosen" else 0
     return {"month": s.isoformat(), "people": people, "unassigned": unassigned}
 
 
 def person_board(month: date) -> dict:
-    """S2-P4c-2a 사람별 인센티브 (정규직 포함 · 같은 배정 규칙).
-    on_sheet = 그 달 말일 기준 시급 계약 → 근무표 '인센티브' 칸에 들어감. 정규직(월급) = 근무표 외 별도 지급"""
+    """S2-P4c-2a 담당자별 인센티브 (정규직 포함 · 같은 배정 규칙).
+    on_sheet = 그 달 말일 기준 시급 계약 → 근무표 '인센티브' 칸. 정규직(월급) = 근무표 외 별도 지급"""
     pm = person_month(month)
     s = date.fromisoformat(pm["month"])
-    e = s.replace(day=calendar.monthrange(s.year, s.month)[1])
-    rates: dict[int, list[dict]] = {}
-    for r in dash_db.rows("SELECT worker_id, pay_type, effective_from FROM worker_pay_rates WHERE deleted_at IS NULL"):
-        rates.setdefault(int(r["worker_id"]), []).append(r)
-    workers = {int(w["id"]): w for w in dash_db.rows(
-        "SELECT id, name, income_type, active FROM workers WHERE deleted_at IS NULL")}
+    wk = _workers_on(s.replace(day=calendar.monthrange(s.year, s.month)[1]))
     people = []
     for wid, v in pm["people"].items():
-        w = workers.get(wid) or {}
-        r = effective_on(rates.get(wid, []), e, "effective_from")
-        pt = r["pay_type"] if r else None
+        w = wk.get(wid) or {}
+        pt = w.get("pay_type")
         people.append({
             "worker_id": wid, "name": w.get("name") or f"인력 {wid}", "income_type": w.get("income_type"),
             "active": bool(w.get("active")), "pay_type": pt, "on_sheet": pt == "hourly",
             "incentive": v["incentive"], "extras": v["extras"], "total": v["incentive"] + v["extras"],
-            "days": v["days"], "pending_days": v["pending_days"],
+            "days": v["days"], "chosen_days": v["chosen_days"], "pending_days": v["pending_days"],
         })
     people.sort(key=lambda x: (not x["on_sheet"], x["name"]))
     un = pm["unassigned"]

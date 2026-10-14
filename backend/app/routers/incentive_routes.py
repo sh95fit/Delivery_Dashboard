@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from app.auth import get_current_email
 from app.deps import guard, memo, require_admin
 from app.schemas.incentive import (AccountsIn, ExclusionIn, ExtraIn, ExtraItemIn, ExtraUpdateIn,
-                                   HoldIn, QtyAdjIn, RateSetIn, ReasonIn)
+                                   HoldIn, QtyAdjIn, RateSetIn, ReasonIn, OwnerIn)
 from app.services import incentive_service as svc
 
 router = APIRouter(prefix="/incentive", tags=["incentive"])
@@ -23,7 +23,13 @@ def month_board(month: date = Query(...), _: str = Depends(get_current_email)):
 
 @router.get("/people")
 def people_board(month: date = Query(...), _: str = Depends(require_admin)):
-    return guard(svc.person_board, month, fail="사람별 인센티브 조회 실패")
+    return guard(svc.person_board, month, fail="담당자별 인센티브 조회 실패")
+
+
+@router.put("/owners/{d}")
+def save_owner(d: date, body: OwnerIn, email: str = Depends(require_admin)):
+    return guard(svc.save_owner, d, body.manager_id, body.worker_id, memo(body.memo), email,
+                 fail="담당자 지정 실패")
 
 
 @router.get("/rates")

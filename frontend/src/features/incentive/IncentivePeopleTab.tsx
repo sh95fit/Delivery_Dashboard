@@ -8,7 +8,7 @@ import type { IncPeopleView } from "@/api/incentive";
 import { errText } from "@/lib/form";
 import { num } from "@/lib/format";
 
-const TYPE: Record<string, string> = { employee: "근로소득", business: "사업자", freelancer: "프리랜서" };
+const TYPE: Record<string, string> = { employee: "근로소득", business: "사업자", freelancer: "프리랜서", regular: "정규직" };
 
 type Props = { month: string; onMonth: (m: string) => void };
 
@@ -27,10 +27,10 @@ export default function IncentivePeopleTab({ month, onMonth }: Props) {
   const t = view?.totals;
   return (
     <Panel
-      title={`${month} 사람별 인센티브`}
+      title={`${month} 담당자별 인센티브`}
       right={<input type="month" className="input input-sm" value={month}
         onChange={(e) => e.target.value && onMonth(e.target.value)} />}
-      desc="계정 금액을 그날 담당한 사람에게 배정한 결과입니다 (근무 기록의 그날 계정 → 고정 계정 순). 정규직도 같은 기준으로 계산되며, 근무표에는 시급제·사업자·프리랜서만 들어갑니다."
+      desc="계정 금액을 그날 담당한 사람에게 배정한 결과입니다 (담당 지정 → 근무 기록의 그날 계정 → 고정 계정 순). 정규직도 같은 기준으로 계산되며, 근무표에는 시급제·사업자·프리랜서만 들어갑니다."
     >
       {error && <ErrorBox message={error} />}
       {t && (
@@ -62,7 +62,7 @@ export default function IncentivePeopleTab({ month, onMonth }: Props) {
                     <td className="num">{num(p.incentive)}</td>
                     <td className="num">{num(p.extras)}</td>
                     <td className="num"><b>{num(p.total)}</b></td>
-                    <td className="num">{p.pending_days ? <Chip tone="caution">{p.pending_days}일</Chip> : "-"}</td>
+                    <td className="num">{num(p.days)}{p.chosen_days ? <Chip tone="internal">지정 {p.chosen_days}일</Chip> : null}</td>
                   </tr>
                 ))}
                 {t && (
@@ -81,7 +81,7 @@ export default function IncentivePeopleTab({ month, onMonth }: Props) {
             <>
               <h4>담당 미확인 ({view.unassigned.length}건)</h4>
               <div className="muted small">
-                해결: 그날 대신 뛴 시급제 인력의 근무 기록에 "그날 계정" 입력, 또는 인력 &gt; 고정 계정 지정
+                해결: 인센티브 &gt; 일자별 입력 &gt; 담당 [변경]에서 그날 담당자 지정 (정규직 포함), 또는 시급제 근무 기록의 "그날 계정" 입력
               </div>
               <div className="tbl-wrap">
                 <table className="tbl">

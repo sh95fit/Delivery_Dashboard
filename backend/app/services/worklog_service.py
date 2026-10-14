@@ -508,7 +508,7 @@ def export_plan(month: date, start: date | None = None, end: date | None = None,
         cands = _spans(rs, "effective_from", a, b)
         if cands and not any(_hourly(r) for r in cands):
             if want is not None:
-                add("info", sheet, name, "정규직(월급제)은 근무표 대상이 아닙니다 — 인센티브는 인센티브 > 사람별에서 확인")
+                add("info", sheet, name, "정규직(월급제)은 근무표 대상이 아닙니다 — 인센티브는 인센티브 > 담당자별 목록에서 확인")
             continue
         pi = inc_people.get(w["id"], {})
         spans = [r for r in cands if _hourly(r)]

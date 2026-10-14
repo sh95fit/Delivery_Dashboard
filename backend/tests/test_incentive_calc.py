@@ -95,14 +95,17 @@ def test_lineup_below_zero_warns():
 
 def test_assign_owner_rules():
     from app.services.incentive_calc import assign_owner
-    # ① 그날 계정 기록이 우선
-    assert assign_owner(5, [11], [12], {11: 5, 12: None}, set()) == (11, None)
-    # ② 기록 없으면 고정 계정 보유자
-    assert assign_owner(5, [], [12], {}, set()) == (12, None)
-    assert assign_owner(5, [], [12], {12: None}, set()) == (12, None)
-    # 고정 보유자가 휴무 / 다른 계정으로 근무 → 미배정
+    # ⓪ 담당 지정이 최우선 (정규직 대체 등)
+    assert assign_owner(5, [11], [12], {11: 5}, set(), chosen=20) == (20, "chosen", None)
+    # ① 그날 계정 기록
+    assert assign_owner(5, [11], [12], {11: 5, 12: None}, set()) == (11, "log", None)
+    # ② 기록 없으면 고정 계정 보유자 (정규직은 근무 기록이 없어 day_acc에 없음)
+    assert assign_owner(5, [], [12], {}, set()) == (12, "fixed", None)
+    assert assign_owner(5, [], [12], {12: None}, set()) == (12, "fixed", None)
+    # 고정 보유자가 휴무 / 다른 계정으로 근무 / 다른 계정 담당 지정 → 미배정
     assert assign_owner(5, [], [12], {}, {12})[0] is None
     assert assign_owner(5, [], [12], {12: 7}, set())[0] is None
+    assert assign_owner(5, [], [12], {}, set(), taken={12})[0] is None
     # 여러 명 → 미배정 (사유 포함)
-    wid, why = assign_owner(5, [11, 13], [], {11: 5, 13: 5}, set())
-    assert wid is None and "여러 명" in why
+    wid, src, why = assign_owner(5, [11, 13], [], {11: 5, 13: 5}, set())
+    assert wid is None and src is None and "여러 명" in why

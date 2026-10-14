@@ -40,6 +40,7 @@ export interface IncDayRow {
   status: IncStatus; warns: string[]; order_accounts: number;
   stop_list: IncStop[]; exclusions: Exclusion[]; adj_list: QtyAdj[]; extra_list: ExtraRow[]; hold_list: HoldRow[];
   accounts_info: AdjInfo | null;
+  owner: IncOwner;
 }
 export interface ExtraItem {
   id: number; name: string; unit_amount: number | null; active: boolean; sort_order: number; memo: string | null;
@@ -49,6 +50,7 @@ export interface IncDayView {
   exclude_reasons: Record<ExcludeReason, string>;
   adj_lineups: Array<{ product_id: number | null; label: string }>;
   items: IncDayRow[];
+  workers: IncWorkerOpt[];
   totals: { payable: number; extras: number; total: number; need_accounts: number; held: number };
 }
 export interface IncMonthCell {
@@ -102,6 +104,7 @@ export const saveExtraItem = (id: number | null, b: ExtraItemInput) =>
 export interface IncPerson {
   worker_id: number; name: string; income_type: string | null; active: boolean; pay_type: string | null;
   on_sheet: boolean; incentive: number; extras: number; total: number; days: number; pending_days: number;
+  chosen_days: number;
 }
 export interface IncUnassigned {
   date: string; manager_id: number; manager_name: string; amount: number; pending: boolean; why: string | null;
@@ -111,3 +114,11 @@ export interface IncPeopleView {
   totals: { incentive: number; extras: number; total: number; on_sheet: number; off_sheet: number; unassigned: number };
 }
 export const getIncPeople = (ym: string) => http<IncPeopleView>(`/api/incentive/people?month=${ym}-01`);
+
+export type OwnerSource = "chosen" | "log" | "fixed";
+export interface IncOwner {
+  worker_id: number | null; name: string | null; source: OwnerSource | null; why: string | null; memo: string | null;
+}
+export interface IncWorkerOpt { worker_id: number; name: string; pay_type: string | null; fixed_name: string | null }
+export const saveIncOwner = (d: string, b: { manager_id: number; worker_id: number | null; memo: string | null }) =>
+  put<Ok & { changed: boolean }>(`/api/incentive/owners/${d}`, b);

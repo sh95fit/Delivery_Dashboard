@@ -11,6 +11,10 @@ import { errText } from "@/lib/form";
 import { num, todayKst } from "@/lib/format";
 import IncentiveDetailModal from "./IncentiveDetailModal";
 import { STATUS, adjText, amt, shift, wd } from "./util";
+import IncentiveOwnerModal from "./IncentiveOwnerModal";
+import type { ChipTone } from "@/components/ui/Chip";
+const OWNER_SRC: Record<string, [string, ChipTone]> = { chosen: ["지정", "internal"], log: ["근무 기록", "neutral"], fixed: ["고정", "neutral"] };
+
 
 type Props = { date: string; onDate: (d: string) => void; isAdmin: boolean; onDirty?: (n: number) => void };
 const str = (v: number | null) => (v == null ? "" : String(v));
@@ -23,6 +27,7 @@ export default function IncentiveDayTab({ date, onDate, isAdmin, onDirty }: Prop
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [openId, setOpenId] = useState<number | null>(null);
+  const [ownerId, setOwnerId] = useState<number | null>(null);
   const refs = useRef<Record<number, HTMLInputElement | null>>({});
   const base = useRef<Record<number, string>>({});
 
@@ -47,7 +52,7 @@ export default function IncentiveDayTab({ date, onDate, isAdmin, onDirty }: Prop
       setLoading(false);
     }
   }
-  useEffect(() => { setNote(""); setOpenId(null); load(date); }, [date]);
+  useEffect(() => { setNote(""); setOpenId(null); setOwnerId(null); load(date); }, [date]);
 
   const rows = useMemo(() => (view?.items ?? []).map((it) => {
     const f = forms[it.manager_id] ?? str(it.accounts);
@@ -57,6 +62,7 @@ export default function IncentiveDayTab({ date, onDate, isAdmin, onDirty }: Prop
   const bad = dirty.filter((r) => r.bad);
   const warned = rows.filter((r) => r.it.warns.length > 0);
   const locked = !isAdmin || !view || view.closed || view.future;
+  const ownerLocked = !isAdmin || !view || view.closed;
   useEffect(() => { onDirty?.(dirty.length); }, [dirty.length]);
 
   function go(d: string) {
@@ -142,7 +148,7 @@ export default function IncentiveDayTab({ date, onDate, isAdmin, onDirty }: Prop
       ) : rows.length === 0 ? (
         <div className="muted small">이 날짜에 배정된 배송이 없습니다.</div>
       ) : (
-        <DataTable columns={["계정", { label: "배송지", num: true }, { label: "가정식", num: true },
+        <DataTable columns={["계정", "담당", { label: "배송지", num: true }, { label: "가정식", num: true },
           { label: "밀", num: true }, { label: "석식·파일럿(참고)", num: true }, { label: "제외·조정", num: true },
           { label: "제품 수", num: true }, "고객사 수", { label: "제품 인센", num: true },
           { label: "고객사 인센", num: true }, { label: "데일리", num: true }, { label: "특수 수당", num: true },
@@ -150,6 +156,13 @@ export default function IncentiveDayTab({ date, onDate, isAdmin, onDirty }: Prop
           {rows.map(({ it, f, dirty: d, bad: b }, i) => (
             <tr key={it.manager_id} className={it.stops === 0 ? "off" : undefined}>
               <td><span className="inc-swatch" style={{ background: it.color ?? "#94a3b8" }} />{it.manager_name}</td>
+              <td>
+                {it.owner.worker_id != null ? (
+                  <>{it.owner.name} <Chip tone={OWNER_SRC[it.owner.source ?? "fixed"][1]} title={it.owner.memo ?? ""}>
+                    {OWNER_SRC[it.owner.source ?? "fixed"][0]}</Chip></>
+                ) : it.stops > 0 || it.extras > 0 ? <Chip tone="warn" title={it.owner.why ?? ""}>미확인</Chip> : "-"}
+                {!ownerLocked && <Button size="sm" onClick={() => setOwnerId(it.manager_id)}>변경</Button>}
+              </td>              
               <td className="num">{num(it.stops)}</td>
               <td className="num">{num(it.gajung_qty)}</td>
               <td className="num">{num(it.mil_qty)}</td>
@@ -186,7 +199,7 @@ export default function IncentiveDayTab({ date, onDate, isAdmin, onDirty }: Prop
             </tr>
           ))}
           <tr className="inc-total">
-            <td>합계</td>
+            <td>합계</td><td />
             <td className="num">{num(sum("stops"))}</td>
             <td className="num">{num(sum("gajung_qty"))}</td>
             <td className="num">{num(sum("mil_qty"))}</td>
@@ -204,6 +217,10 @@ export default function IncentiveDayTab({ date, onDate, isAdmin, onDirty }: Prop
         <IncentiveDetailModal row={openRow} view={view} locked={locked}
           onClose={() => setOpenId(null)} onChanged={() => load(view.date, true)} />
       )}
+      {ownerId != null && view && view.items.find((x) => x.manager_id === ownerId) && (
+        <IncentiveOwnerModal row={view.items.find((x) => x.manager_id === ownerId)!} view={view}
+          onClose={() => setOwnerId(null)} onSaved={() => load(view.date, true)} />
+      )}      
     </Panel>
   );
 }

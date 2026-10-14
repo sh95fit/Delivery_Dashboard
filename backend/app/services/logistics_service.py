@@ -87,6 +87,10 @@ def cost_view(frm: date, to: date) -> dict:
         "SELECT * FROM work_logs WHERE deleted_at IS NULL AND work_date BETWEEN :a AND :b", p)}
     offs = {(r["worker_id"], r["work_date"]) for r in dash_db.rows(
         "SELECT worker_id, work_date FROM work_offs WHERE deleted_at IS NULL AND work_date BETWEEN :a AND :b", p)}
+    owned: dict[tuple[int, date], int] = {}
+    for o in dash_db.rows("""SELECT worker_id, work_date, manager_id FROM incentive_owners
+                             WHERE deleted_at IS NULL AND work_date BETWEEN :a AND :b ORDER BY id""", p):
+        owned.setdefault((o["worker_id"], o["work_date"]), int(o["manager_id"]))    
     missing: dict[str, list[str]] = {}
     no_acc: dict[str, int] = {}
     nocontract: set[str] = set()
@@ -102,7 +106,7 @@ def cost_view(frm: date, to: date) -> dict:
                     nocontract.add(w["name"])
                 continue
             a = effective_on(accs.get(wid, []), d, "start_date")
-            mid = (lg or {}).get("manager_id") or (a["manager_id"] if a else None)
+            mid = (lg or {}).get("manager_id") or owned.get((wid, d)) or (a["manager_id"] if a else None)
             c = cell(d, mid)
             c["labor" if res["kind"] in ("actual", "monthly") else "labor_est"] += res["cost"]
             c["ot_expected"] += res["ot_pay"]
