@@ -5,8 +5,9 @@ import { todayKst } from "@/lib/format";
 import IncentiveDayTab from "./IncentiveDayTab";
 import IncentiveMonthTab from "./IncentiveMonthTab";
 import IncentiveRatesTab from "./IncentiveRatesTab";
+import IncentivePeopleTab from "./IncentivePeopleTab";
 
-type Tab = "day" | "month" | "rates";
+type Tab = "day" | "month" | "people" | "rates";
 
 export default function IncentivePage() {
   const isAdmin = Boolean(useMe()?.is_admin);
@@ -29,6 +30,7 @@ export default function IncentivePage() {
       <div className="seg wl-tabs">
         {tabBtn("day", "일자별 입력")}
         {tabBtn("month", "월 보드")}
+        {isAdmin && tabBtn("people", "담당자별 목록")}
         {tabBtn("rates", "단가표·품목")}
       </div>
       {/* 일자별 입력은 숨기기만 해서 탭을 오가도 입력 중인 값 유지 */}
@@ -37,6 +39,7 @@ export default function IncentivePage() {
           onDate={(d) => { setDate(d); setMonth(d.slice(0, 7)); }} />
       </div>
       {tab === "month" && <IncentiveMonthTab month={month} onMonth={setMonth} onPick={pick} />}
+      {tab === "people" && isAdmin && <IncentivePeopleTab month={month} onMonth={setMonth} />}
       {tab === "rates" && <IncentiveRatesTab isAdmin={isAdmin} />}
     </PageLayout>
   );

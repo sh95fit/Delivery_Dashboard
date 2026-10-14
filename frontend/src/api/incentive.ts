@@ -98,3 +98,16 @@ export type ExtraItemInput = { name: string; unit_amount: number | null; active:
 export const getExtraItems = () => http<{ items: ExtraItem[] }>("/api/incentive/extra-items");
 export const saveExtraItem = (id: number | null, b: ExtraItemInput) =>
   id == null ? post<Ok>("/api/incentive/extra-items", b) : put<Ok>(`/api/incentive/extra-items/${id}`, b);
+
+export interface IncPerson {
+  worker_id: number; name: string; income_type: string | null; active: boolean; pay_type: string | null;
+  on_sheet: boolean; incentive: number; extras: number; total: number; days: number; pending_days: number;
+}
+export interface IncUnassigned {
+  date: string; manager_id: number; manager_name: string; amount: number; pending: boolean; why: string | null;
+}
+export interface IncPeopleView {
+  month: string; people: IncPerson[]; unassigned: IncUnassigned[];
+  totals: { incentive: number; extras: number; total: number; on_sheet: number; off_sheet: number; unassigned: number };
+}
+export const getIncPeople = (ym: string) => http<IncPeopleView>(`/api/incentive/people?month=${ym}-01`);

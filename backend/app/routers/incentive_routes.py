@@ -21,6 +21,11 @@ def month_board(month: date = Query(...), _: str = Depends(get_current_email)):
     return guard(svc.month_board, month, fail="인센티브 월 조회 실패")
 
 
+@router.get("/people")
+def people_board(month: date = Query(...), _: str = Depends(require_admin)):
+    return guard(svc.person_board, month, fail="사람별 인센티브 조회 실패")
+
+
 @router.get("/rates")
 def rates(_: str = Depends(get_current_email)):
     return guard(svc.list_rate_sets, fail="단가표 조회 실패")

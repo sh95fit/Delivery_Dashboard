@@ -637,3 +637,36 @@ def person_month(month: date) -> dict:
         pp["pending_days"] += 1 if pending else 0
         pp["days"] += 1
     return {"month": s.isoformat(), "people": people, "unassigned": unassigned}
+
+
+def person_board(month: date) -> dict:
+    """S2-P4c-2a 사람별 인센티브 (정규직 포함 · 같은 배정 규칙).
+    on_sheet = 그 달 말일 기준 시급 계약 → 근무표 '인센티브' 칸에 들어감. 정규직(월급) = 근무표 외 별도 지급"""
+    pm = person_month(month)
+    s = date.fromisoformat(pm["month"])
+    e = s.replace(day=calendar.monthrange(s.year, s.month)[1])
+    rates: dict[int, list[dict]] = {}
+    for r in dash_db.rows("SELECT worker_id, pay_type, effective_from FROM worker_pay_rates WHERE deleted_at IS NULL"):
+        rates.setdefault(int(r["worker_id"]), []).append(r)
+    workers = {int(w["id"]): w for w in dash_db.rows(
+        "SELECT id, name, income_type, active FROM workers WHERE deleted_at IS NULL")}
+    people = []
+    for wid, v in pm["people"].items():
+        w = workers.get(wid) or {}
+        r = effective_on(rates.get(wid, []), e, "effective_from")
+        pt = r["pay_type"] if r else None
+        people.append({
+            "worker_id": wid, "name": w.get("name") or f"인력 {wid}", "income_type": w.get("income_type"),
+            "active": bool(w.get("active")), "pay_type": pt, "on_sheet": pt == "hourly",
+            "incentive": v["incentive"], "extras": v["extras"], "total": v["incentive"] + v["extras"],
+            "days": v["days"], "pending_days": v["pending_days"],
+        })
+    people.sort(key=lambda x: (not x["on_sheet"], x["name"]))
+    un = pm["unassigned"]
+    return {"month": pm["month"], "people": people, "unassigned": un, "totals": {
+        "incentive": sum(p["incentive"] for p in people), "extras": sum(p["extras"] for p in people),
+        "total": sum(p["total"] for p in people),
+        "on_sheet": sum(p["total"] for p in people if p["on_sheet"]),
+        "off_sheet": sum(p["total"] for p in people if not p["on_sheet"]),
+        "unassigned": sum(u["amount"] for u in un),
+    }}
