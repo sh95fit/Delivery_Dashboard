@@ -6,7 +6,7 @@ from fastapi.openapi.utils import get_openapi
 
 from app.routers import (
     allowlist_routes, auth_routes, delivery_routes, health_routes,
-    incentive_routes, internal_target_routes, manager_routes, me_routes, revenue_routes,
+    incentive_routes, internal_target_routes, logistics_routes, manager_routes, me_routes, revenue_routes,
     routes_routes, status_routes, vehicle_routes, worker_routes, worklog_routes,
 )
 
@@ -31,6 +31,7 @@ app.include_router(manager_routes.router)
 app.include_router(vehicle_routes.router)
 app.include_router(worker_routes.router)
 app.include_router(worklog_routes.router)
+app.include_router(logistics_routes.router)
 
 def _custom_openapi():
     if app.openapi_schema:
