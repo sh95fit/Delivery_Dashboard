@@ -171,7 +171,7 @@ export function PeriodCostTab({ vehicles, isAdmin }: Props) {
         }
       >
         <ErrorLine error={error} />
-        <p className="muted small">보험·자동차세처럼 기간 단위로 내는 비용은 일 단위로 나눠 집계됩니다.</p>
+        <p className="muted small">보험·자동차세·리스처럼 기간 단위로 내는 비용은 기간 안의 영업일(일요일·공휴일 제외)로 나눠 집계됩니다. 표의 '일 환산'은 달력 일수 기준 참고값입니다.</p>
         <div className="form-grid">
           <label className="field">차량
             <VehicleSelect vehicles={vehicles} value={vid} onChange={setVid} />

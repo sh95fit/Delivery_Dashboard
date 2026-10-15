@@ -45,19 +45,18 @@ def _start_tunnel():
 
 
 def _get_tunnel():
-    """터널이 살아있는지 확인하고, 죽었으면 재시작 (스레드 세이프)."""
+    """터널이 살아있는지 확인하고, 없거나 죽었으면 (재)시작 (스레드 세이프)."""
     global _tunnel
     with _tunnel_lock:
         if _tunnel is None or not _tunnel.is_active or not _tunnel.local_bind_port:
-            try:
-                if _tunnel is not None:
-                    try:
-                        _tunnel.stop()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            logger.warning("SSH tunnel dead — restarting")
+            if _tunnel is None:
+                logger.info("SSH tunnel starting")
+            else:
+                logger.warning("SSH tunnel dead — restarting")
+                try:
+                    _tunnel.stop()
+                except Exception:
+                    pass
             _start_tunnel()
         return _tunnel
 

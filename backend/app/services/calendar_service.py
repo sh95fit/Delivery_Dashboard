@@ -24,6 +24,12 @@ def open_days(frm: date, to: date) -> list[date]:
     return business_days(frm, to, overrides(frm, to))
 
 
+def open_checker(frm: date, to: date):
+    """frm~to 예외 지정을 한 번만 읽고 '날짜 → 영업 여부' 함수를 돌려줌 (범위 밖 날짜는 규칙만 적용)."""
+    ov = overrides(frm, to)
+    return lambda d: day_status(d, ov)[0]
+
+
 def day_list(frm: date, to: date) -> dict:
     if to < frm:
         raise ValueError("조회 종료일이 시작일보다 빠릅니다")

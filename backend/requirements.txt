@@ -3,7 +3,7 @@ uvicorn[standard]
 pymysql
 cryptography<48
 sshtunnel
-paramiko==3.4.0
+paramiko>=3.4.1,<4
 sqlalchemy==2.1.3
 python-dotenv
 authlib

@@ -44,7 +44,7 @@ export interface ManagerDetail { rates: PayRate[]; assignments: Assignment[] }
 export interface Vehicle {
   id: number; plate_no: string; model: string | null; fuel_type: FuelType;
   fuel_efficiency: number | null; purchase_date: string | null; purchase_price: number | null;
-  memo: string | null; active: boolean; manager_ids: number[];
+  memo: string | null; active: boolean; manager_ids: number[]; vat_deductible: boolean;
 }
 export type VehicleInput = Omit<Vehicle, "id" | "manager_ids">;
 

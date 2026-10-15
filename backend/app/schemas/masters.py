@@ -34,6 +34,7 @@ class VehicleIn(BaseModel):
     purchase_price: int | None = Field(default=None, ge=0)
     memo: str | None = Field(default=None, max_length=500)
     active: bool = True
+    vat_deductible: bool = False    
 
 
 class PeriodCostIn(BaseModel):

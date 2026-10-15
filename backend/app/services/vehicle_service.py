@@ -8,13 +8,15 @@ from sqlalchemy.exc import IntegrityError
 
 from app.database import get_dash_engine
 from app.services import dash_db
-from app.services.cost_calc import allocate_period, days_incl, latest_by
+from app.services.calendar_service import open_checker
+from app.services.cost_calc import days_incl, latest_by
+from app.services.logistics_calc import cost_amount, period_shares
 from app.services.manager_service import today
 
 FUEL_TYPES = ("gasoline", "diesel", "lpg", "ev")
 PERIOD_CATS = ("insurance", "tax", "inspection", "lease", "other")
 EXPENSE_CATS = ("repair", "maintenance", "tire", "towing", "accident", "depreciation", "parking", "wash", "other")
-VEHICLE_FIELDS = ("plate_no", "model", "fuel_type", "fuel_efficiency", "purchase_date", "purchase_price", "memo", "active")
+VEHICLE_FIELDS = ("plate_no", "model", "fuel_type", "fuel_efficiency", "purchase_date", "purchase_price", "memo", "active", "vat_deductible")
 MAX_SUMMARY_DAYS = 400
 
 
@@ -40,6 +42,7 @@ def _clean_vehicle(d: dict) -> dict:
     d["model"] = (d["model"] or "").strip() or None
     d["memo"] = (d["memo"] or "").strip() or None
     d["active"] = True if d["active"] is None else bool(d["active"])
+    d["vat_deductible"] = bool(d["vat_deductible"])    
     return d
 
 
@@ -49,6 +52,7 @@ def _vehicle_out(r: dict, manager_ids: list[int]) -> dict:
         "fuel_efficiency": float(r["fuel_efficiency"]) if r["fuel_efficiency"] is not None else None,
         "purchase_date": _iso(r["purchase_date"]), "purchase_price": r["purchase_price"],
         "memo": r["memo"], "active": bool(r["active"]), "manager_ids": manager_ids,
+        "vat_deductible": bool(r.get("vat_deductible")),
     }
 
 
@@ -70,9 +74,9 @@ def create_vehicle(data: dict, email: str) -> int:
     try:
         return dash_db.insert_id("""
             INSERT INTO vehicles (plate_no, model, fuel_type, fuel_efficiency, purchase_date, purchase_price,
-                                  memo, active, created_by, updated_by)
+                                  memo, active, vat_deductible, created_by, updated_by)
             VALUES (:plate_no, :model, :fuel_type, :fuel_efficiency, :purchase_date, :purchase_price,
-                    :memo, :active, :e, :e)
+                    :memo, :active, :vat_deductible, :e, :e)
             RETURNING id
         """, {**d, "e": email})
     except IntegrityError as exc:
@@ -87,7 +91,7 @@ def update_vehicle(vid: int, data: dict, email: str) -> None:
                 UPDATE vehicles
                    SET plate_no = :plate_no, model = :model, fuel_type = :fuel_type,
                        fuel_efficiency = :fuel_efficiency, purchase_date = :purchase_date,
-                       purchase_price = :purchase_price, memo = :memo, active = :active,
+                       purchase_price, memo = :memo, active = :active, vat_deductible = :vat_deductible,
                        updated_by = :e, updated_at = NOW()
                  WHERE id = :id AND deleted_at IS NULL
             """), {**d, "e": email, "id": vid})
@@ -184,25 +188,33 @@ def add_expense(vehicle_id: int, expense_date: date, category: str, amount: int,
 
 # ---------- 기간 요약 (비용 엔진 P6의 차량 부분) ----------
 def cost_summary(frm: date, to: date) -> dict:
+    """기간 요약 = 물류비와 같은 기준. 기간 비용은 영업일 배분 후 조회 기간 몫, 부가세 공제 차량은 해당 항목 공급가액."""
     if to < frm:
         raise ValueError("조회 종료일이 시작일보다 빠릅니다")
     if days_incl(frm, to) > MAX_SUMMARY_DAYS:
         raise ValueError(f"조회 기간은 {MAX_SUMMARY_DAYS}일 이내로 지정하세요")
-    vehicles = {r["id"]: r for r in dash_db.rows("SELECT id, plate_no, active, deleted_at FROM vehicles")}
+    vehicles = {r["id"]: r for r in dash_db.rows(
+        "SELECT id, plate_no, active, deleted_at, vat_deductible FROM vehicles")}
     periods = dash_db.rows("""
-        SELECT vehicle_id, amount, start_date, end_date FROM vehicle_period_costs
+        SELECT vehicle_id, category, amount, start_date, end_date FROM vehicle_period_costs
         WHERE deleted_at IS NULL AND start_date <= :t AND end_date >= :f
     """, {"f": frm, "t": to})
     expenses = dash_db.rows("""
         SELECT vehicle_id, category, amount FROM vehicle_expenses
         WHERE deleted_at IS NULL AND expense_date BETWEEN :f AND :t
     """, {"f": frm, "t": to})
+    lo = min([frm] + [p["start_date"] for p in periods])
+    hi = max([to] + [p["end_date"] for p in periods])
+    is_open = open_checker(lo, hi)
+
+    def ded(vid: int) -> bool:
+        return bool((vehicles.get(vid) or {}).get("vat_deductible"))
 
     acc: dict[int, dict] = {}
 
     def slot(vid: int) -> dict:
         return acc.setdefault(vid, {
-            "vehicle_id": vid, "plate_no": (vehicles.get(vid) or {}).get("plate_no"),
+            "vehicle_id": vid, "plate_no": (vehicles.get(vid) or {}).get("plate_no"), "vat_deductible": ded(vid),
             "period_cost": 0, "expense": 0, "expense_by_category": {},
         })
 
@@ -210,11 +222,14 @@ def cost_summary(frm: date, to: date) -> dict:
         if v["deleted_at"] is None and v["active"]:
             slot(vid)
     for p in periods:
-        slot(p["vehicle_id"])["period_cost"] += allocate_period(p["amount"], p["start_date"], p["end_date"], frm, to)
+        amt = cost_amount(p["amount"], p["category"], ded(p["vehicle_id"]))
+        shares = period_shares(amt, p["start_date"], p["end_date"], is_open)
+        slot(p["vehicle_id"])["period_cost"] += sum(v for d, v in shares.items() if frm <= d <= to)
     for e in expenses:
         s = slot(e["vehicle_id"])
-        s["expense"] += int(e["amount"])
-        s["expense_by_category"][e["category"]] = s["expense_by_category"].get(e["category"], 0) + int(e["amount"])
+        amt = cost_amount(e["amount"], e["category"], ded(e["vehicle_id"]))
+        s["expense"] += amt
+        s["expense_by_category"][e["category"]] = s["expense_by_category"].get(e["category"], 0) + amt
 
     items = sorted(acc.values(), key=lambda x: x["plate_no"] or "")
     return {

@@ -68,8 +68,8 @@ export default function VehiclesPage() {
   );
 }
 
-type VForm = { plate_no: string; model: string; fuel_type: FuelType; eff: string; pdate: string; price: string; memo: string; active: boolean };
-const EMPTY: VForm = { plate_no: "", model: "", fuel_type: "diesel", eff: "", pdate: "", price: "", memo: "", active: true };
+type VForm = { plate_no: string; model: string; fuel_type: FuelType; eff: string; pdate: string; price: string; memo: string; active: boolean; vat: boolean };
+const EMPTY: VForm = { plate_no: "", model: "", fuel_type: "diesel", eff: "", pdate: "", price: "", memo: "", active: true, vat: false };
 
 function VehicleListTab({ vehicles, managers, isAdmin, onChanged }: {
   vehicles: Vehicle[]; managers: ManagerRow[]; isAdmin: boolean; onChanged: () => Promise<void>;
@@ -87,7 +87,7 @@ function VehicleListTab({ vehicles, managers, isAdmin, onChanged }: {
     setF(v ? {
       plate_no: v.plate_no, model: v.model ?? "", fuel_type: v.fuel_type,
       eff: v.fuel_efficiency != null ? String(v.fuel_efficiency) : "", pdate: v.purchase_date ?? "",
-      price: v.purchase_price != null ? String(v.purchase_price) : "", memo: v.memo ?? "", active: v.active,
+      price: v.purchase_price != null ? String(v.purchase_price) : "", memo: v.memo ?? "", active: v.active, vat: v.vat_deductible,
     } : EMPTY);
   }
 
@@ -106,7 +106,7 @@ function VehicleListTab({ vehicles, managers, isAdmin, onChanged }: {
     const body: VehicleInput = {
       plate_no: f.plate_no.trim(), model: f.model.trim() || null, fuel_type: f.fuel_type,
       fuel_efficiency: eff, purchase_date: f.pdate || null, purchase_price: price,
-      memo: f.memo.trim() || null, active: f.active,
+      memo: f.memo.trim() || null, active: f.active, vat_deductible: f.vat,
     };
     run(async () => {
       if (editing === "new") await api.createVehicle(body);
@@ -127,12 +127,13 @@ function VehicleListTab({ vehicles, managers, isAdmin, onChanged }: {
         {vehicles.length === 0 ? (
           <div className="muted small">등록된 차량이 없습니다.</div>
         ) : (
-          <DataTable columns={["차량번호", "차종", "연료", { label: "공인연비", num: true }, "구매일", { label: "구매가", num: true }, "현재 배정", "상태", ...(isAdmin ? ["관리"] : [])]}>
+          <DataTable columns={["차량번호", "차종", "연료", "부가세", { label: "공인연비", num: true }, "구매일", { label: "구매가", num: true }, "현재 배정", "상태", ...(isAdmin ? ["관리"] : [])]}>
             {vehicles.map((v) => (
               <tr key={v.id} className={v.active ? undefined : "off"}>
                 <td>{v.plate_no}</td>
                 <td>{v.model ?? "-"}</td>
                 <td>{FUEL_LABEL[v.fuel_type]}</td>
+                <td>{v.vat_deductible ? <Chip tone="internal">공제 · 공급가액</Chip> : <Chip>불공제 · 합계</Chip>}</td>
                 <td className="num">{v.fuel_efficiency != null ? `${v.fuel_efficiency}${v.fuel_type === "ev" ? "km/kWh" : "km/L"}` : "-"}</td>
                 <td>{v.purchase_date ?? "-"}</td>
                 <td className="num">{v.purchase_price != null ? won(v.purchase_price) : "-"}</td>
@@ -178,6 +179,12 @@ function VehicleListTab({ vehicles, managers, isAdmin, onChanged }: {
           <label className="field">상태
             <select className="input" value={f.active ? "1" : "0"} onChange={(e) => set("active", e.target.value === "1")}>
               <option value="1">사용</option><option value="0">중지</option>
+            </select>
+          </label>
+          <label className="field">부가세 공제
+            <select className="input" value={f.vat ? "1" : "0"} onChange={(e) => set("vat", e.target.value === "1")}>
+              <option value="0">불공제 (승용차 등) — 합계를 비용으로</option>
+              <option value="1">공제 (화물차·경차·승합 등) — 공급가액을 비용으로</option>
             </select>
           </label>
           <label className="field field-wide">메모<input className="input" value={f.memo} maxLength={500} onChange={(e) => set("memo", e.target.value)} /></label>
