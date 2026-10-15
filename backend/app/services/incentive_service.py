@@ -266,7 +266,7 @@ def _acc_out(a: dict | None) -> dict | None:
 
 
 def _build(s: date, e: date, *, detail: bool) -> dict[tuple[date, int], dict]:
-    stops = _safe_fetch_stops(s, e)
+    stops = fetch_stops_range(s, e)
     p = {"s": s, "e": e}
     acc_rows, qadj, excl = dash_db.rows(SQL_ACC, p), dash_db.rows(SQL_QADJ, p), dash_db.rows(SQL_EXCL, p)
     extras, holds = dash_db.rows(SQL_EXTRAS, p), dash_db.rows(SQL_HOLDS, p)
