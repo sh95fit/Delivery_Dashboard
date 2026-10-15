@@ -38,7 +38,7 @@ class VehicleIn(BaseModel):
 
 class PeriodCostIn(BaseModel):
     vehicle_id: int
-    category: Literal["insurance", "tax", "inspection", "other"]
+    category: Literal["insurance", "tax", "inspection", "lease", "other"]
     amount: int = Field(gt=0, le=1_000_000_000)
     start_date: date
     end_date: date
@@ -48,6 +48,18 @@ class PeriodCostIn(BaseModel):
 class ExpenseIn(BaseModel):
     vehicle_id: int
     expense_date: date
-    category: Literal["repair", "maintenance", "tire", "depreciation", "parking", "wash", "other"]
+    category: Literal["repair", "maintenance", "tire", "towing", "accident", "depreciation", "parking", "wash", "other"]
     amount: int = Field(gt=0, le=1_000_000_000)
+    memo: str | None = Field(default=None, max_length=200)
+
+
+class FuelPriceIn(BaseModel):
+    price_date: date
+    fuel_type: Literal["gasoline", "diesel", "lpg", "ev"]
+    price: float = Field(gt=0, le=10000)
+    memo: str | None = Field(default=None, max_length=200)
+
+
+class DayOverrideIn(BaseModel):
+    is_open: bool
     memo: str | None = Field(default=None, max_length=200)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from contextvars import ContextVar
 from datetime import date as date_type, datetime, timedelta, timezone
 
 import requests
@@ -19,12 +20,44 @@ DAILY_NAVER_CALL_BUDGET = 150  # NAVER Directions 15 월 3,000회 무료 - 일�
 _daily_call_count: int = 0
 _daily_call_date = None
 
+
+# [S3-P1b-1] 지금 계산 중인 계정의 그날 차량 연료·연비·유가 → NAVER 예상 유류비 옵션
+_route_vehicle: ContextVar[dict] = ContextVar("_route_vehicle", default={})
+NCP_FUEL = {"gasoline": "gasoline", "diesel": "diesel", "lpg": "lpg"}   # 전기차는 NAVER 미지원
+
+
+def _vehicle_params(target: date_type, manager_id: int) -> dict:
+    """그날 배정 차량 → {fueltype, mileage, fuelPrice}. 차량 없음·전기차·연비 없음이면 {} (NAVER 기본값)."""
+    try:
+        with get_dash_engine().connect() as conn:
+            row = conn.execute(text("""
+                SELECT v.fuel_type, v.fuel_efficiency
+                FROM vehicle_assignments a LEFT JOIN vehicles v ON v.id = a.vehicle_id
+                WHERE a.manager_id = :m AND a.deleted_at IS NULL AND a.start_date <= :d
+                ORDER BY a.start_date DESC, a.id DESC LIMIT 1
+            """), {"m": manager_id, "d": target}).fetchone()
+            if not row or row.fuel_type not in NCP_FUEL or not row.fuel_efficiency:
+                return {}
+            price = conn.execute(text("""
+                SELECT price FROM fuel_price_log
+                WHERE fuel_type = :f AND deleted_at IS NULL AND price_date <= :d
+                ORDER BY price_date DESC, (source = 'manual') DESC, id DESC LIMIT 1
+            """), {"f": row.fuel_type, "d": target}).scalar()
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {"fueltype": NCP_FUEL[row.fuel_type], "mileage": float(row.fuel_efficiency)}
+    if price:
+        out["fuelPrice"] = float(price)
+    return out
+
+
 def _get_origin(origin_row: dict | None) -> dict:
     return {
         "name": origin_row["name"] if origin_row else "기본 출발지",
         "latitude": float(origin_row["latitude"]) if origin_row else float(os.environ.get("DEPOT_LAT", "37.5700682")),
         "longitude": float(origin_row["longitude"]) if origin_row else float(os.environ.get("DEPOT_LNG", "127.0684966")),
     }
+
 
 def _today_kst() -> date_type:
     return datetime.now(KST).date()
@@ -553,6 +586,7 @@ def _naver_driving(start: dict, ordered_nodes: list[dict], option: str = "trafas
         "option": option,
         "lang": "ko",
     }
+    params.update(_route_vehicle.get())
 
     waypoints = ordered_nodes[:-1]
     if waypoints:
@@ -786,6 +820,7 @@ def _build_manager_route(
     force: bool = False,
     trigger_reason: str = "api_read",
 ) -> dict:
+    _route_vehicle.set(_vehicle_params(target, manager_id))
     if not manager_stops:
         return {
             "manager_id": manager_id,

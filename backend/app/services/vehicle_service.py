@@ -12,8 +12,8 @@ from app.services.cost_calc import allocate_period, days_incl, latest_by
 from app.services.manager_service import today
 
 FUEL_TYPES = ("gasoline", "diesel", "lpg", "ev")
-PERIOD_CATS = ("insurance", "tax", "inspection", "other")
-EXPENSE_CATS = ("repair", "maintenance", "tire", "depreciation", "parking", "wash", "other")
+PERIOD_CATS = ("insurance", "tax", "inspection", "lease", "other")
+EXPENSE_CATS = ("repair", "maintenance", "tire", "towing", "accident", "depreciation", "parking", "wash", "other")
 VEHICLE_FIELDS = ("plate_no", "model", "fuel_type", "fuel_efficiency", "purchase_date", "purchase_price", "memo", "active")
 MAX_SUMMARY_DAYS = 400
 

@@ -3,7 +3,7 @@ import logging
 import os
 import time
 
-from app.services import routes_service
+from app.services import fuel_price_service, routes_service
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("route_collector")
@@ -32,6 +32,10 @@ def main():
     )
 
     while True:
+        try:
+            fuel_price_service.ensure_today()   # 하루 1번 오피넷 유가 수집
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("opinet fetch failed: %s", exc)
         interval = interval_active if is_delivery_hours() else interval_idle
 
         try:

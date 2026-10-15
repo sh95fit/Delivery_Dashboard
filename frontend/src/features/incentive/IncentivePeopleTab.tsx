@@ -58,11 +58,11 @@ export default function IncentivePeopleTab({ month, onMonth }: Props) {
                     <td>{p.name} {!p.active && <Chip tone="caution">비활성</Chip>}</td>
                     <td>{p.pay_type === "monthly" ? "정규직" : TYPE[p.income_type ?? ""] ?? "-"}</td>
                     <td>{p.on_sheet ? <Chip tone="ok">인센티브 칸</Chip> : <Chip tone="warn">근무표 외 · 별도 지급</Chip>}</td>
-                    <td className="num">{num(p.days)}</td>
+                    <td className="num">{num(p.days)}{p.chosen_days ? <> <Chip tone="internal">지정 {p.chosen_days}일</Chip></> : null}</td>
                     <td className="num">{num(p.incentive)}</td>
                     <td className="num">{num(p.extras)}</td>
                     <td className="num"><b>{num(p.total)}</b></td>
-                    <td className="num">{num(p.days)}{p.chosen_days ? <Chip tone="internal">지정 {p.chosen_days}일</Chip> : null}</td>
+                    <td className="num">{p.pending_days ? <Chip tone="warn">{p.pending_days}일</Chip> : "-"}</td>
                   </tr>
                 ))}
                 {t && (

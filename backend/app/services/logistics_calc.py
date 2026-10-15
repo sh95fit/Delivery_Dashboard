@@ -1,4 +1,4 @@
-"""S3-P1 물류비 계산 순수 함수 (DB 없음 → 단위 테스트 대상). 금액은 모두 공급가(부가세 제외)."""
+"""S3-P1 물류비 계산 순수 함수 (DB 없음 → 단위 테스트 대상)."""
 from __future__ import annotations
 
 import calendar

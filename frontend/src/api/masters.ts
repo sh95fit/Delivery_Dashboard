@@ -6,10 +6,12 @@ export type FuelType = "gasoline" | "diesel" | "lpg" | "ev";
 
 export const PAY_LABEL: Record<PayType, string> = { monthly: "월급", hourly: "시급", none: "인건비 없음" };
 export const FUEL_LABEL: Record<FuelType, string> = { gasoline: "휘발유", diesel: "경유", lpg: "LPG", ev: "전기" };
-export const PERIOD_CATS: Record<string, string> = { insurance: "보험", tax: "자동차세", inspection: "검사", other: "기타" };
+export const PERIOD_CATS: Record<string, string> = {
+  insurance: "보험", tax: "자동차세", inspection: "검사", lease: "리스·렌트", other: "기타",
+};
 export const EXPENSE_CATS: Record<string, string> = {
-  repair: "수리", maintenance: "정비·소모품", tire: "타이어", depreciation: "감가",
-  parking: "주차", wash: "세차", other: "기타",
+  repair: "수리", maintenance: "정비·소모품", tire: "타이어", towing: "견인", accident: "사고 처리(자기부담금 등)",
+  depreciation: "감가", parking: "주차", wash: "세차", other: "기타",
 };
 
 export interface PayRate {

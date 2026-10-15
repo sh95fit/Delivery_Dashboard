@@ -14,3 +14,4 @@ psycopg2-binary
 requests
 openpyxl
 pydantic==2.13.5
+holidays

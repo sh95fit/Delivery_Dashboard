@@ -1,7 +1,9 @@
 """S3-P1 물류비 (계정 × 일자) — 매출 대비 비용 확인용. 지급·제출 금액이 아님 (근무표·급여와 별개).
-규칙은 logistics_calc 참고. 금액은 모두 공급가(부가세 제외) — 순매출이 VAT 제외이므로 같은 기준."""
+규칙은 logistics_calc 참고. 매출 = 순매출(부가세 제외), 비용 = 입력 금액 그대로 (부가세 규칙은 S3-P1b-3에서 적용)."""
 from __future__ import annotations
 
+import logging
+import time
 from datetime import date, datetime, timedelta
 
 from app.services import dash_db
@@ -10,7 +12,9 @@ from app.services.day_aggregate import KST
 from app.services.logistics_calc import labor_day, split_even, vehicle_day
 from app.services.manager_service import today
 
-MAX_DAYS = 62
+MAX_DAYS = 366   # 1년(윤년 포함). 1년 조회가 느리면 줄인다
+logger = logging.getLogger("logistics")
+
 COST_KEYS = ("labor", "labor_est", "ot_expected", "incentive", "extras", "vehicle")
 NO_ACCOUNT = "계정 미지정"
 
@@ -46,6 +50,7 @@ def cost_view(frm: date, to: date) -> dict:
     from app.services.revenue_service import _views
 
     t = today()
+    started = time.perf_counter()
     days = [frm + timedelta(days=i) for i in range(days_incl(frm, to))]
     cells: dict[tuple[date, int | None], dict] = {}
     names: dict[int | None, str] = {}
@@ -106,7 +111,8 @@ def cost_view(frm: date, to: date) -> dict:
                     nocontract.add(w["name"])
                 continue
             a = effective_on(accs.get(wid, []), d, "start_date")
-            mid = (lg or {}).get("manager_id") or owned.get((wid, d)) or (a["manager_id"] if a else None)
+            # 인센티브와 같은 순서: 담당 지정 → 근무 기록의 그날 계정 → 고정 계정
+            mid = owned.get((wid, d)) or (lg or {}).get("manager_id") or (a["manager_id"] if a else None)
             c = cell(d, mid)
             c["labor" if res["kind"] in ("actual", "monthly") else "labor_est"] += res["cost"]
             c["ot_expected"] += res["ot_pay"]
@@ -161,6 +167,7 @@ def cost_view(frm: date, to: date) -> dict:
     totals = _finish({k: sum(r[k] for r in rows) for k in ("net_revenue",) + COST_KEYS})
     if totals["labor_est"]:
         add("info", f"인건비 중 {totals['labor_est']:,}원은 근무 기록이 없는 날의 예상 금액")
+    logger.info("cost_view %s~%s %d일 %.1fs", frm, to, len(days), time.perf_counter() - started)        
     return {"from": frm.isoformat(), "to": to.isoformat(), "days": len(days), "today": t.isoformat(),
             "accounts": rows,
             "by_day": [{"date": d.isoformat(), **_finish(v)} for d, v in sorted(by_day.items())],
