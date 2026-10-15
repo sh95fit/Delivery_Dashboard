@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from app.database import get_dash_engine
 from app.services import dash_db
 from app.services.cost_calc import days_incl
-from app.services.fuel_calc import FUEL_TYPES, UNIT, parse_opinet, price_on
+from app.services.fuel_calc import FUEL_TYPES, UNIT, opinet_params, parse_opinet, price_on
 from app.services.manager_service import today
 
 logger = logging.getLogger("fuel_price")
@@ -32,19 +32,22 @@ def _out(r: dict) -> dict:
 
 
 def fetch_opinet() -> int:
-    """오피넷 평균가를 받아 오늘 날짜로 저장. OPINET_SIDO(예 01=서울)가 있으면 시도 평균, 없으면 전국 평균."""
-    key = os.environ.get("OPINET_API_KEY", "").strip()
+    """오피넷 평균가를 받아 저장. OPINET_SIDO(예 01=서울)가 있으면 시도 평균, 없으면 전국 평균.
+    인증키 파라미터 이름은 code (opinet_params 참고)."""
+    key = os.environ.get("OPINET_API_KEY", "").strip().strip('"').strip("'")
     if not key:
         raise ValueError("서버 .env에 OPINET_API_KEY가 없습니다")
     sido = os.environ.get("OPINET_SIDO", "").strip()
-    params = {"out": "json", "certkey": key}
-    if sido:
-        params["sido"] = sido
-    resp = requests.get(OPINET_SIDO if sido else OPINET_ALL, params=params, timeout=10)
+    resp = requests.get(OPINET_SIDO if sido else OPINET_ALL, params=opinet_params(key, sido), timeout=10)
     resp.raise_for_status()
-    items = parse_opinet(resp.json(), today())
+    try:
+        payload = resp.json()
+    except ValueError as exc:
+        raise ValueError(f"오피넷 응답을 읽지 못했습니다 (HTTP {resp.status_code}) — {resp.text.strip()[:200]}") from exc
+    items = parse_opinet(payload, today())
     if not items:
-        raise ValueError("오피넷 응답에 유가가 없습니다 — 인증키를 확인하세요")
+        raise ValueError("오피넷이 빈 목록을 돌려줬습니다 — OPINET_API_KEY 값·승인 상태와 OPINET_SIDO 코드를 확인하세요. "
+                         f"응답 앞부분 {' '.join(resp.text.split())[:120]}")
     memo = f"시도 {sido} 평균" if sido else "전국 평균"
     with get_dash_engine().begin() as conn:
         for it in items:

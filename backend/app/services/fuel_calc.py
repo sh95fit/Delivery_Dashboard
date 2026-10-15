@@ -9,6 +9,14 @@ UNIT = {"gasoline": "원/L", "diesel": "원/L", "lpg": "원/L", "ev": "원/kWh"}
 OPINET_CODE = {"B027": "gasoline", "D047": "diesel", "K015": "lpg"}
 
 
+def opinet_params(key: str, sido: str = "") -> dict:
+    """오피넷 요청 파라미터. 인증키 이름은 code (공식 문서 표의 certkey로 보내면 승인된 키여도 빈 목록이 옴)."""
+    p = {"out": "json", "code": key}
+    if sido:
+        p["sido"] = sido
+    return p
+
+
 def parse_opinet(payload, default_date: date) -> list[dict]:
     """오피넷 평균가 응답 → [{price_date, fuel_type, price}]. 날짜 없는 응답(시도별)은 default_date."""
     oil = ((payload or {}).get("RESULT") or {}).get("OIL") or []
