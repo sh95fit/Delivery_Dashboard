@@ -22,7 +22,9 @@ VERSION = "v4"          # v4: 배송 순서(seq), 배송시간 파싱 보강
 TTL_TODAY = 20
 TTL_RECENT = 600
 TTL_OLD = 21600
+TTL_ARCHIVE = 604800    # 7일 — 35일보다 지난 날짜 (늦은 수정은 캐시 비우기로 즉시 반영)
 RECENT_DAYS = 3
+ARCHIVE_DAYS = 35
 
 _client = None
 _locks: dict[str, threading.Lock] = {}
@@ -45,7 +47,9 @@ def ttl_for(target: date_type, today: date_type) -> int:
         return TTL_TODAY
     if target >= today - timedelta(days=RECENT_DAYS):
         return TTL_RECENT
-    return TTL_OLD
+    if target >= today - timedelta(days=ARCHIVE_DAYS):
+        return TTL_OLD
+    return TTL_ARCHIVE
 
 
 def _targets_sig() -> str:

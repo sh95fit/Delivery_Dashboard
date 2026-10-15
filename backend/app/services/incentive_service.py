@@ -112,7 +112,8 @@ def _safe_fetch_stops(s: date, e: date) -> list[dict]:
 
 
 STOPS_CACHE = "dash:stops:v1"
-STOPS_TTL = 21600          # 6시간 (day_cache TTL_OLD와 같음)
+STOPS_TTL = 21600 # 6시간 (day_cache TTL_OLD와 같음)
+STOPS_TTL_ARCHIVE = 604800  # 7일 — 구간 끝이 35일보다 지난 달 (day_cache TTL_ARCHIVE와 같음)
 STOPS_RECENT_DAYS = 3      # 최근 3일·이번 달은 저장 안 함 (당일 수정 반영)
 
 
@@ -140,7 +141,8 @@ def _stops_month(s: date, e: date) -> list[dict]:
     rows = _safe_fetch_stops(s, e)
     if cacheable:
         try:
-            _redis().setex(key, STOPS_TTL, pickle.dumps(rows))
+            ttl = STOPS_TTL_ARCHIVE if e < today() - timedelta(days=35) else STOPS_TTL
+            _redis().setex(key, ttl, pickle.dumps(rows))
         except Exception:  # noqa: BLE001
             pass
     return rows
