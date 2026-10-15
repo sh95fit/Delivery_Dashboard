@@ -21,7 +21,7 @@ from app.services.manager_service import today
 MAX_DAYS = 366   # 1년(윤년 포함). 느리면 줄인다
 logger = logging.getLogger("logistics")
 
-COST_KEYS = ("labor", "labor_est", "ot_expected", "incentive", "extras", "vehicle")
+COST_KEYS = ("labor", "labor_est", "ot_expected", "incentive", "extras", "vehicle", "fuel", "fuel_est")
 NO_ACCOUNT = "계정 미지정"
 
 
@@ -171,8 +171,32 @@ def cost_view(frm: date, to: date) -> dict:
                     continue
                 for mid, share in split_even(amt, users[vid]).items():
                     cell(d, mid)["vehicle"] += share
+                    
+        # ---------- 유류비 (그달 영업일 배분 → 그날 차량 배정 계정에 균분. 마감 = 확정, 마감 전 = 입력분 예상) ----------
+        from app.services.fuel_log_service import fuel_by_day   # 함수 안 import = 순환 import 방지
+        fuel_days, fuel_closed = fuel_by_day(frm, to, is_open, deductible)
+        fuel_open: set[tuple[int, int]] = set()
+        for d, per_vid in fuel_days.items():
+            key = "fuel" if (d.year, d.month) in fuel_closed else "fuel_est"
+            if key == "fuel_est":
+                fuel_open.add((d.year, d.month))
+            users = {}
+            for mid, a in latest_by(assigns, "manager_id", "start_date", d).items():
+                if a["vehicle_id"]:
+                    users.setdefault(a["vehicle_id"], []).append(mid)
+            for vid, amt in per_vid.items():
+                if not users.get(vid):
+                    cell(d, None)[key] += amt
+                    loose += amt
+                    continue
+                for mid, share in split_even(amt, users[vid]).items():
+                    cell(d, mid)[key] += share
+        if fuel_open:
+            months = ", ".join(f"{y}-{m:02d}" for y, m in sorted(fuel_open))
+            add("info", f"유류비 미마감 {months} — 지금까지 입력한 주유 기록으로 예상 계산 (월 마감 후 확정)")
         if loose:
             add("info", f"배정 계정이 없는 차량 비용 {loose:,}원은 '{NO_ACCOUNT}'로 들어감")
+
         timing["vehicle"] = round(time.perf_counter() - s, 2)
 
         rev_views = f_rev.result()

@@ -64,3 +64,24 @@ class FuelPriceIn(BaseModel):
 class DayOverrideIn(BaseModel):
     is_open: bool
     memo: str | None = Field(default=None, max_length=200)
+
+
+class FuelLogIn(BaseModel):
+    vehicle_id: int
+    fuel_date: date
+    fuel_type: Literal["gasoline", "diesel", "lpg", "ev"] | None = None
+    quantity: float | None = Field(default=None, gt=0, le=100000)
+    unit_price: float | None = Field(default=None, gt=0, le=10000)
+    total_amount: int = Field(gt=0, le=100_000_000)
+    supply_amount: int | None = Field(default=None, ge=0, le=100_000_000)
+    vat_amount: int | None = Field(default=None, ge=0, le=100_000_000)
+    station: str | None = Field(default=None, max_length=100)
+    memo: str | None = Field(default=None, max_length=200)
+
+
+class FuelCloseIn(BaseModel):
+    memo: str | None = Field(default=None, max_length=200)
+
+
+class FuelReleaseIn(BaseModel):
+    reason: str = Field(min_length=1, max_length=200)
