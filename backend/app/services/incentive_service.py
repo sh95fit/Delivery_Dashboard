@@ -14,7 +14,9 @@
 from __future__ import annotations
 
 import calendar
-from datetime import date
+import pickle
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, timedelta
 
 from sqlalchemy import bindparam, text
 
@@ -107,6 +109,51 @@ def _safe_fetch_stops(s: date, e: date) -> list[dict]:
             pass
         db._engine = None
         return _fetch_stops(s, e)
+
+
+STOPS_CACHE = "dash:stops:v1"
+STOPS_TTL = 21600          # 6시간 (day_cache TTL_OLD와 같음)
+STOPS_RECENT_DAYS = 3      # 최근 3일·이번 달은 저장 안 함 (당일 수정 반영)
+
+
+def _month_chunks(s: date, e: date) -> list[tuple[date, date]]:
+    out, cur = [], s
+    while cur <= e:
+        last = cur.replace(day=calendar.monthrange(cur.year, cur.month)[1])
+        out.append((cur, min(last, e)))
+        cur = last + timedelta(days=1)
+    return out
+
+
+def _stops_month(s: date, e: date) -> list[dict]:
+    """한 달 이하 구간. 지난 구간은 Redis에 저장해 다음 조회부터 운영 DB를 거치지 않음."""
+    from app.services.day_cache import _redis
+    cacheable = e < today() - timedelta(days=STOPS_RECENT_DAYS) and (e.year, e.month) != (today().year, today().month)
+    key = f"{STOPS_CACHE}:{s.isoformat()}:{e.isoformat()}"
+    if cacheable:
+        try:
+            raw = _redis().get(key)
+            if raw:
+                return pickle.loads(raw)
+        except Exception:  # noqa: BLE001
+            pass
+    rows = _safe_fetch_stops(s, e)
+    if cacheable:
+        try:
+            _redis().setex(key, STOPS_TTL, pickle.dumps(rows))
+        except Exception:  # noqa: BLE001
+            pass
+    return rows
+
+
+def fetch_stops_range(s: date, e: date) -> list[dict]:
+    """기간을 월별로 나눠 동시에 3개씩 조회 (운영 DB 연결 풀 8개 중 매출 4 + 인센티브 3). 순서는 날짜순 유지."""
+    chunks = _month_chunks(s, e)
+    if len(chunks) == 1:
+        return _stops_month(s, e)
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        parts = list(ex.map(lambda c: _stops_month(*c), chunks))
+    return [r for p in parts for r in p]
 
 
 def _managers() -> dict[int, dict]:

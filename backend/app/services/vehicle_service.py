@@ -91,7 +91,7 @@ def update_vehicle(vid: int, data: dict, email: str) -> None:
                 UPDATE vehicles
                    SET plate_no = :plate_no, model = :model, fuel_type = :fuel_type,
                        fuel_efficiency = :fuel_efficiency, purchase_date = :purchase_date,
-                       purchase_price, memo = :memo, active = :active, vat_deductible = :vat_deductible,
+                       purchase_price = :purchase_price, memo = :memo, active = :active, vat_deductible = :vat_deductible,
                        updated_by = :e, updated_at = NOW()
                  WHERE id = :id AND deleted_at IS NULL
             """), {**d, "e": email, "id": vid})
