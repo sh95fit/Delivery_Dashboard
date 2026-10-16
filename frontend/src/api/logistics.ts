@@ -3,7 +3,8 @@ import { download, http } from "./client";
 /* S3-P2a 물류비 (계정 × 일자) — 백엔드 logistics_service.cost_view 결과 */
 export type CostKey = "labor" | "labor_est" | "ot_expected" | "incentive" | "extras" | "vehicle" | "fuel" | "fuel_est";
 export type CostRow = Record<CostKey, number> & {
-  net_revenue: number; cost_total: number; profit: number; cost_ratio: number | null;
+    net_revenue: number; cost_total: number; profit: number; cost_ratio: number | null;
+    ncp_fuel: number; calc_fuel: number; route_m: number; route_km: number;   // S3-P2b 참고 (합계 제외)
 };
 export type CostAccount = CostRow & { manager_id: number | null; manager_name: string };
 export type CostDay = CostRow & { date: string };

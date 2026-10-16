@@ -1,9 +1,9 @@
 from app.services.excel_export import build_xlsx
-from app.services.logistics_export import KEYS, view_sheets
+from app.services.logistics_export import KEYS, REF_KEYS, view_sheets
 
 
 def _row(**kw):
-    base = {k: 0 for k in KEYS}
+    base = {k: 0 for k in KEYS + REF_KEYS}
     base["cost_ratio"] = None
     base.update(kw)
     return base
@@ -32,3 +32,11 @@ def test_sheets():
 def test_xlsx_bytes():
     _, sheets = view_sheets(VIEW)
     assert build_xlsx(sheets)[:2] == b"PK"
+
+
+def test_ref_columns_last():
+    _, sheets = view_sheets(VIEW)
+    labels = [c[0] for c in sheets[0]["columns"]]
+    assert labels[-3:] == ["주행거리(km, 참고)", "NCP 예상 유류비(참고)", "직접 계산 유류비(참고)"]
+    assert "물류비 합계" in labels
+    

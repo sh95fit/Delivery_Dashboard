@@ -18,10 +18,15 @@ MONEY = [
     ("이익", "profit"),
 ]
 KEYS = [k for _, k in MONEY]
-
+REF = [
+    ("주행거리(km, 참고)", "route_km", "num"),
+    ("NCP 예상 유류비(참고)", "ncp_fuel", "won"),
+    ("직접 계산 유류비(참고)", "calc_fuel", "won"),
+]
+REF_KEYS = [k for _, k, _ in REF]
 
 def _cols() -> list[tuple[str, str, str]]:
-    return [(label, key, "won") for label, key in MONEY] + [("비용률(%)", "cost_ratio", "num")]
+    return [(label, key, "won") for label, key in MONEY] + [("비용률(%)", "cost_ratio", "num")] + REF
 
 
 def view_sheets(view: dict) -> tuple[str, list[dict]]:

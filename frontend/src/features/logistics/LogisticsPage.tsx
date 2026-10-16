@@ -24,6 +24,9 @@ const COLUMNS = [
   { label: "물류비 합계", num: true },
   { label: "이익", num: true },
   { label: "비용률", num: true },
+  { label: "주행 km", num: true },
+  { label: "NCP 예상 유류비", num: true },
+  { label: "직접 계산", num: true },    
 ];
 
 const ratio = (r: CostRow) => (r.cost_ratio == null ? "-" : `${r.cost_ratio}%`);
@@ -36,6 +39,9 @@ function Cells({ r }: { r: CostRow }) {
       <td className="num"><b>{num(r.cost_total)}</b></td>
       <td className="num">{num(r.profit)}</td>
       <td className="num">{ratio(r)}</td>
+      <td className="num muted">{r.route_km ? r.route_km.toLocaleString("ko-KR") : "-"}</td>
+      <td className="num muted">{r.ncp_fuel ? num(r.ncp_fuel) : "-"}</td>
+      <td className="num muted">{r.calc_fuel ? num(r.calc_fuel) : "-"}</td>      
     </>
   );
 }
@@ -50,6 +56,7 @@ function Body({ view, showDays, onShowDays }: { view: CostView; showDays: boolea
         <Card title="물류비" sub={est ? `예상분 ${won(est)} 포함` : "확정"}>{won(t.cost_total)}</Card>
         <Card title="이익" sub="순매출 − 물류비">{won(t.profit)}</Card>
         <Card title="비용률" sub="물류비 ÷ 순매출">{ratio(t)}</Card>
+        <Card title="NCP 예상 유류비" sub={`참고 · 직접 계산 ${won(t.calc_fuel)} · 실제 ${won(t.fuel + t.fuel_est)}`}>{won(t.ncp_fuel)}</Card>
         <Card title="기간" sub={`${view.from} ~ ${view.to}`}>{`${view.days}일 · 영업 ${view.open_days}일`}</Card>
       </section>
 
@@ -65,7 +72,7 @@ function Body({ view, showDays, onShowDays }: { view: CostView; showDays: boolea
 
       <Panel
         title="계정별"
-        desc="단위 원. 매출은 부가세 제외, 비용은 실제 부담액(부가세 공제 차량만 공급가액). 정규직 월급·차량 기간 비용·유류비는 영업일(일요일·공휴일 제외)로 나눠 배분합니다. '예상' 칸은 근무 기록이 없거나 유류비 마감 전인 금액입니다."
+        desc="단위 원. 매출은 부가세 제외, 비용은 실제 부담액(부가세 공제 차량만 공급가액). 정규직 월급·차량 기간 비용·유류비는 영업일(일요일·공휴일 제외)로 나눠 배분합니다. '예상' 칸은 근무 기록이 없거나 유류비 마감 전인 금액입니다. 맨 오른쪽 3칸(주행 km·NCP 예상 유류비·직접 계산)은 지도에 저장된 경로 기준 참고값으로 물류비 합계에 넣지 않습니다."
       >
         {view.accounts.length === 0 ? (
           <p className="muted">이 기간에 매출·비용이 없습니다.</p>

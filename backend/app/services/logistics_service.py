@@ -17,16 +17,18 @@ from app.services.cost_calc import days_incl, effective_on, latest_by
 from app.services.day_aggregate import KST
 from app.services.logistics_calc import labor_day, month_days, split_even, vehicle_costs
 from app.services.manager_service import today
+from app.services.route_fuel_service import route_fuel
 
 MAX_DAYS = 366   # 1년(윤년 포함). 느리면 줄인다
 logger = logging.getLogger("logistics")
 
 COST_KEYS = ("labor", "labor_est", "ot_expected", "incentive", "extras", "vehicle", "fuel", "fuel_est")
+REF_KEYS = ("ncp_fuel", "calc_fuel", "route_m")   # S3-P2b 참고 칸 — cost_total에 넣지 않음
 NO_ACCOUNT = "계정 미지정"
 
 
 def _blank() -> dict:
-    return {"net_revenue": 0, **{k: 0 for k in COST_KEYS}}
+    return {"net_revenue": 0, **{k: 0 for k in COST_KEYS + REF_KEYS}}
 
 
 def _d(v) -> date:
@@ -44,7 +46,8 @@ def _finish(x: dict) -> dict:
     cost = sum(int(x[k]) for k in COST_KEYS)
     rev = int(x["net_revenue"])
     return {**x, "cost_total": cost, "profit": rev - cost,
-            "cost_ratio": round(cost * 100 / rev, 1) if rev > 0 else None}
+            "cost_ratio": round(cost * 100 / rev, 1) if rev > 0 else None,
+            "route_km": round(int(x.get("route_m") or 0) / 1000, 1)}
 
 
 def _timed(timing: dict, key: str, fn):
@@ -199,6 +202,18 @@ def cost_view(frm: date, to: date) -> dict:
 
         timing["vehicle"] = round(time.perf_counter() - s, 2)
 
+        # ---------- 참고: NCP 예상 유류비 · 직접 계산 (S3-P2b, 합계에 넣지 않음) ----------
+        s = time.perf_counter()
+        rf, rf_notes = route_fuel(frm, to, assigns)
+        for (d, mid), x in rf.items():
+            c = cell(d, mid)
+            c["route_m"] += x["route_m"]
+            c["ncp_fuel"] += x["ncp"]
+            c["calc_fuel"] += x["calc"]
+        for n in rf_notes:
+            add("info", n)
+        timing["route"] = round(time.perf_counter() - s, 2)        
+
         rev_views = f_rev.result()
         inc_rows = f_inc.result()
 
@@ -236,7 +251,7 @@ def cost_view(frm: date, to: date) -> dict:
         name = NO_ACCOUNT if mid is None else ((mgrs.get(mid) or {}).get("name") or names.get(mid) or f"계정 {mid}")
         rows.append(_finish({**acc, "manager_name": name}))
     rows.sort(key=lambda x: (x["manager_id"] is None, -x["net_revenue"]))
-    totals = _finish({k: sum(r[k] for r in rows) for k in ("net_revenue",) + COST_KEYS})
+    totals = _finish({k: sum(r[k] for r in rows) for k in ("net_revenue",) + COST_KEYS + REF_KEYS})
     if totals["labor_est"]:
         add("info", f"인건비 중 {totals['labor_est']:,}원은 근무 기록이 없는 날의 예상 금액")
     timing["total"] = round(time.perf_counter() - started, 2)
