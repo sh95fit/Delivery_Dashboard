@@ -59,9 +59,10 @@ export interface Expense {
 }
 export interface CostSummary {
   from: string; to: string; days: number;
-  vehicles: Array<{ vehicle_id: number; plate_no: string | null; period_cost: number; expense: number;
+  vehicles: Array<{ vehicle_id: number; plate_no: string | null; period_cost: number; expense: number; fuel: number;
     expense_by_category: Record<string, number> }>;
-  totals: { period_cost: number; expense: number };
+  totals: { period_cost: number; expense: number; fuel: number };
+  fuel_estimated: string[];
 }
 
 type Ok = { ok: boolean; id?: number };

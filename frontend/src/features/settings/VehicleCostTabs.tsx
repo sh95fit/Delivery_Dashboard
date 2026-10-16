@@ -337,6 +337,7 @@ type SummaryRow = CostSummary["vehicles"][number];
 export function CostSummaryTab() {
   const [month, setMonth] = useState(thisMonth());
   const [withExp, setWithExp] = useState(true);
+  const [withFuel, setWithFuel] = useState(true);
   const [data, setData] = useState<CostSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -347,14 +348,15 @@ export function CostSummaryTab() {
     api.getCostSummary(from, to).then(setData).catch((e) => setError(errText(e)));
   }, [month]);
 
-  const rowTotal = (r: SummaryRow) => r.period_cost + (withExp ? r.expense : 0);
+  const rowTotal = (r: SummaryRow) => r.period_cost + (withExp ? r.expense : 0) + (withFuel ? r.fuel : 0);
   const totals = data?.totals;
-  const grand = totals ? totals.period_cost + (withExp ? totals.expense : 0) : 0;
+  const grand = totals ? totals.period_cost + (withExp ? totals.expense : 0) + (withFuel ? totals.fuel : 0) : 0;
+  const est = data?.fuel_estimated ?? [];
 
   return (
     <Panel
       title="비용 요약"
-      desc="기간 비용은 해당 월에 걸친 일수만큼만, 지출은 일자 기준으로 합산합니다."
+      desc="기간 비용·유류비는 영업일(일요일·공휴일 제외)로 나눠 이 달 몫만, 지출은 일자 기준으로 합산합니다. 부가세 공제 차량은 공급가액 기준."
       right={
         <div className="row-gap">
           <input type="month" className="input" value={month} onChange={(e) => setMonth(e.target.value)} />
@@ -362,10 +364,17 @@ export function CostSummaryTab() {
             <input type="checkbox" checked={withExp} onChange={(e) => setWithExp(e.target.checked)} />
             지출 포함
           </label>
+          <label className="check">
+            <input type="checkbox" checked={withFuel} onChange={(e) => setWithFuel(e.target.checked)} />
+            유류비 포함
+          </label>
         </div>
       }
     >
       <ErrorLine error={error} />
+      {withFuel && est.length > 0 && (
+        <p className="muted small">유류비 {est.join(", ")}은 아직 마감 전이라 지금까지 입력한 주유 기록으로 계산한 예상 금액입니다.</p>
+      )}
       {!data ? (
         !error && <p className="muted">불러오는 중…</p>
       ) : data.vehicles.length === 0 ? (
@@ -376,6 +385,7 @@ export function CostSummaryTab() {
             "차량",
             { label: "기간 비용", num: true },
             ...(withExp ? [{ label: "지출", num: true }] : []),
+            ...(withFuel ? [{ label: "유류비", num: true }] : []),
             { label: "합계", num: true },
           ]}
         >
@@ -384,6 +394,7 @@ export function CostSummaryTab() {
               <td>{r.plate_no ?? `#${r.vehicle_id}`}</td>
               <td className="num">{won(r.period_cost)}</td>
               {withExp && <td className="num">{won(r.expense)}</td>}
+              {withFuel && <td className="num">{won(r.fuel)}</td>}
               <td className="num">{won(rowTotal(r))}</td>
             </tr>
           ))}
@@ -391,6 +402,7 @@ export function CostSummaryTab() {
             <td>합계 ({data.days}일)</td>
             <td className="num">{won(data.totals.period_cost)}</td>
             {withExp && <td className="num">{won(data.totals.expense)}</td>}
+            {withFuel && <td className="num">{won(data.totals.fuel)}</td>}
             <td className="num">{won(grand)}</td>
           </tr>
         </DataTable>

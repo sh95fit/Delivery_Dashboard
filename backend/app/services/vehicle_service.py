@@ -10,6 +10,8 @@ from app.database import get_dash_engine
 from app.services import dash_db
 from app.services.calendar_service import open_checker
 from app.services.cost_calc import days_incl, latest_by
+from app.services.fuel_log_calc import month_bounds
+from app.services.fuel_log_service import fuel_by_day
 from app.services.logistics_calc import cost_amount, period_shares
 from app.services.manager_service import today
 
@@ -187,8 +189,22 @@ def add_expense(vehicle_id: int, expense_date: date, category: str, amount: int,
 
 
 # ---------- 기간 요약 (비용 엔진 P6의 차량 부분) ----------
+def _months(frm: date, to: date) -> list[tuple[int, int]]:
+    """조회 기간이 걸친 (연, 월) 목록."""
+    out, (y, m) = [], (frm.year, frm.month)
+    while (y, m) <= (to.year, to.month):
+        out.append((y, m))
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return out
+
+
 def cost_summary(frm: date, to: date) -> dict:
-    """기간 요약 = 물류비와 같은 기준. 기간 비용은 영업일 배분 후 조회 기간 몫, 부가세 공제 차량은 해당 항목 공급가액."""
+    """기간 요약 = 물류비와 같은 기준.
+    - 기간 비용: 영업일 배분 후 조회 기간 몫. 부가세 공제 차량은 해당 항목 공급가액
+    - 지출: 일자 기준
+    - 유류비(S3-P1b-2c): 그달 차량별 비용을 그달 영업일로 나눈 뒤 조회 기간 몫 (물류비와 같은 fuel_by_day)
+      마감 전 달은 지금까지 입력한 기록으로 예상 → fuel_estimated 에 달 목록
+    """
     if to < frm:
         raise ValueError("조회 종료일이 시작일보다 빠릅니다")
     if days_incl(frm, to) > MAX_SUMMARY_DAYS:
@@ -203,8 +219,11 @@ def cost_summary(frm: date, to: date) -> dict:
         SELECT vehicle_id, category, amount FROM vehicle_expenses
         WHERE deleted_at IS NULL AND expense_date BETWEEN :f AND :t
     """, {"f": frm, "t": to})
-    lo = min([frm] + [p["start_date"] for p in periods])
-    hi = max([to] + [p["end_date"] for p in periods])
+    # 유류비는 걸친 달 전체 영업일로 나누므로 달 1일~말일까지 영업일 판정 범위에 포함
+    month_lo, _ = month_bounds(f"{frm.year}-{frm.month:02d}")
+    _, month_hi = month_bounds(f"{to.year}-{to.month:02d}")
+    lo = min([month_lo] + [p["start_date"] for p in periods])
+    hi = max([month_hi] + [p["end_date"] for p in periods])
     is_open = open_checker(lo, hi)
 
     def ded(vid: int) -> bool:
@@ -215,7 +234,7 @@ def cost_summary(frm: date, to: date) -> dict:
     def slot(vid: int) -> dict:
         return acc.setdefault(vid, {
             "vehicle_id": vid, "plate_no": (vehicles.get(vid) or {}).get("plate_no"), "vat_deductible": ded(vid),
-            "period_cost": 0, "expense": 0, "expense_by_category": {},
+            "period_cost": 0, "expense": 0, "fuel": 0, "expense_by_category": {},
         })
 
     for vid, v in vehicles.items():
@@ -231,9 +250,17 @@ def cost_summary(frm: date, to: date) -> dict:
         s["expense"] += amt
         s["expense_by_category"][e["category"]] = s["expense_by_category"].get(e["category"], 0) + amt
 
+    fuel_days, fuel_closed = fuel_by_day(frm, to, is_open, {vid for vid in vehicles if ded(vid)})
+    for per in fuel_days.values():
+        for vid, amt in per.items():
+            slot(vid)["fuel"] += amt
+
     items = sorted(acc.values(), key=lambda x: x["plate_no"] or "")
     return {
         "from": frm.isoformat(), "to": to.isoformat(), "days": days_incl(frm, to),
         "vehicles": items,
-        "totals": {"period_cost": sum(i["period_cost"] for i in items), "expense": sum(i["expense"] for i in items)},
+        "totals": {"period_cost": sum(i["period_cost"] for i in items),
+                   "expense": sum(i["expense"] for i in items),
+                   "fuel": sum(i["fuel"] for i in items)},
+        "fuel_estimated": [f"{y}-{m:02d}" for y, m in _months(frm, to) if (y, m) not in fuel_closed],
     }
