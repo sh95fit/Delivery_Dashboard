@@ -61,6 +61,7 @@ export default function VehiclesPage() {
         <>
           {tab === "list" && <VehicleListTab vehicles={vehicles} managers={managers} isAdmin={isAdmin} onChanged={reload} />}
           {tab === "period" && <PeriodCostTab vehicles={vehicles} isAdmin={isAdmin} />}
+          {tab === "expense" && <ExpenseTab vehicles={vehicles} isAdmin={isAdmin} />}
           {tab === "fuel" && <FuelTab vehicles={vehicles} managers={managers} isAdmin={isAdmin} />}
           {tab === "summary" && <CostSummaryTab />}
         </>
