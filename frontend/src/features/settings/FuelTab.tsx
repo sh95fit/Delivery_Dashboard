@@ -6,11 +6,12 @@ import DataTable from "@/components/ui/DataTable";
 import ErrorBox from "@/components/ui/ErrorBox";
 import Modal from "@/components/ui/Modal";
 import * as fuel from "@/api/fuel";
-import type { FuelLog, FuelSummary } from "@/api/fuel";
+import type { FuelImportRecord, FuelLog, FuelSummary } from "@/api/fuel";
 import { FUEL_LABEL } from "@/api/masters";
 import type { ManagerRow, Vehicle } from "@/api/masters";
 import { errText, parseAmount } from "@/lib/form";
-import { todayKst, won } from "@/lib/format";
+import { kstDateTime, todayKst, won } from "@/lib/format";
+import FuelImport from "./FuelImport";
 
 /* S3-P1b-2b 유류비 탭 — 주유 기록 입력·월 집계(차량·매니저·일자)·월 마감 */
 
@@ -31,15 +32,19 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [imports, setImports] = useState<FuelImportRecord[]>([]);
   const [f, setF] = useState<Form>({ vid: "", date: todayKst(), total: "", supply: "", vat: "", qty: "", station: "", memo: "" });
 
   const load = useCallback(async () => {
-    const [s, l] = await Promise.all([
+    const [s, l, im] = await Promise.all([
       fuel.getFuelSummary(month),
       fuel.listFuelLogs(month, filter ? Number(filter) : undefined),
+      fuel.listFuelImports(month),
     ]);
     setSum(s);
     setLogs(l.items);
+    setImports(im);
   }, [month, filter]);
 
   useEffect(() => {
@@ -114,6 +119,21 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
     run(() => fuel.releaseFuelMonth(month, reason.trim()));
   }
 
+
+  function undoImport(im: FuelImportRecord) {
+    const reason = window.prompt(
+      `업로드 #${im.id} (${im.file_name ?? "파일"} · ${im.active_count}건 · ${won(im.total_amount)})을 되돌립니다.\n`
+      + "이 업로드로 저장된 주유 기록이 모두 삭제됩니다(다른 달 포함). 사유를 입력하세요 (필수)");
+    if (reason == null) return;
+    if (!reason.trim()) return setError("되돌리기 사유를 입력하세요");
+    run(() => fuel.undoFuelImport(im.id, reason.trim()));
+  }
+
+  function exportMonth() {
+    run(() => fuel.exportFuelMonth(month));
+  }
+
+
   const unit = (ft: string) => (ft === "ev" ? "kWh" : "L");
 
   return (
@@ -125,6 +145,8 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
             <input type="month" className="input" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} />
             {sum && (closed ? <Chip tone="ok">마감 · 확정</Chip> : <Chip tone="warn">미마감 · 예상</Chip>)}
             {isAdmin && !closed && <Button size="sm" variant="primary" onClick={openAdd}>주유 입력</Button>}
+            {isAdmin && <Button size="sm" disabled={busy} onClick={() => { setError(""); setImporting(true); }}>엑셀 업로드</Button>}
+            <Button size="sm" disabled={busy || !sum?.totals.count} onClick={exportMonth}>엑셀 내보내기</Button>
             {isAdmin && !closed && <Button size="sm" disabled={busy || !sum?.totals.count} onClick={closeMonth}>월 마감</Button>}
             {isAdmin && closed && <Button size="sm" variant="danger" disabled={busy} onClick={releaseMonth}>마감 해제</Button>}
           </div>
@@ -250,6 +272,36 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
         )}
       </Panel>
 
+      {imports.length > 0 && (
+        <Panel title={`엑셀 업로드 기록 ${imports.length}건`}>
+          <DataTable columns={["#", "파일", "기간", { label: "남은/저장", num: true }, { label: "합계", num: true },
+            "올린 사람", "상태", ...(isAdmin ? ["관리"] : [])]}>
+            {imports.map((im) => (
+              <tr key={im.id} className={im.undone_at ? "off" : undefined}>
+                <td>{im.id}</td>
+                <td>{im.file_name ?? "-"}</td>
+                <td>{im.date_from} ~ {im.date_to}</td>
+                <td className="num">{im.active_count}/{im.log_count}건</td>
+                <td className="num">{won(im.total_amount)}</td>
+                <td>{im.created_by ?? "-"} · {kstDateTime(im.created_at)}</td>
+                <td>
+                  {im.undone_at
+                    ? <Chip title={im.undo_reason ?? ""}>되돌림 · {kstDateTime(im.undone_at)} · {im.undo_reason ?? ""}</Chip>
+                    : <Chip tone="ok">반영</Chip>}
+                </td>
+                {isAdmin && (
+                  <td>
+                    {!im.undone_at && (
+                      <Button size="sm" variant="danger" disabled={busy} onClick={() => undoImport(im)}>되돌리기</Button>
+                    )}
+                  </td>
+                )}
+              </tr>
+            ))}
+          </DataTable>
+        </Panel>
+      )}
+
       <Modal
         open={isAdmin && adding}
         title="주유 입력"
@@ -301,6 +353,12 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
           </label>
         </div>
       </Modal>
+      {isAdmin && importing && (
+        <FuelImport
+          onClose={() => setImporting(false)}
+          onDone={async (m) => { if (m && m !== month) setMonth(m); else await load(); }}
+        />
+      )}
     </>
   );
 }

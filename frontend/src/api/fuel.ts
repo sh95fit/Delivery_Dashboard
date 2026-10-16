@@ -1,4 +1,4 @@
-import { del, http, post } from "./client";
+import { del, download, http, post } from "./client";
 import type { FuelType } from "./masters";
 
 export interface FuelLog {
@@ -37,3 +37,41 @@ export const closeFuelMonth = (month: string, memo: string | null) =>
   post<Ok>(`/api/fuel/closings/${month}`, { memo });
 export const releaseFuelMonth = (month: string, reason: string) =>
   post<Ok>(`/api/fuel/closings/${month}/release`, { reason });
+
+
+/* ---------- S3-P1b-2b-3 엑셀 업로드 · 되돌리기 · 내보내기 ---------- */
+export type ImportLevel = "ok" | "warn" | "need_vehicle" | "error" | "cancel";
+export interface FuelImportRow {
+  row: number; code: string; date: string | null; date_raw: string; product: string | null;
+  fuel_type: FuelType | null; quantity: number | null; unit_price: number | null;
+  total_amount: number | null; supply_amount: number | null; vat_amount: number | null; cost: number | null;
+  vehicle_id: number | null; plate_no: string | null; auto: boolean; candidates: number[];
+  level: ImportLevel; selectable: boolean; checked: boolean; messages: string[]; pair: number | null;
+}
+export interface FuelImportCode {
+  code: string; rows: number; total: number; vehicle_id: number | null; auto: boolean; candidates: number[];
+}
+export interface FuelImportVehicle {
+  id: number; plate_no: string; model: string | null; fuel_type: FuelType; vat_deductible: boolean; active: boolean;
+}
+export interface FuelImportPreview {
+  file_name: string | null; file_kind: "xlsx" | "xls" | "html"; header_row: number; skipped: number;
+  checks: Array<{ level: "ok" | "warn"; text: string }>; counts: Partial<Record<ImportLevel, number>>;
+  selected: { count: number; total: number; cost: number };
+  codes: FuelImportCode[]; vehicles: FuelImportVehicle[]; rows: FuelImportRow[];
+}
+export interface FuelImportRecord {
+  id: number; file_name: string | null; date_from: string; date_to: string; log_count: number; total_amount: number;
+  created_by: string | null; created_at: string | null;
+  undone_by: string | null; undone_at: string | null; undo_reason: string | null; active_count: number;
+}
+type ImportBody = { file_name: string; content_b64: string; vehicle_map: Record<string, number> };
+
+export const previewFuelImport = (body: ImportBody) => post<FuelImportPreview>("/api/fuel/import/preview", body);
+export const commitFuelImport = (body: ImportBody & { rows: number[] }) =>
+  post<{ ok: boolean; import_id: number; created: number; total: number }>("/api/fuel/import", body);
+export const listFuelImports = (month: string) => http<FuelImportRecord[]>(`/api/fuel/imports?month=${month}`);
+export const undoFuelImport = (id: number, reason: string) =>
+  post<{ ok: boolean; deleted: number }>(`/api/fuel/imports/${id}/undo`, { reason });
+export const exportFuelMonth = (month: string) =>
+  download(`/api/fuel/export?month=${month}`, `유류비_${month}.xlsx`);

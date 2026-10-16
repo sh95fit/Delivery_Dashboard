@@ -153,3 +153,35 @@ export async function put<T>(path: string, body: unknown): Promise<T> {
   }
   return res.json() as Promise<T>;
 }
+
+
+/** 파일 내려받기 (모든 엑셀 내보내기 공통) → 저장된 파일명 */
+export async function download(path: string, fallback: string): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch(path, { credentials: "same-origin" });
+  } catch {
+    throw new ApiError(0, "network_error", "네트워크 연결에 실패했습니다. 잠시 후 다시 시도하세요.");
+  }
+  if (res.status === 401) {
+    window.location.href = "/login";
+    throw new ApiError(401, "unauthorized", "로그인이 필요합니다.");
+  }
+  if (res.status === 403) throw new ApiError(403, "forbidden", "이 기능에 접근할 권한이 없습니다.");
+  if (!res.ok) {
+    const b = await readErrorBody(res);
+    throw new ApiError(res.status, "server_error", b || "파일을 만들지 못했습니다.");
+  }
+  const blob = await res.blob();
+  const m = /filename\*=UTF-8''([^;]+)/i.exec(res.headers.get("Content-Disposition") ?? "");
+  const name = m ? decodeURIComponent(m[1]) : fallback;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return name;
+}
