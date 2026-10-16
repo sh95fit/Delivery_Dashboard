@@ -119,7 +119,7 @@ def test_judge_warnings():
 
 def test_judge_errors():
     rows = [R("1612", "20261020", "50000"), R("1612", "20260815", "50000"),
-            R("1612", "2026-13-01", "50000"), R("1612", "20260910", "-50000")]
+            R("1612", "2026-13-01", "50000"), R("1612", "20260910", "-77000")]
     out = judge(items(rows), VEH, {}, set(), {date(2026, 8, 1)}, TODAY)
     assert [r["level"] for r in out] == ["error"] * 4
     assert "미래" in out[0]["messages"][0] and "마감" in out[1]["messages"][0]
