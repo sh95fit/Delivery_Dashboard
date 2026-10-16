@@ -8,6 +8,7 @@ import VehiclesPage from "./features/settings/VehiclesPage";
 import WorkersPage from "./features/settings/WorkersPage";
 import WorkLogPage from "./features/worklogs/WorkLogPage";
 import IncentivePage from "./features/incentive/IncentivePage";
+import LogisticsPage from "./features/logistics/LogisticsPage";
 
 
 export const router = createBrowserRouter([
@@ -22,6 +23,7 @@ export const router = createBrowserRouter([
       { path: "/settings/vehicles", element: <VehiclesPage /> },
       { path: "/ops/work", element: <WorkLogPage /> }, 
       { path: "/finance/incentive", element: <IncentivePage /> },           
+      { path: "/finance/cost", element: <LogisticsPage /> },
     ],
   },
   { path: "*", element: <Navigate to="/" replace /> },

@@ -7,6 +7,8 @@ from app.deps import guard, memo, require_admin
 from app.schemas.masters import DayOverrideIn
 from app.services import calendar_service as cal
 from app.services import logistics_service as svc
+from app.services import logistics_export
+from app.services.excel_export import xlsx_response
 
 router = APIRouter(prefix="/logistics", tags=["logistics"])
 
@@ -32,3 +34,9 @@ def set_business_day(d: date, body: DayOverrideIn, email: str = Depends(require_
 def clear_business_day(d: date, email: str = Depends(require_admin)):
     guard(cal.clear_override, d, email, fail="영업일 지정 해제 실패")
     return {"ok": True}
+
+
+@router.get("/export")
+def export_cost(frm: date = Query(..., alias="from"), to: date = Query(...), _: str = Depends(require_admin)):
+    name, sheets = guard(logistics_export.cost_sheets, frm, to, fail="물류비 내보내기 실패")
+    return xlsx_response(name, sheets)

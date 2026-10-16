@@ -17,7 +17,7 @@ export const NAV: NavSection[] = [
     section: "재무",
     items: [
       { to: "/finance/revenue", label: "매출 관리", icon: "won", ready: false, step: "P7" },
-      { to: "/finance/cost", label: "비용 관리", icon: "wallet", ready: false, step: "P7" },
+      { to: "/finance/cost", label: "물류비", hint: "매출 대비 인건비·인센티브·차량비·유류비", icon: "wallet", ready: true },
       { to: "/finance/incentive", label: "인센티브·수당", hint: "고객사 수 입력 · 배송지 제외 · 미지급 · 특수 수당", icon: "gift", ready: true },
       { to: "/finance/grid", label: "매출·비용 분석", icon: "grid", ready: false, step: "P8" },
     ],
