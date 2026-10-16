@@ -8,7 +8,7 @@
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -193,8 +193,8 @@ def month_summary(month: str) -> dict:
 
 def close_month(month: str, memo: str | None, email: str) -> None:
     f, t = month_bounds(month)
-    if t > today():
-        raise ValueError(f"{f.year}년 {f.month}월이 끝난 뒤({t.isoformat()}부터) 마감할 수 있습니다")
+    if t >= today():
+        raise ValueError(f"{f.year}년 {f.month}월이 끝난 뒤({(t + timedelta(days=1)).isoformat()}부터) 마감할 수 있습니다")
     if _closing(f):
         raise ValueError("이미 마감된 달입니다")
     s = month_summary(month)
