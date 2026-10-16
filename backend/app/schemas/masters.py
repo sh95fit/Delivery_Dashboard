@@ -85,3 +85,17 @@ class FuelCloseIn(BaseModel):
 
 class FuelReleaseIn(BaseModel):
     reason: str = Field(min_length=1, max_length=200)
+
+
+class FuelImportPreviewIn(BaseModel):
+    file_name: str | None = Field(default=None, max_length=200)
+    content_b64: str = Field(min_length=1, max_length=3_000_000)
+    vehicle_map: dict[str, int] = Field(default_factory=dict)
+
+
+class FuelImportIn(FuelImportPreviewIn):
+    rows: list[int] = Field(min_length=1, max_length=2000)
+
+
+class FuelUndoIn(BaseModel):
+    reason: str = Field(min_length=1, max_length=200)

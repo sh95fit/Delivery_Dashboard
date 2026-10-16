@@ -4,9 +4,13 @@ from fastapi import APIRouter, Depends, Query
 
 from app.auth import get_current_email
 from app.deps import guard, memo, require_admin
-from app.schemas.masters import FuelCloseIn, FuelLogIn, FuelPriceIn, FuelReleaseIn
+from app.schemas.masters import (FuelCloseIn, FuelImportIn, FuelImportPreviewIn, FuelLogIn, FuelPriceIn,
+                                 FuelReleaseIn, FuelUndoIn)
 from app.services import fuel_price_service as svc
 from app.services import fuel_log_service as logs_svc
+from app.services import fuel_export
+from app.services import fuel_import_service as import_svc
+from app.services.excel_export import xlsx_response
 
 router = APIRouter(prefix="/fuel", tags=["fuel"])
 
@@ -68,3 +72,32 @@ def close_month(month: str, body: FuelCloseIn, email: str = Depends(require_admi
 def release_month(month: str, body: FuelReleaseIn, email: str = Depends(require_admin)):
     guard(logs_svc.release_month, month, body.reason, email, fail="유류비 마감 해제 실패")
     return {"ok": True}
+
+
+# ---------- S3-P1b-2b-3 엑셀 업로드 · 되돌리기 · 내보내기 ----------
+@router.post("/import/preview")
+def import_preview(body: FuelImportPreviewIn, _: str = Depends(require_admin)):
+    return guard(import_svc.preview, body.content_b64, body.file_name, body.vehicle_map, fail="엑셀 미리보기 실패")
+
+
+@router.post("/import")
+def import_commit(body: FuelImportIn, email: str = Depends(require_admin)):
+    return guard(import_svc.commit, body.content_b64, body.file_name, body.vehicle_map, body.rows, email,
+                 fail="엑셀 저장 실패")
+
+
+@router.get("/imports")
+def imports(month: str = Query(...), _: str = Depends(get_current_email)):
+    return guard(import_svc.list_imports, month, fail="업로드 기록 조회 실패")
+
+
+@router.post("/imports/{iid}/undo")
+def import_undo(iid: int, body: FuelUndoIn, email: str = Depends(require_admin)):
+    return guard(import_svc.undo_import, iid, body.reason, email, fail="업로드 되돌리기 실패")
+
+@router.get("/export")
+def export_month(month: str = Query(...), _: str = Depends(get_current_email)):
+    name, sheets = guard(fuel_export.month_sheets, month, fail="유류비 내보내기 실패") 
+    return xlsx_response(name, sheets)
+
+
