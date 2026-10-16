@@ -163,6 +163,7 @@ export default function FuelImport({ onDone, onClose }: Props) {
           ))}
 
           <p className="small mt"><b>차량 끝번호별 연결</b></p>
+          <div className="fi-codes">
           <DataTable columns={["끝번호", { label: "행", num: true }, { label: "합계", num: true }, "연결", "차량"]}>
             {prev.codes.map((c) => {
               const cand = new Set(c.candidates);
@@ -193,6 +194,7 @@ export default function FuelImport({ onDone, onClose }: Props) {
               );
             })}
           </DataTable>
+          </div>
 
           <div className="row-gap mt">
             <label className="small">

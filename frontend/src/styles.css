@@ -584,3 +584,13 @@ tr.wl-dirty td { background: #fffbeb; }
 .inc-lu { max-width: 520px; margin-bottom: 8px; }
 .inc-mini .ed-editing .input-sm { width: 100%; }
 .inc-legend .lg-extra::before { content: none; }
+
+
+/* S3-P1b-2b-3b 유류비 업로드: 끝번호별 차량 연결 표 — 칸 너비 고정, 차량 선택 너비 통일 */
+.fi-codes .tbl { table-layout: fixed; }
+.fi-codes .tbl th:nth-child(1) { width: 90px; }
+.fi-codes .tbl th:nth-child(2) { width: 70px; }
+.fi-codes .tbl th:nth-child(3) { width: 130px; }
+.fi-codes .tbl th:nth-child(4) { width: 120px; }
+.fi-codes .tbl td { padding: 6px 10px; vertical-align: middle; }
+.fi-codes .input-sm { width: 280px; max-width: 100%; }
