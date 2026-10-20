@@ -364,4 +364,7 @@ def _run_all(d: date, mids: list[int], st: dict) -> None:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     for arg in sys.argv[1:]:
-        print(collect(date.fromisoformat(arg), purpose="backfill"))
+        r = collect(date.fromisoformat(arg), purpose="backfill")
+        print(r)
+        if r.get("stopped"):      # 한도 도달·호출 꺼짐 → 남은 날짜는 다음 실행에서
+            break
