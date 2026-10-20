@@ -6,7 +6,7 @@ import DataTable from "@/components/ui/DataTable";
 import ErrorBox from "@/components/ui/ErrorBox";
 import Modal from "@/components/ui/Modal";
 import * as fuel from "@/api/fuel";
-import type { FuelImportRecord, FuelLog, FuelSummary } from "@/api/fuel";
+import type { DailyPrices, FuelImportRecord, FuelLog, FuelSummary } from "@/api/fuel";
 import { FUEL_LABEL } from "@/api/masters";
 import type { ManagerRow, Vehicle } from "@/api/masters";
 import { errText, parseAmount } from "@/lib/form";
@@ -23,6 +23,19 @@ const supplyOf = (total: number) => Math.floor((total * 10 + 5) / 11); // 서버
 const optAmount = (s: string) => (s.trim() ? parseAmount(s) : null);
 const qtyText = (q: number | null, unit = "") =>
   q == null ? "-" : `${q.toLocaleString("ko-KR", { maximumFractionDigits: 3 })}${unit}`;
+const FTS = ["gasoline", "diesel", "lpg", "ev"] as const;
+const priceText = (p: number | null) => (p == null ? "-" : p.toLocaleString("ko-KR", { maximumFractionDigits: 2 }));
+const diffText = (d: number | null) => (d == null ? "-" : `${d > 0 ? "+" : ""}${d.toFixed(1)}%`);
+const diffCell = (d: number | null) =>
+  d != null && Math.abs(d) >= 10 ? <Chip tone="warn">{diffText(d)}</Chip> : diffText(d);
+const kindText = (d: DailyPrices["days"][number]) => {
+  const ks = new Set<string>();
+  FTS.forEach((ft) => {
+    const c = d[ft];
+    if (c) ks.add(c.source === "manual" ? "직접 입력" : c.confirmed ? "오피넷 확정" : "오피넷 당일 게시");
+  });
+  return ks.size ? Array.from(ks).join(", ") : "없음";
+};
 
 export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
   const [month, setMonth] = useState(thisMonth());
@@ -34,14 +47,17 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [imports, setImports] = useState<FuelImportRecord[]>([]);
+  const [daily, setDaily] = useState<DailyPrices | null>(null);
   const [f, setF] = useState<Form>({ vid: "", date: todayKst(), total: "", supply: "", vat: "", qty: "", station: "", memo: "" });
 
   const load = useCallback(async () => {
+    const d = await fuel.getDailyPrices(month);   // 빠진 날 오피넷 단가를 먼저 채운 뒤 주유 기록을 읽음
     const [s, l, im] = await Promise.all([
       fuel.getFuelSummary(month),
       fuel.listFuelLogs(month, filter ? Number(filter) : undefined),
       fuel.listFuelImports(month),
     ]);
+    setDaily(d);
     setSum(s);
     setLogs(l.items);
     setImports(im);
@@ -188,7 +204,8 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
         <>
           <Panel title="차량별">
             <DataTable columns={["차량", "연료", "부가세", { label: "건수", num: true }, { label: "수량", num: true },
-              { label: "합계", num: true }, { label: "비용", num: true }]}>
+              { label: "합계", num: true }, { label: "비용", num: true },
+              { label: "실제 평균 단가", num: true }, { label: "오피넷 평균", num: true }, { label: "차이", num: true }]}>
               {sum.vehicles.map((v) => (
                 <tr key={v.vehicle_id}>
                   <td>{v.plate_no ?? `#${v.vehicle_id}`}</td>
@@ -198,6 +215,9 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
                   <td className="num">{qtyText(v.quantity, unit(v.fuel_type))}</td>
                   <td className="num">{won(v.total)}</td>
                   <td className="num">{won(v.cost)}</td>
+                  <td className="num">{priceText(v.avg_unit)}</td>
+                  <td className="num">{priceText(v.avg_ref)}</td>
+                  <td className="num">{diffCell(v.ref_diff)}</td>                  
                 </tr>
               ))}
             </DataTable>
@@ -247,6 +267,7 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
           <p className="muted">이 달 주유 기록이 없습니다.</p>
         ) : (
           <DataTable columns={["일자", "차량", "연료", { label: "수량", num: true }, { label: "단가", num: true },
+            { label: "오피넷 단가", num: true }, { label: "차이", num: true },            
             { label: "합계", num: true }, { label: "공급가액", num: true }, { label: "부가세", num: true },
             { label: "비용", num: true }, "주유소", "메모", "입력", ...(isAdmin && !closed ? ["관리"] : [])]}>
             {logs.map((r) => (
@@ -256,6 +277,11 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
                 <td>{FUEL_LABEL[r.fuel_type]}</td>
                 <td className="num">{qtyText(r.quantity, unit(r.fuel_type))}</td>
                 <td className="num">{r.unit_price != null ? won(Math.round(r.unit_price)) : "-"}</td>
+                <td className="num" title={r.ref_date ? `${r.ref_date} · ${r.ref_source === "manual" ? "직접 입력" : "오피넷"}` : ""}>
+                  {priceText(r.ref_price)}
+                  {r.ref_date && r.ref_date !== r.fuel_date ? <span className="muted small"> ({r.ref_date.slice(5)})</span> : null}
+                </td>
+                <td className="num">{diffCell(r.ref_diff)}</td>
                 <td className="num">{won(r.total_amount)}</td>
                 <td className="num">{won(r.supply_amount)}</td>
                 <td className="num">{won(r.vat_amount)}</td>
@@ -271,6 +297,28 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
           </DataTable>
         )}
       </Panel>
+
+
+      {daily && (
+        <Panel title={`일자별 단가 (${daily.area ? `오피넷 시도 ${daily.area} 평균` : "오피넷 전국 평균"} · 원/L, 전기 원/kWh)`}>
+          {daily.notes.map((n) => <p key={n} className="muted small">{n}</p>)}
+          <p className="muted small">
+            물류비는 실제 결제 금액 그대로이고, 오피넷 단가는 그 결제의 기준 단가입니다. 주유 기록은 주유한 날의 값을 쓰고,
+            그날 값이 없으면 바로 전 날짜 값을 쓴 뒤 날짜를 표시합니다. 차량별은 수량 가중 평균입니다. ±10% 이상 차이 나면 노란색으로 표시합니다.
+          </p>
+          <DataTable columns={["일자", { label: "휘발유", num: true }, { label: "경유", num: true },
+            { label: "LPG", num: true }, { label: "전기", num: true }, "구분"]}>
+            {daily.days.map((d) => (
+              <tr key={d.date}>
+                <td>{d.date}</td>
+                {FTS.map((ft) => <td key={ft} className="num">{priceText(d[ft]?.price ?? null)}</td>)}
+                <td>{kindText(d)}</td>
+              </tr>
+            ))}
+          </DataTable>
+        </Panel>
+      )}
+
 
       {imports.length > 0 && (
         <Panel title={`엑셀 업로드 기록 ${imports.length}건`}>

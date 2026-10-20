@@ -38,6 +38,16 @@ def fetch_now(_: str = Depends(require_admin)):
     return {"ok": True, "saved": guard(svc.fetch_opinet, fail="오피넷 수집 실패")}
 
 
+@router.get("/prices/daily")
+def prices_daily(month: str = Query(...), _: str = Depends(get_current_email)):
+    return guard(svc.daily_prices, month, fail="일자별 단가 조회 실패")
+
+
+@router.post("/prices/fill")
+def fill_now(frm: date = Query(..., alias="from"), to: date = Query(...), _: str = Depends(require_admin)):
+    return guard(svc.fill_prices, frm, to, fail="오피넷 단가 불러오기 실패")
+
+
 # ---------- S3-P1b-2b 주유 기록 · 월 집계 · 월 마감 ----------
 @router.get("/logs")
 def logs(month: str = Query(...), vehicle_id: int | None = Query(default=None),

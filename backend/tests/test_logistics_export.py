@@ -39,4 +39,3 @@ def test_ref_columns_last():
     labels = [c[0] for c in sheets[0]["columns"]]
     assert labels[-3:] == ["주행거리(km, 참고)", "NCP 예상 유류비(참고)", "직접 계산 유류비(참고)"]
     assert "물류비 합계" in labels
-    

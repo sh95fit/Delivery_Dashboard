@@ -26,7 +26,7 @@ const COLUMNS = [
   { label: "비용률", num: true },
   { label: "주행 km", num: true },
   { label: "NCP 예상 유류비", num: true },
-  { label: "직접 계산", num: true },    
+  { label: "직접 계산", num: true },
 ];
 
 const ratio = (r: CostRow) => (r.cost_ratio == null ? "-" : `${r.cost_ratio}%`);
@@ -41,7 +41,7 @@ function Cells({ r }: { r: CostRow }) {
       <td className="num">{ratio(r)}</td>
       <td className="num muted">{r.route_km ? r.route_km.toLocaleString("ko-KR") : "-"}</td>
       <td className="num muted">{r.ncp_fuel ? num(r.ncp_fuel) : "-"}</td>
-      <td className="num muted">{r.calc_fuel ? num(r.calc_fuel) : "-"}</td>      
+      <td className="num muted">{r.calc_fuel ? num(r.calc_fuel) : "-"}</td>
     </>
   );
 }

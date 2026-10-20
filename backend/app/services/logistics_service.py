@@ -213,7 +213,6 @@ def cost_view(frm: date, to: date) -> dict:
         for n in rf_notes:
             add("info", n)
         timing["route"] = round(time.perf_counter() - s, 2)        
-
         rev_views = f_rev.result()
         inc_rows = f_inc.result()
 

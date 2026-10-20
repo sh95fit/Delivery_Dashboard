@@ -6,6 +6,7 @@ export interface FuelLog {
   quantity: number | null; unit_price: number | null;
   total_amount: number; supply_amount: number; vat_amount: number; cost: number;
   station: string | null; memo: string | null; source: "manual" | "excel"; created_by: string | null;
+  ref_price: number | null; ref_date: string | null; ref_source: "opinet" | "manual" | null; ref_diff: number | null;  
 }
 export interface FuelClosing {
   total_amount: number; cost_amount: number; log_count: number;
@@ -14,7 +15,10 @@ export interface FuelClosing {
 export interface FuelAgg { count: number; quantity: number; total: number; supply: number; vat: number; cost: number }
 export interface FuelSummary {
   month: string; open_days: number; closed: FuelClosing | null; totals: FuelAgg;
-  vehicles: Array<FuelAgg & { vehicle_id: number; plate_no: string | null; fuel_type: FuelType; vat_deductible: boolean }>;
+  vehicles: Array<FuelAgg & {
+    vehicle_id: number; plate_no: string | null; fuel_type: FuelType; vat_deductible: boolean;
+    avg_unit: number | null; avg_ref: number | null; ref_diff: number | null;
+  }>;
   days: Array<FuelAgg & { date: string }>;
   managers: Array<{ manager_id: number | null; cost: number; vehicle_ids: number[] }>;
 }
@@ -75,3 +79,12 @@ export const undoFuelImport = (id: number, reason: string) =>
   post<{ ok: boolean; deleted: number }>(`/api/fuel/imports/${id}/undo`, { reason });
 export const exportFuelMonth = (month: string) =>
   download(`/api/fuel/export?month=${month}`, `유류비_${month}.xlsx`);
+
+
+/* ---------- S3-P2c 일자별 단가 (오피넷 확정 · 당일 게시 · 직접 입력) ---------- */
+export interface DailyPriceCell { price: number; source: "opinet" | "manual"; confirmed: boolean }
+export interface DailyPrices {
+  month: string; area: string | null; units: Record<FuelType, string>; notes: string[];
+  days: Array<{ date: string } & Record<FuelType, DailyPriceCell | null>>;
+}
+export const getDailyPrices = (month: string) => http<DailyPrices>(`/api/fuel/prices/daily?month=${month}`);

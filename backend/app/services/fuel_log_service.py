@@ -17,6 +17,7 @@ from app.database import get_dash_engine
 from app.services import dash_db
 from app.services.calendar_service import open_checker
 from app.services.cost_calc import latest_by
+from app.services.fuel_calc import add_basis, finish_basis, ref_price
 from app.services.fuel_log_calc import allocate_month, amounts, days_between, log_cost, month_bounds
 from app.services.logistics_calc import split_even
 from app.services.manager_service import today
@@ -91,6 +92,20 @@ def _log_out(r: dict) -> dict:
     }
 
 
+def price_rows(f: date, t: date) -> list[dict]:
+    """주유일 기준 단가용 — 그달 + 앞 31일 (그날 값이 없으면 바로 전 날짜 값)."""
+    return dash_db.rows("""SELECT price_date, fuel_type, price, source FROM fuel_price_log
+        WHERE deleted_at IS NULL AND price_date BETWEEN :a AND :t""", {"a": f - timedelta(days=31), "t": t})
+
+
+def log_ref(r: dict, prices: list[dict]) -> dict:
+    """주유 기록 1건의 오피넷(또는 직접 입력) 기준 단가 · 차이. 단가가 없으면 합계 ÷ 수량."""
+    unit = r.get("unit_price")
+    if not unit and r.get("quantity"):
+        unit = int(r["total_amount"]) / float(r["quantity"])
+    return ref_price(prices, r["fuel_type"], r["fuel_date"], unit)
+
+
 def list_logs(month: str, vehicle_id: int | None = None) -> dict:
     f, t = month_bounds(month)
     sql, p = SQL_LOGS, {"f": f, "t": t}
@@ -98,7 +113,9 @@ def list_logs(month: str, vehicle_id: int | None = None) -> dict:
         sql += " AND l.vehicle_id = :v"
         p["v"] = vehicle_id
     rows = dash_db.rows(sql + " ORDER BY l.fuel_date, v.plate_no, l.id", p)
-    return {"month": _ym(f), "closed": _closing_out(_closing(f)), "items": [_log_out(r) for r in rows]}
+    prices = price_rows(f, t)
+    return {"month": _ym(f), "closed": _closing_out(_closing(f)),
+            "items": [{**_log_out(r), **log_ref(r, prices)} for r in rows]}
 
 
 def add_log(data: dict, email: str, source: str = "manual") -> int:
@@ -154,6 +171,7 @@ def month_summary(month: str) -> dict:
     """차량별 · 일자별(주유한 날) · 계정별(영업일 배분 후 차량 배정 계정에 균분). 계정 이름은 화면에서 붙임."""
     f, t = month_bounds(month)
     rows = dash_db.rows(SQL_LOGS + " ORDER BY l.fuel_date, l.id", {"f": f, "t": t})
+    prices = price_rows(f, t)    
     is_open = open_checker(f, t)
     open_days = [x for x in days_between(f, t) if is_open(x)]
     totals = _zero()
@@ -165,6 +183,7 @@ def month_summary(month: str) -> dict:
         _add(by_v.setdefault(r["vehicle_id"], _zero(
             vehicle_id=r["vehicle_id"], plate_no=r["plate_no"], fuel_type=r["fuel_type"],
             vat_deductible=bool(r["vat_deductible"]))), r, cost)
+        add_basis(by_v[r["vehicle_id"]], r["quantity"], r["total_amount"], log_ref(r, prices)["ref_price"])    
         _add(by_d.setdefault(r["fuel_date"], _zero(date=_iso(r["fuel_date"]))), r, cost)
 
     assigns = dash_db.rows(SQL_ASSIGNS)
@@ -185,7 +204,7 @@ def month_summary(month: str) -> dict:
     return {
         "month": _ym(f), "open_days": len(open_days), "closed": _closing_out(_closing(f)),
         "totals": totals,
-        "vehicles": sorted(by_v.values(), key=lambda x: x["plate_no"] or ""),
+        "vehicles": sorted((finish_basis(x) for x in by_v.values()), key=lambda x: x["plate_no"] or ""),        
         "days": [by_d[k] for k in sorted(by_d)],
         "managers": managers,
     }
