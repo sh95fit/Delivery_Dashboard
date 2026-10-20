@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from app.services.route_leg_calc import alloc, chunks, coord_key, pending_groups, split_legs
+from app.services.route_leg_calc import alloc, chunks, coord_key, d5_code, pending_groups, split_legs
 
 KST = timezone(timedelta(hours=9))
 T = lambda m: datetime(2026, 10, 20, 7, 0, tzinfo=KST) + timedelta(minutes=m)  # noqa: E731
@@ -44,3 +44,11 @@ def test_alloc():
     assert sum(alloc(1001, [1, 1, 1])) == 1001
     assert alloc(0, [5, 5]) == [0, 0]
     assert alloc(7, []) == []
+
+
+def test_d5_code():
+    assert d5_code(200, {"code": 0}) == 0
+    assert d5_code(400, {"error": {"errorCode": 400, "code": 1, "message": "출발지와 도착지가 동일합니다."}}) == 1
+    assert d5_code(400, {}) is None
+    assert d5_code(401, {"error": {"errorCode": "210", "message": "Permission Denied"}}) is None
+    assert d5_code(500, {"code": 0}) is None

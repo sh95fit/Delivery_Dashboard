@@ -69,3 +69,18 @@ def alloc(total, weights: list[int]) -> list[int]:
     out = [total * x // w for x in weights]
     out[-1] += total - sum(out)
     return out
+
+
+def d5_code(status: int, body: dict) -> int | None:
+    """D5 응답 → NAVER code. 정상(HTTP 200)은 body.code, 길찾기 결과 오류(HTTP 400: 출발=도착 1, 도로와 멂 2 등)는
+    body.error.code. 인증·서버 오류 등 판단할 수 없으면 None."""
+    if status == 200:
+        c = body.get("code")
+    elif status == 400 and isinstance(body.get("error"), dict):
+        c = body["error"].get("code")
+    else:
+        c = None
+    try:
+        return int(c) if c is not None else None
+    except (TypeError, ValueError):
+        return None

@@ -18,7 +18,7 @@ from sqlalchemy import text
 from app.database import get_dash_engine
 from app.services import dash_db, day_cache, routes_service
 from app.services.day_aggregate import KST, to_kst
-from app.services.route_leg_calc import alloc, chunks, coord_key, pending_groups, split_legs
+from app.services.route_leg_calc import alloc, chunks, coord_key, d5_code, pending_groups, split_legs
 
 logger = logging.getLogger("route_legs")
 
@@ -76,10 +76,14 @@ def _d5(start: dict, nodes: list[dict], vparams: dict, purpose: str) -> tuple[in
     headers = {"x-ncp-apigw-api-key-id": os.environ.get("NAVER_MAPS_API_KEY_ID", ""),
                "x-ncp-apigw-api-key": os.environ.get("NAVER_MAPS_API_KEY", "")}
     r = requests.get(D5_URL, params=params, headers=headers, timeout=15)
-    if r.status_code != 200:
+    try:
+        j = r.json()
+    except ValueError:
+        j = {}
+    j = j if isinstance(j, dict) else {}
+    code = d5_code(r.status_code, j)    # 출발=도착(1)·도로와 멂(2) 등은 HTTP 400으로 옴 → 코드로 받아 지점별 처리
+    if code is None:
         raise RuntimeError(f"NAVER HTTP {r.status_code}: {r.text[:200]}")
-    j = r.json()
-    code = int(j.get("code", -1))
     route = ((j.get("route") or {}).get("trafast") or [None])[0] if code == 0 else None
     return code, route
 
