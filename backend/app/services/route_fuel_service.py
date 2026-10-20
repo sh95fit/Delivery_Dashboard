@@ -9,6 +9,9 @@ from app.services.cost_calc import latest_by
 from app.services.route_fuel_calc import direct_cost, pick_routes, price_index, price_on
 
 
+NCP_OK = ("gasoline", "diesel", "lpg")   # NAVER 유류비 지원 연료 (전기 제외)
+
+
 def route_fuel(frm: date, to: date, assigns: list[dict]) -> tuple[dict[tuple[date, int], dict], list[str]]:
     """반환 = ({(날짜, 계정): {route_m, ncp, calc}}, 안내 문구). assigns = vehicle_assignments 행."""
     rows = dash_db.rows("""SELECT route_key, distance_m, fuel_price_naver, created_at FROM route_cache
@@ -23,6 +26,7 @@ def route_fuel(frm: date, to: date, assigns: list[dict]) -> tuple[dict[tuple[dat
     assigned: dict[date, dict] = {}
     out: dict[tuple[date, int], dict] = {}
     no_calc = 0
+    no_ncp = 0    
     for (d, mid), r in routes.items():
         if d not in assigned:
             assigned[d] = latest_by(assigns, "manager_id", "start_date", d)
@@ -32,9 +36,14 @@ def route_fuel(frm: date, to: date, assigns: list[dict]) -> tuple[dict[tuple[dat
         calc = direct_cost(dist, v["fuel_efficiency"], price_on(idx, v["fuel_type"], d)) if v else None
         if calc is None:
             no_calc += 1
-        out[(d, mid)] = {"route_m": dist, "ncp": int(r["fuel_price_naver"] or 0), "calc": calc or 0}
+        # NAVER는 연비를 안 받으면 기본 연비로 계산 → 차량 연비가 있고 지원 연료일 때만 NCP 값을 씀
+        ncp_ok = bool(v and v["fuel_efficiency"] and v["fuel_type"] in NCP_OK)
+        no_ncp += 0 if ncp_ok else 1
+        out[(d, mid)] = {"route_m": dist, "ncp": int(r["fuel_price_naver"] or 0) if ncp_ok else 0, "calc": calc or 0}
     days = len({d for d, _ in routes})
     notes = [f"NCP 예상 유류비: 경로가 저장된 {days}일 · {len(routes)}건만 계산 (참고용, 물류비 합계에 넣지 않음)"]
     if no_calc:
         notes.append(f"직접 계산 유류비: {no_calc}건은 차량 미배정·연비 미입력·전기차·단가 없음으로 0원")
+    if no_ncp:
+        notes.append(f"NCP 예상 유류비: {no_ncp}건은 차량 미배정·연비 미입력·전기차라 0원 (NAVER 기본 연비 값은 쓰지 않음)")        
     return out, notes

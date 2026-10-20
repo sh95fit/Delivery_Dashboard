@@ -5,7 +5,7 @@ from __future__ import annotations
 from bisect import bisect_right
 from datetime import date
 
-STATE_RANK = {"RESULT": 0, "LIVE": 1, "PREVIEW": 2}   # 같은 날·계정에 경로가 여러 개면 이 순서로 하나만
+STATE_RANK = {"RESULT": 0, "COMPLETED_FIXED": 1}   # 실제 달린 경로만. LIVE·REMAINING·PREVIEW는 남은 예정 경로가 섞여 제외
 
 
 def parse_key(key: str) -> tuple[date, int, str] | None:
@@ -20,13 +20,15 @@ def parse_key(key: str) -> tuple[date, int, str] | None:
 
 
 def pick_routes(rows: list[dict]) -> dict[tuple[date, int], dict]:
-    """거리 0 경로는 버리고, (날짜, 계정)마다 RESULT > LIVE > PREVIEW, 같은 상태면 최근 것 하나."""
+    """거리 0 경로·예정 경로(LIVE·REMAINING·PREVIEW)는 버리고, (날짜, 계정)마다 RESULT > COMPLETED_FIXED, 같은 상태면 최근 것 하나."""
     best: dict[tuple[date, int], tuple[tuple, dict]] = {}
     for r in rows:
         k = parse_key(r["route_key"])
         if k is None or int(r.get("distance_m") or 0) <= 0:
             continue
         d, mid, state = k
+        if state not in STATE_RANK:
+            continue        
         ts = r.get("created_at")
         rank = (STATE_RANK.get(state, 9), -(ts.timestamp() if ts else 0))
         cur = best.get((d, mid))

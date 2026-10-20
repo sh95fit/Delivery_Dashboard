@@ -43,3 +43,15 @@ def test_direct_cost():
     assert direct_cost(45000, None, 1900) is None
     assert direct_cost(45000, 9.0, None) is None
     assert direct_cost(0, 9.0, 1900) is None
+
+
+def test_pick_routes_actual_only():
+    rows = [
+        _r("2026-09-23:15:LIVE:o:a", 36736, 4875, 5),
+        _r("2026-09-23:15:REMAINING:o:b", 10097, 1300, 5),
+        _r("2026-09-23:15:COMPLETED_FIXED:o:c", 26639, 3400, 4),
+        _r("2026-09-23:42:PREVIEW:o:d", 20000, 2000, 1),
+    ]
+    got = pick_routes(rows)
+    assert list(got) == [(date(2026, 9, 23), 15)]
+    assert got[(date(2026, 9, 23), 15)]["distance_m"] == 26639
