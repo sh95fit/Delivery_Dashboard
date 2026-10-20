@@ -171,7 +171,7 @@ def month_summary(month: str) -> dict:
     """차량별 · 일자별(주유한 날) · 계정별(영업일 배분 후 차량 배정 계정에 균분). 계정 이름은 화면에서 붙임."""
     f, t = month_bounds(month)
     rows = dash_db.rows(SQL_LOGS + " ORDER BY l.fuel_date, l.id", {"f": f, "t": t})
-    prices = price_rows(f, t)    
+    prices = price_rows(f, t)
     is_open = open_checker(f, t)
     open_days = [x for x in days_between(f, t) if is_open(x)]
     totals = _zero()
@@ -183,7 +183,7 @@ def month_summary(month: str) -> dict:
         _add(by_v.setdefault(r["vehicle_id"], _zero(
             vehicle_id=r["vehicle_id"], plate_no=r["plate_no"], fuel_type=r["fuel_type"],
             vat_deductible=bool(r["vat_deductible"]))), r, cost)
-        add_basis(by_v[r["vehicle_id"]], r["quantity"], r["total_amount"], log_ref(r, prices)["ref_price"])    
+        add_basis(by_v[r["vehicle_id"]], r["quantity"], r["total_amount"], log_ref(r, prices)["ref_price"])
         _add(by_d.setdefault(r["fuel_date"], _zero(date=_iso(r["fuel_date"]))), r, cost)
 
     assigns = dash_db.rows(SQL_ASSIGNS)
@@ -204,7 +204,7 @@ def month_summary(month: str) -> dict:
     return {
         "month": _ym(f), "open_days": len(open_days), "closed": _closing_out(_closing(f)),
         "totals": totals,
-        "vehicles": sorted((finish_basis(x) for x in by_v.values()), key=lambda x: x["plate_no"] or ""),        
+        "vehicles": sorted((finish_basis(x) for x in by_v.values()), key=lambda x: x["plate_no"] or ""),
         "days": [by_d[k] for k in sorted(by_d)],
         "managers": managers,
     }

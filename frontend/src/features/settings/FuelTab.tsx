@@ -217,7 +217,7 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
                   <td className="num">{won(v.cost)}</td>
                   <td className="num">{priceText(v.avg_unit)}</td>
                   <td className="num">{priceText(v.avg_ref)}</td>
-                  <td className="num">{diffCell(v.ref_diff)}</td>                  
+                  <td className="num">{diffCell(v.ref_diff)}</td>
                 </tr>
               ))}
             </DataTable>
@@ -267,7 +267,7 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
           <p className="muted">이 달 주유 기록이 없습니다.</p>
         ) : (
           <DataTable columns={["일자", "차량", "연료", { label: "수량", num: true }, { label: "단가", num: true },
-            { label: "오피넷 단가", num: true }, { label: "차이", num: true },            
+            { label: "오피넷 단가", num: true }, { label: "차이", num: true },
             { label: "합계", num: true }, { label: "공급가액", num: true }, { label: "부가세", num: true },
             { label: "비용", num: true }, "주유소", "메모", "입력", ...(isAdmin && !closed ? ["관리"] : [])]}>
             {logs.map((r) => (

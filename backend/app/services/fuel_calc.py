@@ -76,7 +76,7 @@ def ref_price(rows: list[dict], fuel_type: str, d: date, unit_price) -> dict:
     if not p:
         return {"ref_price": None, "ref_date": None, "ref_source": None, "ref_diff": None}
     price = float(p["price"])
-    diff = round((float(unit_price) / price - 1) * 100, 1) if unit_price and price > 0 else None
+    diff = round((float(unit_price) / price - 1) * 100, 1) + 0.0 if unit_price and price > 0 else None
     return {"ref_price": round(price, 2), "ref_date": p["price_date"].isoformat(),
             "ref_source": p["source"], "ref_diff": diff}
 
@@ -100,5 +100,5 @@ def finish_basis(acc: dict) -> dict:
     rq, rt, ra = acc.pop("_rq", 0.0), acc.pop("_rt", 0), acc.pop("_ra", 0.0)
     acc["avg_unit"] = round(qt / q, 2) if q else None
     acc["avg_ref"] = round(ra / rq, 2) if rq else None
-    acc["ref_diff"] = round((rt / ra - 1) * 100, 1) if ra else None
+    acc["ref_diff"] = round((rt / ra - 1) * 100, 1) + 0.0 if ra else None
     return acc

@@ -6,7 +6,7 @@ export interface FuelLog {
   quantity: number | null; unit_price: number | null;
   total_amount: number; supply_amount: number; vat_amount: number; cost: number;
   station: string | null; memo: string | null; source: "manual" | "excel"; created_by: string | null;
-  ref_price: number | null; ref_date: string | null; ref_source: "opinet" | "manual" | null; ref_diff: number | null;  
+  ref_price: number | null; ref_date: string | null; ref_source: "opinet" | "manual" | null; ref_diff: number | null;
 }
 export interface FuelClosing {
   total_amount: number; cost_amount: number; log_count: number;

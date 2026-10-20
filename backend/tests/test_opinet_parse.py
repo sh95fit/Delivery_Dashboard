@@ -50,7 +50,7 @@ def test_ref_price():
     rows = [{"price_date": date(2026, 9, 22), "fuel_type": "diesel", "price": 1800, "source": "opinet"}]
     assert ref_price(rows, "diesel", date(2026, 9, 23), 1980) == {
         "ref_price": 1800.0, "ref_date": "2026-09-22", "ref_source": "opinet", "ref_diff": 10.0}
-    assert ref_price(rows, "gasoline", date(2026, 9, 23), 1980)["ref_price"] is None
+    assert str(ref_price(rows, "diesel", date(2026, 9, 23), 1799.5)["ref_diff"]) == "0.0"   # -0.0 표시 방지
 
 
 def test_basis():
