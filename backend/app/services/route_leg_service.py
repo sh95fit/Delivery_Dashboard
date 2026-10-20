@@ -183,7 +183,7 @@ def collect(d: date, purpose: str = "legs") -> dict:
         at = to_kst(s.get("delivered_at"))
         if at:
             by.setdefault(int(s["manager_id"]), []).append(
-                {"id": str(s["id"]), "lat": float(s["latitude"]), "lng": float(s["longitude"]), "at": at})
+                {"id": str(s["delivery_id"]), "lat": float(s["latitude"]), "lng": float(s["longitude"]), "at": at})
     o, _ = routes_service._active_origin()
     origin = {"lat": float(o["latitude"]), "lng": float(o["longitude"])}
     for mid, stops in sorted(by.items()):
