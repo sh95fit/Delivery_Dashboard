@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from app.services.route_leg_calc import alloc, chunks, coord_key, d5_code, pending_groups, split_legs
+from app.services.route_leg_calc import alloc, chunks, coord_key, d5_code, pending_groups, preview_input, split_legs
 
 KST = timezone(timedelta(hours=9))
 T = lambda m: datetime(2026, 10, 20, 7, 0, tzinfo=KST) + timedelta(minutes=m)  # noqa: E731
@@ -52,3 +52,20 @@ def test_d5_code():
     assert d5_code(400, {}) is None
     assert d5_code(401, {"error": {"errorCode": "210", "message": "Permission Denied"}}) is None
     assert d5_code(500, {"code": 0}) is None
+
+
+def P(i, mid, lat, at, seq, coord=True):
+    return {"delivery_id": i, "has_coord": coord, "manager_id": mid, "latitude": lat if coord else None,
+            "longitude": lat + 90 if coord else None, "delivered_at": at, "seq": seq}
+
+
+def test_preview_input():
+    o = {"lat": 37.0, "lng": 127.0}
+    stops = [P("a", 7, 37.1, "2026-10-19T23:00:00", 1), P("b", 7, 37.2, "2026-10-19T23:30:00", 2),
+             P("d", 7, 37.4, None, 4), P("c", 7, 37.3, None, 3), P("x", 8, 37.9, None, 1), P("n", 7, 0, None, 5, coord=False)]
+    start, left, sig = preview_input(stops, 7, o)
+    assert (start["lat"], start["lng"]) == (37.2, 127.2)      # 출발 = 마지막 완료 지점
+    assert [p["id"] for p in left] == ["c", "d"]               # 미완료만, 배송 순서대로, 좌표 없는 곳 제외
+    s8, left8, sig8 = preview_input(stops, 8, o)
+    assert s8 == o and [p["id"] for p in left8] == ["x"] and sig8 != sig   # 완료 없으면 출발지에서
+    assert preview_input(stops, 7, o)[2] == sig                # 같은 상태면 같은 sig (다시 호출 안 함)

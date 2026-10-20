@@ -2,6 +2,10 @@
 완료 시각 순으로 '마지막 연결 지점 → 새로 완료된 곳'만 이어 붙인다."""
 from __future__ import annotations
 
+import hashlib
+
+from app.services.day_aggregate import to_kst
+
 D5_MAX_NODES = 6     # Directions 5: 경유지 5 + 도착 1 → 1회 최대 6구간 (경유 6개는 HTTP 400 확인)
 
 
@@ -84,3 +88,24 @@ def d5_code(status: int, body: dict) -> int | None:
         return int(c) if c is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def preview_input(stops: list[dict], mid: int, origin: dict) -> tuple[dict, list[dict], str]:
+    """지도 남은 경로 미리보기 입력. stops = 하루 집계 stops.
+    출발 = 마지막 완료 지점(없으면 출발지), 남은 곳 = 미완료 배송지(배송 순서 seq 순).
+    sig = 출발 좌표 + 남은 곳 목록 → 바뀌면 미리보기를 다시 계산해야 함."""
+    done, rem = [], []
+    for s in stops:
+        if not s.get("has_coord") or s.get("manager_id") is None or int(s["manager_id"]) != mid:
+            continue
+        p = {"id": str(s.get("delivery_id") or s.get("address_id")), "lat": float(s["latitude"]), "lng": float(s["longitude"])}
+        at = to_kst(s.get("delivered_at"))
+        if at:
+            done.append((at, p["id"], p))
+        else:
+            seq = s.get("seq")
+            rem.append((seq is None, seq or 0, p["id"], p))
+    start = max(done, key=lambda x: (x[0], x[1]))[2] if done else origin
+    left = [x[3] for x in sorted(rem, key=lambda x: x[:3])]
+    raw = f'{start["lat"]:.6f},{start["lng"]:.6f}|' + ",".join(p["id"] for p in left)
+    return start, left, hashlib.sha1(raw.encode()).hexdigest()[:12]

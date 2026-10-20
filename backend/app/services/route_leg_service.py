@@ -10,6 +10,8 @@ import json
 import logging
 import os
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 
 import requests
@@ -18,7 +20,7 @@ from sqlalchemy import text
 from app.database import get_dash_engine
 from app.services import dash_db, day_cache, routes_service
 from app.services.day_aggregate import KST, to_kst
-from app.services.route_leg_calc import alloc, chunks, coord_key, d5_code, pending_groups, split_legs
+from app.services.route_leg_calc import alloc, chunks, coord_key, d5_code, pending_groups, preview_input, split_legs
 
 logger = logging.getLogger("route_legs")
 
@@ -28,6 +30,9 @@ DAILY_LIMIT = int(os.environ.get("ROUTE_DAILY_LIMIT", "1500"))
 MONTHLY_LIMIT = int(os.environ.get("ROUTE_MONTHLY_LIMIT", "55000"))
 BACKFILL_RESERVE = 500          # 지난 날짜 채우기는 하루 한도에서 500회를 남기고 멈춤 (당일 경로 우선)
 UNREACHABLE = (2, 3, 4, 5)      # 도로와 너무 멂·자동차 길 없음 등 → 그 지점만 '연결 불가'
+PREVIEW_RESERVE = 300           # 지도 미리보기는 하루 한도에서 300회를 남기고 막음 (당일 실제 경로 우선)
+PREVIEW_TTL = 21600             # 미리보기 결과 보관 6시간 (Redis)
+PREVIEW_WORKERS = 4             # 전체 노선 미리보기: 4명씩 동시에 계산
 
 _INS = text("""INSERT INTO route_legs (route_date, manager_id, seq, from_lat, from_lng, to_lat, to_lng, to_stop_ids,
         delivered_at, status, error_code, distance_m, duration_ms, fuel_price_naver, toll_fare, ncp_mileage, path, purpose)
@@ -55,7 +60,7 @@ def calls_used(d: date) -> tuple[int, int]:
 def _take_call(purpose: str) -> None:
     today = datetime.now(KST).date()
     day, month = calls_used(today)
-    limit = DAILY_LIMIT - (BACKFILL_RESERVE if purpose == "backfill" else 0)
+    limit = DAILY_LIMIT - {"backfill": BACKFILL_RESERVE, "preview": PREVIEW_RESERVE}.get(purpose, 0)
     if day >= limit or month >= MONTHLY_LIMIT:
         raise StopCalls(f"NAVER 호출 한도 도달 (오늘 {day}/{limit}, 이번 달 {month}/{MONTHLY_LIMIT})")
     with get_dash_engine().begin() as c:
@@ -203,6 +208,157 @@ def collect(d: date, purpose: str = "legs") -> dict:
         for k in ("calls", "legs", "unreachable"):
             out[k] += r[k]
     return out
+
+
+# ---------- S3-P2d-2b-1 지도: 실제 경로(실선) 조회 · 남은 경로 미리보기(점선, 버튼으로만 계산) ----------
+def _origin() -> dict:
+    o, _ = routes_service._active_origin()
+    return {"lat": float(o["latitude"]), "lng": float(o["longitude"])}
+
+
+def _jget(key: str):
+    try:
+        raw = day_cache._redis().get(key)
+        return json.loads(raw) if raw else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _jset(key: str, value, ttl: int = PREVIEW_TTL) -> None:
+    try:
+        day_cache._redis().setex(key, ttl, json.dumps(value, ensure_ascii=False, default=str))
+    except Exception:  # noqa: BLE001
+        logger.warning("redis set 실패 (미리보기)", exc_info=True)
+
+
+def _pkey(d: date, mid: int) -> str:
+    return f"route:preview:v1:{d.isoformat()}:{mid}"
+
+
+def _all_key(d: date) -> str:
+    return f"route:preview_all:v1:{d.isoformat()}"
+
+
+def legs_view(d: date) -> dict:
+    """지도용: 계정별 실제 경로 구간(실선) + 마지막 미리보기(점선, 있을 때만). NAVER 호출 없음."""
+    rows = dash_db.rows("""SELECT manager_id, seq, status, distance_m, duration_ms, fuel_price_naver, to_stop_ids,
+            delivered_at, path FROM route_legs WHERE route_date = :d ORDER BY manager_id, seq""", {"d": d})
+    stops = day_cache.get_day(d).get("stops") or []
+    origin = _origin()
+    mids = {int(r["manager_id"]) for r in rows} | {int(s["manager_id"]) for s in stops if s.get("manager_id") is not None}
+    out = {m: {"manager_id": m, "legs": [], "distance_m": 0, "duration_ms": 0, "fuel_price_naver": 0,
+               "stops": 0, "unreachable": 0} for m in mids}
+    for r in rows:
+        m = out[int(r["manager_id"])]
+        m["legs"].append({"seq": r["seq"], "status": r["status"], "distance_m": r["distance_m"],
+                          "duration_ms": r["duration_ms"], "stop_ids": r["to_stop_ids"] or [],
+                          "delivered_at": r["delivered_at"], "path": r["path"] or []})
+        m["distance_m"] += int(r["distance_m"] or 0)
+        m["duration_ms"] += int(r["duration_ms"] or 0)
+        m["fuel_price_naver"] += int(r["fuel_price_naver"] or 0)
+        m["stops"] += len(r["to_stop_ids"] or [])
+        m["unreachable"] += 1 if r["status"] == "unreachable" else 0
+    for mid, m in out.items():
+        _, left, sig = preview_input(stops, mid, origin)
+        last = _jget(_pkey(d, mid)) if left else None
+        m["remaining_stops"] = len(left)
+        m["preview_sig"] = sig if left else None
+        m["preview"] = last
+        m["preview_stale"] = bool(last and last.get("sig") != sig)
+    today = datetime.now(KST).date()
+    return {"date": d.isoformat(), "origin": origin, "enabled": enabled(), "calls_today": calls_used(today)[0],
+            "daily_limit": DAILY_LIMIT, "managers": [out[m] for m in sorted(out)]}
+
+
+def preview(d: date, mid: int) -> dict:
+    """버튼: 마지막 완료 지점 → 남은 배송지(배송 순서) 경로. 저장하지 않음(물류비 미반영), 같은 상태면 다시 호출하지 않음."""
+    start, left, sig = preview_input(day_cache.get_day(d).get("stops") or [], mid, _origin())
+    base = {"manager_id": mid, "sig": sig, "stops": len(left)}
+    if not left:
+        return {**base, "path": [], "distance_m": 0, "duration_ms": 0, "skipped": 0, "calls": 0, "cached": False}
+    last = _jget(_pkey(d, mid))
+    if last and last.get("sig") == sig:
+        return {**last, "calls": 0, "cached": True}
+    groups = pending_groups([{**p, "at": i} for i, p in enumerate(left)], set(), coord_key(start["lat"], start["lng"]))[1]
+    vparams = routes_service._vehicle_params(d, mid)
+    path: list = []
+    tot = {"distance_m": 0, "duration_ms": 0, "calls": 0, "skipped": 0}
+
+    def add(route: dict) -> None:
+        s = route.get("summary") or {}
+        path.extend(route.get("path") or [])
+        tot["distance_m"] += int(s.get("distance") or 0)
+        tot["duration_ms"] += int(s.get("duration") or 0)
+
+    cur = start
+    for ch in chunks(groups):
+        code, route = _d5(cur, ch, vparams, "preview")
+        tot["calls"] += 1
+        if route:
+            add(route)
+            cur = ch[-1]
+            continue
+        if code not in (0, 1, *UNREACHABLE):
+            raise RuntimeError(f"NAVER code {code}")
+        for g in ch:        # 묶음 실패 → 한 곳씩, 문제 지점은 건너뜀
+            if len(ch) == 1:
+                c1, r1 = code, route
+            else:
+                c1, r1 = _d5(cur, [g], vparams, "preview")
+                tot["calls"] += 1
+            if r1:
+                add(r1)
+                cur = g
+            elif c1 == 1:
+                cur = g
+            else:
+                tot["skipped"] += len(g["ids"])
+    out = {**base, **tot, "path": path, "cached": False, "calc_at": datetime.now(KST).isoformat()}
+    _jset(_pkey(d, mid), out)
+    return out
+
+
+def preview_all_status(d: date) -> dict:
+    return _jget(_all_key(d)) or {"status": "idle"}
+
+
+def start_preview_all(d: date) -> dict:
+    """전체 노선 미리보기: 뒤에서 계산(화면은 진행률 조회). 이미 도는 중이면 그 상태를 돌려줌 (10분 넘으면 새로 시작)."""
+    st = _jget(_all_key(d))
+    now_ts = datetime.now(KST).timestamp()
+    if st and st.get("status") == "running" and float(st.get("started_ts") or 0) > now_ts - 600:
+        return st
+    stops = day_cache.get_day(d).get("stops") or []
+    mids = sorted({int(s["manager_id"]) for s in stops
+                   if s.get("manager_id") is not None and s.get("has_coord") and not s.get("delivered_at")})
+    st = {"status": "running", "total": len(mids), "done": 0, "calls": 0, "failed": [], "started_ts": now_ts}
+    _jset(_all_key(d), st)
+    threading.Thread(target=_run_all, args=(d, mids, st), daemon=True).start()
+    return st
+
+
+def _run_all(d: date, mids: list[int], st: dict) -> None:
+    lock = threading.Lock()
+
+    def one(mid: int) -> None:
+        try:
+            r, err = preview(d, mid), None
+        except Exception as e:  # noqa: BLE001
+            r, err = None, str(e)
+            if not isinstance(e, StopCalls):
+                logger.exception("전체 미리보기 %s 계정 %s 실패", d, mid)
+        with lock:
+            st["done"] += 1
+            if r:
+                st["calls"] += int(r.get("calls") or 0)
+            else:
+                st["failed"].append({"manager_id": mid, "error": err})
+            _jset(_all_key(d), st)
+
+    with ThreadPoolExecutor(max_workers=PREVIEW_WORKERS) as ex:
+        list(ex.map(one, mids))
+    st["status"] = "done"
+    _jset(_all_key(d), st)
 
 
 if __name__ == "__main__":
