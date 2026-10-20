@@ -209,3 +209,60 @@ export interface MeResp {
   email: string;
   is_admin?: boolean;
 }
+
+/* S3-P2d-2b-2 실제 경로(route_legs, 실선) · 남은 경로 미리보기(점선) — 좌표는 NAVER 형식 [경도, 위도] */
+export type LngLat = [number, number];
+
+export interface RouteLeg {
+  seq: number;
+  status: "ok" | "same" | "unreachable";
+  distance_m: number;
+  duration_ms: number;
+  stop_ids: string[];
+  delivered_at?: string | null;
+  path: LngLat[];
+}
+
+export interface RoutePreview {
+  manager_id: number;
+  sig: string;
+  stops: number;
+  path: LngLat[];
+  distance_m: number;
+  duration_ms: number;
+  calls: number;
+  skipped: number;
+  cached: boolean;
+  calc_at?: string;
+}
+
+export interface ManagerLegs {
+  manager_id: number;
+  legs: RouteLeg[];
+  distance_m: number;
+  duration_ms: number;
+  fuel_price_naver: number;
+  stops: number;
+  unreachable: number;
+  remaining_stops: number;
+  preview_sig: string | null;
+  preview: RoutePreview | null;
+  preview_stale: boolean;
+}
+
+export interface RouteLegsResp {
+  date: string;
+  origin: { lat: number; lng: number };
+  enabled: boolean;
+  calls_today: number;
+  daily_limit: number;
+  managers: ManagerLegs[];
+}
+
+export interface PreviewAllStatus {
+  status: "idle" | "running" | "done";
+  total?: number;
+  done?: number;
+  calls?: number;
+  failed?: Array<{ manager_id: number; error: string | null }>;
+}
