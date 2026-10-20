@@ -3,7 +3,7 @@ import logging
 import os
 import time
 
-from app.services import fuel_price_service, routes_service
+from app.services import fuel_price_service, route_leg_service, routes_service
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("route_collector")
@@ -37,7 +37,14 @@ def main():
         except Exception as exc:  # noqa: BLE001
             logger.warning("opinet fetch failed: %s", exc)
         interval = interval_active if is_delivery_hours() else interval_idle
-
+        # [S3-P2d-2a] 실제 경로 구간: 새로 완료된 곳만 Directions 5로 이어 붙임 (새 완료 없으면 호출 0, 어제분은 자정 직후 마무리용)
+        for d in (today_kst() - timedelta(days=1), today_kst()):
+            try:
+                r = route_leg_service.collect(d)
+                if r["calls"] or r.get("stopped", "").startswith("NAVER"):
+                    logger.info("route legs: %s", r)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("route legs failed: %s", exc)        
         try:
             if is_delivery_hours():
                 target = today_kst()
