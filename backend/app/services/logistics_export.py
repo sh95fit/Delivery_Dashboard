@@ -19,6 +19,7 @@ MONEY = [
 ]
 KEYS = [k for _, k in MONEY]
 REF = [
+    ("주행거리(km, 참고)", "route_km", "num"),
     ("주행 시간(분, 참고)", "route_min", "num"),
     ("NCP 예상 유류비(참고)", "ncp_fuel", "won"),
     ("직접 계산 유류비(참고)", "calc_fuel", "won"),
