@@ -214,7 +214,7 @@ export default function DashboardPage() {
       )}
 
       {!error && stops.length > 0 && routesData && pvTarget.length > 0 && (
-        <div className="toolbar">
+        <div className="toolbar" style={{ marginTop: 12, flexWrap: "wrap", rowGap: 8 }}>
           <Button size="sm" variant="primary" disabled={pvBusy || !routesData.enabled} onClick={() => { runPreview().catch(() => {}); }}>
             {pvBusy ? "계산 중…" : selectedManagerId == null ? "전체 노선 남은 경로 미리보기" : "이 노선 남은 경로 미리보기"}
           </Button>

@@ -20,8 +20,8 @@ from sqlalchemy import text
 from app.database import get_dash_engine
 from app.services import dash_db, day_cache, routes_service
 from app.services.day_aggregate import KST, to_kst
-from app.services.route_leg_calc import (alloc, chunks, control_summary, coord_key, d5_code, dwell_ms, pending_groups,
-                                         preview_input, split_legs, target_at)
+from app.services.route_leg_calc import (alloc, chunks, control_summary, coord_key, d5_code, delay_min, dwell_ms,
+                                         pending_groups, preview_input, split_legs, target_at)
 
 logger = logging.getLogger("route_legs")
 
@@ -35,7 +35,7 @@ PREVIEW_RESERVE = 300           # 지도 미리보기는 하루 한도에서 300
 PREVIEW_TTL = 21600             # 미리보기 결과 보관 6시간 (Redis)
 PREVIEW_WORKERS = 4             # 전체 노선 미리보기: 4명씩 동시에 계산
 ETA_EVERY = int(os.environ.get("ETA_INTERVAL_MIN", "15")) * 60   # [S3-P2d-4] 남은 경로 자동 재계산 주기(초) — 출발한 노선만
-STALL_MIN = int(os.environ.get("ETA_STALL_MIN", "20"))          # [S3-P2d-4] 정체 = 마지막 완료 후 20분 이상 새 완료 없음
+STALL_MIN = int(os.environ.get("ETA_STALL_MIN", "15"))          # [S3-P2d-4b] 정체 = 다음 곳 예상 도착보다 15분 넘게 지났는데 새 완료 없음
 
 _INS = text("""INSERT INTO route_legs (route_date, manager_id, seq, from_lat, from_lng, to_lat, to_lng, to_stop_ids,
         delivered_at, status, error_code, distance_m, duration_ms, fuel_price_naver, toll_fare, ncp_mileage, path, purpose)
@@ -380,27 +380,33 @@ def auto_eta(d: date) -> dict:
 
 def _control(d: date, mid: int, legs: list[dict], stops: list[dict], last: dict | None, rem_ids: list[str],
              now: datetime) -> dict:
-    """[S3-P2d-4] 노선 관제: 남은 거리·예상 완료·지연 예상·정체·미지정 고객사 (NAVER 호출 없음)."""
-    name: dict = {}
+    """[S3-P2d-4b] 노선 관제: 배송지별 희망 시각 대비 예상 도착(남은 곳)·완료 시각(완료한 곳), 정체·대기 (NAVER 호출 없음)."""
+    info: dict = {}
     target_of: dict = {}
-    last_at, done, late_done = None, 0, 0
+    done_stops: list[dict] = []
+    last_at = None
     for s in stops:
         if s.get("manager_id") is None or int(s["manager_id"]) != mid:
             continue
         sid = str(s.get("delivery_id") or s.get("address_id"))
-        name[sid] = s.get("address_name") or sid
-        target_of[sid] = target_at(d, s.get("delivery_time"))
+        info[sid] = {"name": s.get("address_name") or sid, "seq": s.get("seq")}
+        tg = target_at(d, s.get("delivery_time"))
+        target_of[sid] = tg
         at = to_kst(s.get("delivered_at"))
         if at:
-            done += 1
             last_at = at if last_at is None or at > last_at else last_at
-            late_done += 1 if target_of[sid] and at > target_of[sid] else 0
+            done_stops.append({"id": sid, **info[sid], "target_at": tg.isoformat() if tg else None,
+                               "done_at": at.isoformat(), "delay_min": delay_min(at, tg)})
+    done_stops.sort(key=lambda x: x["done_at"])
     dw = dwell_ms([(to_kst(x["delivered_at"]), int(x["duration_ms"] or 0)) for x in legs if x.get("delivered_at")])
     c = control_summary((last or {}).get("groups") or [], rem_ids, last_at, dw, now, target_of, STALL_MIN,
                         d == now.date())
-    c["late"] = [{**x, "name": name.get(x["id"], x["id"])} for x in c["late"]]
-    c["no_time"] = [name.get(i, i) for i in c.pop("no_time_ids")]
-    return {**c, "done": done, "late_done": late_done, "calc_at": (last or {}).get("calc_at")}
+    for x in c["stops"]:
+        x.update(info.get(x["id"], {"name": x["id"], "seq": None}))
+    c["no_time"] = [info.get(i, {}).get("name", i) for i in c.pop("no_time_ids")]
+    late_done = sum(1 for x in done_stops if (x["delay_min"] or 0) >= 1)
+    return {**c, "done": len(done_stops), "late_done": late_done, "done_stops": done_stops,
+            "calc_at": (last or {}).get("calc_at")}
 
 
 def preview_all_status(d: date) -> dict:

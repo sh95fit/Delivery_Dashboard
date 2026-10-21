@@ -270,23 +270,31 @@ export interface PreviewAllStatus {
   failed?: Array<{ manager_id: number; error: string | null }>;
 }
 
-
-/* S3-P2d-4 노선 관제 (legs_view.control) */
-export interface ControlLate {
+/* S3-P2d-4b 노선 관제 (legs_view.control) — 배송지별 희망 시각 대비 */
+export interface ControlStop {
   id: string;
   name: string;
-  target_at: string;
-  eta: string;
+  seq: number | null;
+  target_at: string | null;
+  eta?: string | null;        // 남은 곳: 예상 도착
+  done_at?: string;           // 완료한 곳: 완료 시각
+  delay_min: number | null;   // 희망 대비 분 (+ 지연, 0 정시, − 여유), 희망 시각 없으면 null
+  skipped?: boolean;
 }
 
 export interface RouteControl {
-  state: "done" | "ok" | "late" | "stalled" | "before" | "incomplete";
+  state: "done" | "ok" | "late" | "stalled" | "wait" | "before" | "incomplete";
   done: number;
   remaining: number;
   remaining_m: number;
   remaining_drive_ms: number;
   finish_at: string | null;
-  late: ControlLate[];
+  next_eta: string | null;
+  behind_min: number | null;
+  stops: ControlStop[];
+  done_stops: ControlStop[];
+  late: ControlStop[];
+  max_delay_min: number;
   no_time: string[];
   late_done: number;
   uncalc_n: number;

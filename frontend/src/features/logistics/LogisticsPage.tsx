@@ -49,9 +49,22 @@ function Cells({ r }: { r: CostRow }) {
   );
 }
 
+/* [S3-P2e] 유류비 카드: 마감 전 = NCP 예상, 기간 전체 마감 = 확정 유류비, 일부 마감 = 확정 + 미마감 주유 기록 */
+function fuelCard(view: CostView) {
+  const t = view.totals;
+  const open = t.fuel_est > 0 || view.issues.some((i) => i.msg.includes("유류비 미마감"));
+  const ref = `NCP 예상 ${won(t.ncp_fuel)} · 직접 계산 ${won(t.calc_fuel)}`;
+  if (!open && t.fuel > 0) return { title: "확정 유류비", value: t.fuel, sub: `모두 마감 · 참고 ${ref}` };
+  if (t.fuel > 0) {
+    return { title: "유류비 (일부 확정)", value: t.fuel + t.fuel_est, sub: `확정 ${won(t.fuel)} · 미마감 주유 기록 ${won(t.fuel_est)} · 참고 ${ref}` };
+  }
+  return { title: "NCP 예상 유류비", value: t.ncp_fuel, sub: `마감 전 참고 · 지금까지 주유 기록 ${won(t.fuel_est)} · 직접 계산 ${won(t.calc_fuel)}` };
+}
+
 function Body({ view, showDays, onShowDays }: { view: CostView; showDays: boolean; onShowDays: (v: boolean) => void }) {
   const t = view.totals;
   const est = t.labor_est + t.ot_expected + t.fuel_est;
+  const fc = fuelCard(view);
   return (
     <>
       <section className="stat-grid mt">
@@ -59,7 +72,7 @@ function Body({ view, showDays, onShowDays }: { view: CostView; showDays: boolea
         <Card title="물류비" sub={est ? `예상분 ${won(est)} 포함` : "확정"}>{won(t.cost_total)}</Card>
         <Card title="이익" sub="순매출 − 물류비">{won(t.profit)}</Card>
         <Card title="비용률" sub="물류비 ÷ 순매출">{ratio(t)}</Card>
-        <Card title="NCP 예상 유류비" sub={`참고 · 직접 계산 ${won(t.calc_fuel)} · 실제 ${won(t.fuel + t.fuel_est)}`}>{won(t.ncp_fuel)}</Card>
+        <Card title={fc.title} sub={fc.sub}>{won(fc.value)}</Card>
         <Card title="기간" sub={`${view.from} ~ ${view.to}`}>{`${view.days}일 · 영업 ${view.open_days}일`}</Card>
       </section>
 

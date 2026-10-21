@@ -130,28 +130,40 @@ def target_at(d: date, hhmm: str | None) -> datetime | None:
 
 def dwell_ms(done: list[tuple[datetime, int]]) -> int:
     """done = [(완료 시각, 그 지점까지 주행 시간 ms)] 완료 순.
-    1곳당 평균 정차 시간 = (첫 완료 → 마지막 완료 경과 − 그 사이 주행 시간) ÷ 구간 수."""
+    1곳당 정차 시간 = (완료 간격 − 그 구간 주행 시간)의 중앙값 → 휴식·상차 한 번에 흔들리지 않음."""
     if len(done) < 3:
         return DEFAULT_DWELL_MS
-    span = (done[-1][0] - done[0][0]).total_seconds() * 1000
-    drive = sum(x for _, x in done[1:])
-    v = int((span - drive) / (len(done) - 1))
+    gaps = sorted((b[0] - a[0]).total_seconds() * 1000 - b[1] for a, b in zip(done, done[1:]))
+    n = len(gaps)
+    v = int(gaps[n // 2] if n % 2 else (gaps[n // 2 - 1] + gaps[n // 2]) / 2)
     return max(DWELL_MIN_MS, min(DWELL_MAX_MS, v))
+
+
+LATE_MIN = 1      # 1분 이상 늦으면 지연 예상 (제때 완료되면 사라짐)
+
+
+def delay_min(at: datetime | None, target: datetime | None) -> int | None:
+    """희망 시각 대비 분 (내림). 양수 = 지연, 0 = 1분 미만(정시로 봄), 음수 = 여유. 둘 중 하나 없으면 None."""
+    if at is None or target is None:
+        return None
+    return int((at - target).total_seconds() // 60)
 
 
 def control_summary(groups: list[dict], rem_ids: list[str], last_at: datetime | None, dwell: int, now: datetime,
                     target_of: dict, stall_min: int, live: bool) -> dict:
-    """노선 1개 관제 요약.
+    """노선 1개 관제 요약 (S3-P2d-4b).
     groups = 마지막 남은 경로 계산의 묶음 [{ids, distance_m, duration_ms, skipped?}] (배송 순서)
     rem_ids = 지금 남은 배송지(좌표 있는 곳), target_of = {배송지: 희망 시각 | None}
-    - 예상 도착: 마지막 완료 + 정차 + 다음 곳 주행 … (첫 곳이 지금보다 이르면 지금 = 이동 중)
+    - 예상 도착: 마지막 완료 + (정차 + 다음 곳 주행) 반복. 첫 곳 예상이 이미 지났으면 지금 도착으로 보고 뒤 곳도 함께 미룸
     - 계산 뒤 완료된 곳은 빼고 셈 → 15분 사이에도 호출 없이 갱신
-    - 지연 예상: 예상 도착 > 희망 시각. 희망 시각 없는 곳은 판단에서 빼고 no_time_ids로
-    - 정체: 오늘 · 남은 곳 있음 · 마지막 완료 후 stall_min분 이상 새 완료 없음"""
+    - 지연 예상: 희망 시각보다 1분 이상 늦은 곳 (배송지별 delay_min)
+    - 정체: 다음 곳 예상 도착보다 stall_min분 넘게 지났는데 새 완료 없음
+      단, 지금 출발해도 다음 곳 희망 시각에 맞출 수 있으면 '대기' (희망 시각에 맞춰 기다리는 경우)"""
     rem = set(rem_ids)
-    arrive: dict = {}
+    eta: dict = {}
     skipped: set = set()
     t, first, dist, drive = last_at or now, True, 0, 0
+    next_eta, next_id, next_leg = None, None, 0
     for g in groups:
         ids = [i for i in (g.get("ids") or []) if i in rem]
         if not ids:
@@ -159,34 +171,42 @@ def control_summary(groups: list[dict], rem_ids: list[str], last_at: datetime | 
         if g.get("skipped"):
             skipped.update(ids)
             continue
+        leg = int(g.get("duration_ms") or 0)
         wait = dwell if (last_at is not None or not first) else 0
-        t = t + timedelta(milliseconds=wait + int(g.get("duration_ms") or 0))
-        if first and t < now:
-            t = now
-        first = False
+        t = t + timedelta(milliseconds=wait + leg)
+        if first:
+            next_eta, next_id, next_leg = t, ids[0], leg
+            t = max(t, now)
+            first = False
         dist += int(g.get("distance_m") or 0)
-        drive += int(g.get("duration_ms") or 0)
+        drive += leg
         for i in ids:
-            arrive[i] = t
-    late = [{"id": i, "target_at": target_of[i].isoformat(), "eta": arrive[i].isoformat()}
-            for i in rem_ids if i in arrive and target_of.get(i) and arrive[i] > target_of[i]]
+            eta[i] = t
+    stops = [{"id": i, "target_at": target_of[i].isoformat() if target_of.get(i) else None,
+              "eta": eta[i].isoformat() if i in eta else None,
+              "delay_min": delay_min(eta.get(i), target_of.get(i)), "skipped": i in skipped} for i in rem_ids]
+    late = [s for s in stops if s["delay_min"] is not None and s["delay_min"] >= LATE_MIN]
     no_time = [i for i in rem_ids if not target_of.get(i)]
-    uncalc = [i for i in rem_ids if i not in arrive and i not in skipped]
+    uncalc = [i for i in rem_ids if i not in eta and i not in skipped]
     idle = int((now - last_at).total_seconds() // 60) if last_at else None
+    behind = delay_min(now, next_eta) if last_at else None
     if not rem_ids:
         state = "done"
     elif not live:
         state = "incomplete"
     elif last_at is None:
         state = "before"
-    elif idle >= stall_min:
-        state = "stalled"
+    elif behind is not None and behind >= stall_min:
+        tg = target_of.get(next_id)
+        state = "wait" if tg and now + timedelta(milliseconds=next_leg) <= tg else "stalled"
     elif late:
         state = "late"
     else:
         state = "ok"
     return {"state": state, "remaining": len(rem_ids), "remaining_m": dist, "remaining_drive_ms": drive,
-            "finish_at": max(arrive.values()).isoformat() if arrive else None,
-            "late": late, "no_time_ids": no_time, "uncalc_n": len(uncalc), "skipped_n": len(skipped),
+            "finish_at": max(eta.values()).isoformat() if eta else None,
+            "next_eta": next_eta.isoformat() if next_eta else None, "behind_min": behind,
+            "stops": stops, "late": late, "max_delay_min": max((s["delay_min"] for s in late), default=0),
+            "no_time_ids": no_time, "uncalc_n": len(uncalc), "skipped_n": len(skipped),
             "last_at": last_at.isoformat() if last_at else None, "idle_min": idle,
             "dwell_min": round(dwell / 60000, 1)}
