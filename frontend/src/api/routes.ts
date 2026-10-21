@@ -1,4 +1,4 @@
-import { http, post } from "./client";
+import { del, http, post } from "./client";
 import type { AllRoutesResp, PreviewAllStatus, RouteLegsResp, RoutePreview, RouteSummary } from "./types";
 
 export const getAllRoutes = (date: string) =>
@@ -22,3 +22,10 @@ export const startPreviewAll = (date: string) =>
 
 export const getPreviewAll = (date: string) =>
   http<PreviewAllStatus>(`/api/routes/${date}/preview-all`);
+
+/* S3-P2d-5 관제 제외 배송지 (관리자) */
+export const addControlExclude = (body: { address_id: number; label: string | null; memo: string | null }) =>
+  post<{ ok: boolean; id: number }>("/api/control-excludes", body);
+
+export const deleteControlExclude = (id: number) =>
+  del<{ ok: boolean }>(`/api/control-excludes/${id}`);

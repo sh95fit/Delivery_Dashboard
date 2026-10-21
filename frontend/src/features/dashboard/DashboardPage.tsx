@@ -25,6 +25,7 @@ import { usePolling } from "@/hooks/usePolling";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { todayISO } from "@/lib/date";
 import { kstDateTime } from "@/lib/format";
+import { useMe } from "@/layouts/shell";
 
 
 /* [S3-P2d-2b-2] 실제 경로(route_legs) → 지도 형식. 완료 구간 = 실선(completed_path), 미리보기 = 점선(remaining_path) */
@@ -74,6 +75,8 @@ export default function DashboardPage() {
   const [routesLoading, setRoutesLoading] = useState(false);
   const [routesError, setRoutesError] = useState("");
   const [lastAt, setLastAt] = useState<Date | null>(null);
+  const [focusStop, setFocusStop] = useState<{ id: string; n: number } | null>(null);   // [S3-P2d-5] 관제 → 지도 마커
+  const isAdmin = Boolean(useMe()?.is_admin);  
   const auto = useAutoRefresh();
 
   const status = useAsync(() => getStatus(date), [date]);
@@ -84,6 +87,7 @@ export default function DashboardPage() {
   const est = st ? st.state === "PREVIEW" || Boolean(st.estimated) : false;
   const showProgress = st?.state === "LIVE" || st?.state === "RESULT";
   const internalOn = Boolean(st?.internal?.enabled);
+  const liveNow = st?.state === "LIVE" && date === todayISO();   // [S3-P2d-5] 지연 예상은 오늘 · 진행 중일 때만
 
   const rows = delivery.data?.managers ?? [];
   const stops = delivery.data?.stops ?? [];
@@ -120,6 +124,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setSelectedManagerId(null);
+    setFocusStop(null);    
     loadRoutes().catch(() => {});
   }, [date]);
 
@@ -225,10 +230,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {!error && routesData && routesData.managers.length > 0 && (
-        <ControlTable data={routesData} names={mgrNames} selected={selectedManagerId} onSelect={setSelectedManagerId} />
-      )}
-
       {!error && stops.length > 0 && (
         <MapSection
           stops={stops}
@@ -240,8 +241,26 @@ export default function DashboardPage() {
           autoFitKey={`${date}:${selectedManagerId ?? "all"}`}
           loading={delivery.loading}
           routesLoading={routesLoading}
+        />        
+      )}
+
+      <div id="dash-map-anchor" />
+      {!error && routesData && routesData.managers.length > 0 && (
+        <ControlTable
+          data={routesData}
+          names={mgrNames}
+          selected={selectedManagerId}
+          onSelect={setSelectedManagerId}
+          live={liveNow}
+          isAdmin={isAdmin}
+          onFocusStop={(id) => {
+            setFocusStop((p) => ({ id, n: (p?.n ?? 0) + 1 }));
+            document.querySelector(".map-wrap, #dash-map-anchor")?.scrollIntoView({ behavior: "smooth", block: "center" });
+          }}
+          onChanged={() => { void loadRoutes(); }}
         />
       )}
+
 
       {!error && noData && (
         <EmptyState

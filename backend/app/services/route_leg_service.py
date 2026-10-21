@@ -18,10 +18,10 @@ import requests
 from sqlalchemy import text
 
 from app.database import get_dash_engine
-from app.services import dash_db, day_cache, routes_service
+from app.services import control_exclude_service, dash_db, day_cache, routes_service
 from app.services.day_aggregate import KST, to_kst
 from app.services.route_leg_calc import (alloc, chunks, control_summary, coord_key, d5_code, delay_min, dwell_ms,
-                                         pending_groups, preview_input, split_legs, target_at)
+                                         pending_groups, preview_input, split_legs, target_at, trim_preview)
 
 logger = logging.getLogger("route_legs")
 
@@ -262,17 +262,20 @@ def legs_view(d: date) -> dict:
         m["stops"] += len(r["to_stop_ids"] or [])
         m["unreachable"] += 1 if r["status"] == "unreachable" else 0
     now = datetime.now(KST)
+    skip = control_exclude_service.active_ids()     # [S3-P2d-5] 관제 제외 배송지
     for mid, m in out.items():
-        _, left, sig = preview_input(stops, mid, origin)
+        _, left, sig = preview_input(stops, mid, origin, skip)
         last = _jget(_pkey(d, mid)) if left else None
+        rem_ids = [p["id"] for p in left]
         m["remaining_stops"] = len(left)
         m["preview_sig"] = sig if left else None
-        m["preview"] = last
-        m["control"] = _control(d, mid, m["legs"], stops, last, [p["id"] for p in left], now)
+        m["preview"] = trim_preview(last, set(rem_ids))   # [S3-P2d-5] 완료된 곳까지의 점선은 바로 지움
+        m["control"] = _control(d, mid, m["legs"], stops, last, rem_ids, now, skip)
         m["preview_stale"] = bool(last) and m["control"]["uncalc_n"] > 0   # 계산 뒤 새로 배정된 곳이 있을 때만 '반영 필요'
     today = now.date()
     return {"date": d.isoformat(), "origin": origin, "enabled": enabled(), "calls_today": calls_used(today)[0],
             "daily_limit": DAILY_LIMIT, "stall_min": STALL_MIN, "eta_every_min": ETA_EVERY // 60,
+            "excludes": control_exclude_service.list_items(),
             "managers": [out[m] for m in sorted(out)]}
 
 
@@ -289,7 +292,8 @@ def preview(d: date, mid: int, purpose: str = "preview", every: int | None = Non
     - [S3-P2d-4] 자동(every=초): 마지막 계산 후 every초 안이면 상태가 바뀌어도 다시 호출하지 않음
       (그 사이 완료된 곳은 관제 화면에서 빼고 계산)
     - groups = 배송지 묶음별 주행 거리·시간 → 예상 도착·지연 판단에 사용"""
-    start, left, sig = preview_input(day_cache.get_day(d).get("stops") or [], mid, _origin())
+    start, left, sig = preview_input(day_cache.get_day(d).get("stops") or [], mid, _origin(),
+                                     control_exclude_service.active_ids())
     base = {"manager_id": mid, "sig": sig, "stops": len(left)}
     if not left:
         return {**base, "path": [], "groups": [], "distance_m": 0, "duration_ms": 0, "skipped": 0, "calls": 0,
@@ -313,12 +317,14 @@ def preview(d: date, mid: int, purpose: str = "preview", every: int | None = Non
         tot["distance_m"] += int(s.get("distance") or 0)
         tot["duration_ms"] += int(s.get("duration") or 0)
         legs = split_legs(route, len(gs))
-        if not legs:        # 구간 나누기 실패 → 묶음 합계를 곳 수대로 나눔
+        if not legs:        # 구간 나누기 실패 → 묶음 합계를 곳 수대로 나눔 (선은 묶음 마지막 곳에 통째로)
             ones = [1] * len(gs)
-            legs = [{"distance_m": a, "duration_ms": b}
+            legs = [{"distance_m": a, "duration_ms": b, "path": []}
                     for a, b in zip(alloc(s.get("distance"), ones), alloc(s.get("duration"), ones))]
+            legs[-1]["path"] = route.get("path") or []
         for g, leg in zip(gs, legs):
-            plan.append({"ids": g["ids"], "distance_m": int(leg["distance_m"]), "duration_ms": int(leg["duration_ms"])})
+            plan.append({"ids": g["ids"], "distance_m": int(leg["distance_m"]), "duration_ms": int(leg["duration_ms"]),
+                         "path": leg.get("path") or []})   # [S3-P2d-5] 묶음별 선 → 완료된 곳 점선은 조회 때 지움
 
     cur = start
     for ch in chunks(groups):
@@ -379,17 +385,24 @@ def auto_eta(d: date) -> dict:
 
 
 def _control(d: date, mid: int, legs: list[dict], stops: list[dict], last: dict | None, rem_ids: list[str],
-             now: datetime) -> dict:
+             now: datetime, skip: set | None = None) -> dict:
     """[S3-P2d-4b] 노선 관제: 배송지별 희망 시각 대비 예상 도착(남은 곳)·완료 시각(완료한 곳), 정체·대기 (NAVER 호출 없음)."""
     info: dict = {}
     target_of: dict = {}
     done_stops: list[dict] = []
+    excluded: list[dict] = []    
     last_at = None
     for s in stops:
         if s.get("manager_id") is None or int(s["manager_id"]) != mid:
             continue
         sid = str(s.get("delivery_id") or s.get("address_id"))
-        info[sid] = {"name": s.get("address_name") or sid, "seq": s.get("seq")}
+        aid = int(s["address_id"]) if s.get("address_id") is not None else None
+        info[sid] = {"name": s.get("address_name") or sid, "seq": s.get("seq"), "address_id": aid}
+        if skip and aid in skip:          # [S3-P2d-5] 관제 제외 → 완료·지연·정체 판단에서 뺌 (지도에는 그대로)
+            at_x = to_kst(s.get("delivered_at"))
+            excluded.append({"id": sid, **info[sid], "target_at": None, "delay_min": None,
+                             "done_at": at_x.isoformat() if at_x else None})
+            continue
         tg = target_at(d, s.get("delivery_time"))
         target_of[sid] = tg
         at = to_kst(s.get("delivered_at"))
@@ -405,7 +418,7 @@ def _control(d: date, mid: int, legs: list[dict], stops: list[dict], last: dict 
         x.update(info.get(x["id"], {"name": x["id"], "seq": None}))
     c["no_time"] = [info.get(i, {}).get("name", i) for i in c.pop("no_time_ids")]
     late_done = sum(1 for x in done_stops if (x["delay_min"] or 0) >= 1)
-    return {**c, "done": len(done_stops), "late_done": late_done, "done_stops": done_stops,
+    return {**c, "done": len(done_stops), "late_done": late_done, "done_stops": done_stops, "excluded": excluded,
             "calc_at": (last or {}).get("calc_at")}
 
 

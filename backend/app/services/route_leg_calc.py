@@ -91,7 +91,7 @@ def d5_code(status: int, body: dict) -> int | None:
         return None
 
 
-def preview_input(stops: list[dict], mid: int, origin: dict) -> tuple[dict, list[dict], str]:
+def preview_input(stops: list[dict], mid: int, origin: dict, skip: set | None = None) -> tuple[dict, list[dict], str]:
     """지도 남은 경로 미리보기 입력. stops = 하루 집계 stops.
     출발 = 마지막 완료 지점(없으면 출발지), 남은 곳 = 미완료 배송지(배송 순서 seq 순).
     sig = 출발 좌표 + 남은 곳 목록 → 바뀌면 미리보기를 다시 계산해야 함."""
@@ -99,6 +99,8 @@ def preview_input(stops: list[dict], mid: int, origin: dict) -> tuple[dict, list
     for s in stops:
         if not s.get("has_coord") or s.get("manager_id") is None or int(s["manager_id"]) != mid:
             continue
+        if skip and s.get("address_id") is not None and int(s["address_id"]) in skip:
+            continue                                   # [S3-P2d-5] 관제 제외 배송지 → 남은 경로·출발점에서 뺌        
         p = {"id": str(s.get("delivery_id") or s.get("address_id")), "lat": float(s["latitude"]), "lng": float(s["longitude"])}
         at = to_kst(s.get("delivered_at"))
         if at:
@@ -185,7 +187,7 @@ def control_summary(groups: list[dict], rem_ids: list[str], last_at: datetime | 
     stops = [{"id": i, "target_at": target_of[i].isoformat() if target_of.get(i) else None,
               "eta": eta[i].isoformat() if i in eta else None,
               "delay_min": delay_min(eta.get(i), target_of.get(i)), "skipped": i in skipped} for i in rem_ids]
-    late = [s for s in stops if s["delay_min"] is not None and s["delay_min"] >= LATE_MIN]
+    late = [s for s in stops if live and s["delay_min"] is not None and s["delay_min"] >= LATE_MIN]   # [S3-P2d-5] 지연 예상은 오늘(진행 중)만
     no_time = [i for i in rem_ids if not target_of.get(i)]
     uncalc = [i for i in rem_ids if i not in eta and i not in skipped]
     idle = int((now - last_at).total_seconds() // 60) if last_at else None
@@ -210,3 +212,18 @@ def control_summary(groups: list[dict], rem_ids: list[str], last_at: datetime | 
             "no_time_ids": no_time, "uncalc_n": len(uncalc), "skipped_n": len(skipped),
             "last_at": last_at.isoformat() if last_at else None, "idle_min": idle,
             "dwell_min": round(dwell / 60000, 1)}
+
+
+def trim_preview(last: dict | None, rem: set) -> dict | None:
+    """[S3-P2d-5] 남은 경로 점선에서 이미 완료된 곳까지의 선을 지움 (NAVER 호출 없음).
+    묶음별 선(groups[].path)이 있는 계산만 다듬고, 예전 계산은 다음 재계산까지 그대로.
+    화면 응답에는 묶음별 선을 빼서 가볍게 보낸다."""
+    if not last or not any("path" in g for g in last.get("groups") or []):
+        return last
+    path: list = []
+    for g in last["groups"]:
+        if g.get("skipped") or not any(i in rem for i in g.get("ids") or []):
+            continue
+        pts = g.get("path") or []
+        path.extend(pts[1:] if path and pts else pts)
+    return {**last, "path": path, "groups": [{k: v for k, v in g.items() if k != "path"} for g in last["groups"]]}

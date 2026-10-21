@@ -259,6 +259,7 @@ export interface RouteLegsResp {
   daily_limit: number;
   stall_min: number;
   eta_every_min: number;
+  excludes: ControlExclude[];  
   managers: ManagerLegs[];
 }
 
@@ -275,9 +276,10 @@ export interface ControlStop {
   id: string;
   name: string;
   seq: number | null;
+  address_id?: number | null; // S3-P2d-5 관제 제외 기준  
   target_at: string | null;
   eta?: string | null;        // 남은 곳: 예상 도착
-  done_at?: string;           // 완료한 곳: 완료 시각
+  done_at?: string | null;    // 완료한 곳: 완료 시각
   delay_min: number | null;   // 희망 대비 분 (+ 지연, 0 정시, − 여유), 희망 시각 없으면 null
   skipped?: boolean;
 }
@@ -293,6 +295,7 @@ export interface RouteControl {
   behind_min: number | null;
   stops: ControlStop[];
   done_stops: ControlStop[];
+  excluded: ControlStop[];    // S3-P2d-5 관제 제외 배송지 (이 노선)  
   late: ControlStop[];
   max_delay_min: number;
   no_time: string[];
@@ -303,4 +306,15 @@ export interface RouteControl {
   idle_min: number | null;
   dwell_min: number;
   calc_at: string | null;
+}
+
+
+/* S3-P2d-5 관제 제외 배송지 (지도에는 그대로, 관제에서만 뺌) */
+export interface ControlExclude {
+  id: number;
+  address_id: number;
+  label: string | null;
+  memo: string | null;
+  created_by: string | null;
+  created_at: string | null;
 }

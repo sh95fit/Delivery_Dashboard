@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from datetime import date
 
 from app.services.route_leg_calc import (DEFAULT_DWELL_MS, alloc, chunks, control_summary, coord_key, d5_code, delay_min,
-                                         dwell_ms, pending_groups, preview_input, split_legs, target_at)
+                                         dwell_ms, pending_groups, preview_input, split_legs, target_at, trim_preview)
 
 KST = timezone(timedelta(hours=9))
 T = lambda m: datetime(2026, 10, 20, 7, 0, tzinfo=KST) + timedelta(minutes=m)  # noqa: E731
@@ -119,3 +119,28 @@ def test_control_summary():
     assert control_summary([], [], T(30), 180000, now, {}, 15, True)["state"] == "done"
     assert control_summary(groups, ["b"], None, 180000, now, target, 15, True)["state"] == "before"
     assert control_summary(groups, ["b"], T(30), 180000, now, target, 15, False)["state"] == "incomplete"
+    assert control_summary(groups, ["b", "c"], T(55), 180000, now, target, 15, False)["late"] == []   # 지난 날짜 → 지연 예상 없음
+    
+
+def test_preview_input_skip():
+    o = {"lat": 37.0, "lng": 127.0}
+    stops = [{**P("a", 7, 37.1, "2026-10-19T23:00:00", 1), "address_id": 11},
+             {**P("c", 7, 37.3, None, 3), "address_id": 13},
+             {**P("d", 7, 37.4, None, 4), "address_id": 14}]
+    _, left, sig = preview_input(stops, 7, o, {13})
+    assert [p["id"] for p in left] == ["d"]                       # 관제 제외(13) 빠짐
+    assert preview_input(stops, 7, o)[2] != sig                   # 제외하면 sig도 바뀜
+
+
+def test_trim_preview():
+    last = {"path": [[0, 0], [1, 1], [2, 2], [3, 3]], "groups": [
+        {"ids": ["a"], "distance_m": 1, "duration_ms": 1, "path": [[0, 0], [1, 1]]},
+        {"ids": ["b"], "distance_m": 1, "duration_ms": 1, "path": [[1, 1], [2, 2]]},
+        {"ids": ["c"], "skipped": True},
+        {"ids": ["d"], "distance_m": 1, "duration_ms": 1, "path": [[2, 2], [3, 3]]}]}
+    t = trim_preview(last, {"b", "d"})                            # a 완료 → a까지 선 지움
+    assert t["path"] == [[1, 1], [2, 2], [3, 3]]
+    assert all("path" not in g for g in t["groups"])
+    old = {"path": [[0, 0], [1, 1]], "groups": [{"ids": ["a"], "distance_m": 1, "duration_ms": 1}]}
+    assert trim_preview(old, {"a"}) is old                        # 예전 계산(묶음별 선 없음) → 그대로
+    assert trim_preview(None, {"a"}) is None
