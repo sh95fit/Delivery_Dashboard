@@ -14,6 +14,7 @@ import ManagerTable from "./components/ManagerTable";
 import WarningsBar from "./components/WarningsBar";
 import LineupTable from "./components/LineupTable";
 import InternalBlock from "./components/InternalBlock";
+import ControlTable from "./components/ControlTable";
 import MapSection from "@/features/map/MapSection";
 import { getStatus } from "@/api/status";
 import { getDeliveries } from "@/api/deliveries";
@@ -93,6 +94,10 @@ export default function DashboardPage() {
     return Object.entries(d?.by_lineup ?? {}).map(([id, v]) => ({ id, meal: v.meal, label: v.name }));
   }, [delivery.data]);
   const noData = !status.loading && !delivery.loading && !status.error && !delivery.error && rows.length === 0;
+  const mgrNames = useMemo(
+    () => new Map(rows.filter((r) => r.manager_id != null).map((r) => [r.manager_id as number, r.manager_name ?? `계정 ${r.manager_id}`])),
+    [rows],
+  );
 
   async function loadRoutes() {
     setRoutesLoading(true);
@@ -218,6 +223,10 @@ export default function DashboardPage() {
             {pvMsg || `실선 = 완료 순서대로 이은 실제 경로 · 점선 = 남은 경로 예상(물류비 미반영) · 오늘 호출 ${routesData.calls_today}/${routesData.daily_limit}`}
           </span>
         </div>
+      )}
+
+      {!error && routesData && routesData.managers.length > 0 && (
+        <ControlTable data={routesData} names={mgrNames} selected={selectedManagerId} onSelect={setSelectedManagerId} />
       )}
 
       {!error && stops.length > 0 && (

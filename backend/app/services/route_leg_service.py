@@ -20,7 +20,8 @@ from sqlalchemy import text
 from app.database import get_dash_engine
 from app.services import dash_db, day_cache, routes_service
 from app.services.day_aggregate import KST, to_kst
-from app.services.route_leg_calc import alloc, chunks, coord_key, d5_code, pending_groups, preview_input, split_legs
+from app.services.route_leg_calc import (alloc, chunks, control_summary, coord_key, d5_code, dwell_ms, pending_groups,
+                                         preview_input, split_legs, target_at)
 
 logger = logging.getLogger("route_legs")
 
@@ -33,6 +34,8 @@ UNREACHABLE = (2, 3, 4, 5)      # 도로와 너무 멂·자동차 길 없음 등
 PREVIEW_RESERVE = 300           # 지도 미리보기는 하루 한도에서 300회를 남기고 막음 (당일 실제 경로 우선)
 PREVIEW_TTL = 21600             # 미리보기 결과 보관 6시간 (Redis)
 PREVIEW_WORKERS = 4             # 전체 노선 미리보기: 4명씩 동시에 계산
+ETA_EVERY = int(os.environ.get("ETA_INTERVAL_MIN", "15")) * 60   # [S3-P2d-4] 남은 경로 자동 재계산 주기(초) — 출발한 노선만
+STALL_MIN = int(os.environ.get("ETA_STALL_MIN", "20"))          # [S3-P2d-4] 정체 = 마지막 완료 후 20분 이상 새 완료 없음
 
 _INS = text("""INSERT INTO route_legs (route_date, manager_id, seq, from_lat, from_lng, to_lat, to_lng, to_stop_ids,
         delivered_at, status, error_code, distance_m, duration_ms, fuel_price_naver, toll_fare, ncp_mileage, path, purpose)
@@ -60,7 +63,7 @@ def calls_used(d: date) -> tuple[int, int]:
 def _take_call(purpose: str) -> None:
     today = datetime.now(KST).date()
     day, month = calls_used(today)
-    limit = DAILY_LIMIT - {"backfill": BACKFILL_RESERVE, "preview": PREVIEW_RESERVE}.get(purpose, 0)
+    limit = DAILY_LIMIT - {"backfill": BACKFILL_RESERVE, "preview": PREVIEW_RESERVE, "eta": PREVIEW_RESERVE}.get(purpose, 0)
     if day >= limit or month >= MONTHLY_LIMIT:
         raise StopCalls(f"NAVER 호출 한도 도달 (오늘 {day}/{limit}, 이번 달 {month}/{MONTHLY_LIMIT})")
     with get_dash_engine().begin() as c:
@@ -258,44 +261,71 @@ def legs_view(d: date) -> dict:
         m["fuel_price_naver"] += int(r["fuel_price_naver"] or 0)
         m["stops"] += len(r["to_stop_ids"] or [])
         m["unreachable"] += 1 if r["status"] == "unreachable" else 0
+    now = datetime.now(KST)
     for mid, m in out.items():
         _, left, sig = preview_input(stops, mid, origin)
         last = _jget(_pkey(d, mid)) if left else None
         m["remaining_stops"] = len(left)
         m["preview_sig"] = sig if left else None
         m["preview"] = last
-        m["preview_stale"] = bool(last and last.get("sig") != sig)
-    today = datetime.now(KST).date()
+        m["control"] = _control(d, mid, m["legs"], stops, last, [p["id"] for p in left], now)
+        m["preview_stale"] = bool(last) and m["control"]["uncalc_n"] > 0   # 계산 뒤 새로 배정된 곳이 있을 때만 '반영 필요'
+    today = now.date()
     return {"date": d.isoformat(), "origin": origin, "enabled": enabled(), "calls_today": calls_used(today)[0],
-            "daily_limit": DAILY_LIMIT, "managers": [out[m] for m in sorted(out)]}
+            "daily_limit": DAILY_LIMIT, "stall_min": STALL_MIN, "eta_every_min": ETA_EVERY // 60,
+            "managers": [out[m] for m in sorted(out)]}
 
 
-def preview(d: date, mid: int) -> dict:
-    """버튼: 마지막 완료 지점 → 남은 배송지(배송 순서) 경로. 저장하지 않음(물류비 미반영), 같은 상태면 다시 호출하지 않음."""
+def _age_sec(last: dict | None) -> float | None:
+    try:
+        return (datetime.now(KST) - datetime.fromisoformat(last["calc_at"])).total_seconds()
+    except (TypeError, KeyError, ValueError):
+        return None
+
+
+def preview(d: date, mid: int, purpose: str = "preview", every: int | None = None) -> dict:
+    """남은 경로: 마지막 완료 지점 → 남은 배송지(배송 순서). 저장하지 않음(물류비 미반영).
+    - 버튼(every 없음): 같은 상태(sig)면 다시 호출하지 않음
+    - [S3-P2d-4] 자동(every=초): 마지막 계산 후 every초 안이면 상태가 바뀌어도 다시 호출하지 않음
+      (그 사이 완료된 곳은 관제 화면에서 빼고 계산)
+    - groups = 배송지 묶음별 주행 거리·시간 → 예상 도착·지연 판단에 사용"""
     start, left, sig = preview_input(day_cache.get_day(d).get("stops") or [], mid, _origin())
     base = {"manager_id": mid, "sig": sig, "stops": len(left)}
     if not left:
-        return {**base, "path": [], "distance_m": 0, "duration_ms": 0, "skipped": 0, "calls": 0, "cached": False}
+        return {**base, "path": [], "groups": [], "distance_m": 0, "duration_ms": 0, "skipped": 0, "calls": 0,
+                "cached": False}
     last = _jget(_pkey(d, mid))
-    if last and last.get("sig") == sig:
-        return {**last, "calls": 0, "cached": True}
-    groups = pending_groups([{**p, "at": i} for i, p in enumerate(left)], set(), coord_key(start["lat"], start["lng"]))[1]
+    if last:
+        age = _age_sec(last)
+        fresh = ("groups" in last and age is not None and age < every) if every else last.get("sig") == sig
+        if fresh:
+            return {**last, "calls": 0, "cached": True}
+    merge, groups = pending_groups([{**p, "at": i} for i, p in enumerate(left)], set(),
+                                   coord_key(start["lat"], start["lng"]))
     vparams = routes_service._vehicle_params(d, mid)
     path: list = []
+    plan: list[dict] = [{"ids": merge, "distance_m": 0, "duration_ms": 0}] if merge else []
     tot = {"distance_m": 0, "duration_ms": 0, "calls": 0, "skipped": 0}
 
-    def add(route: dict) -> None:
+    def add(route: dict, gs: list[dict]) -> None:
         s = route.get("summary") or {}
         path.extend(route.get("path") or [])
         tot["distance_m"] += int(s.get("distance") or 0)
         tot["duration_ms"] += int(s.get("duration") or 0)
+        legs = split_legs(route, len(gs))
+        if not legs:        # 구간 나누기 실패 → 묶음 합계를 곳 수대로 나눔
+            ones = [1] * len(gs)
+            legs = [{"distance_m": a, "duration_ms": b}
+                    for a, b in zip(alloc(s.get("distance"), ones), alloc(s.get("duration"), ones))]
+        for g, leg in zip(gs, legs):
+            plan.append({"ids": g["ids"], "distance_m": int(leg["distance_m"]), "duration_ms": int(leg["duration_ms"])})
 
     cur = start
     for ch in chunks(groups):
-        code, route = _d5(cur, ch, vparams, "preview")
+        code, route = _d5(cur, ch, vparams, purpose)
         tot["calls"] += 1
         if route:
-            add(route)
+            add(route, ch)
             cur = ch[-1]
             continue
         if code not in (0, 1, *UNREACHABLE):
@@ -304,18 +334,73 @@ def preview(d: date, mid: int) -> dict:
             if len(ch) == 1:
                 c1, r1 = code, route
             else:
-                c1, r1 = _d5(cur, [g], vparams, "preview")
+                c1, r1 = _d5(cur, [g], vparams, purpose)
                 tot["calls"] += 1
             if r1:
-                add(r1)
+                add(r1, [g])
                 cur = g
             elif c1 == 1:
+                plan.append({"ids": g["ids"], "distance_m": 0, "duration_ms": 0})
                 cur = g
             else:
+                plan.append({"ids": g["ids"], "skipped": True})
                 tot["skipped"] += len(g["ids"])
-    out = {**base, **tot, "path": path, "cached": False, "calc_at": datetime.now(KST).isoformat()}
+    out = {**base, **tot, "path": path, "groups": plan, "cached": False, "purpose": purpose,
+           "calc_at": datetime.now(KST).isoformat()}
     _jset(_pkey(d, mid), out)
     return out
+
+
+def auto_eta(d: date) -> dict:
+    """[S3-P2d-4] 작업자가 배송 시간대에 호출: 출발한(완료 1곳 이상) 노선 중 남은 곳이 있는 노선만
+    ETA_EVERY초마다 남은 경로를 다시 계산. 출발 전 노선은 버튼으로만."""
+    out = {"date": d.isoformat(), "managers": 0, "calls": 0, "fresh": 0}
+    if not enabled():
+        out["stopped"] = "ROUTE_LEGS_MODE 꺼짐"
+        return out
+    started, left = set(), set()
+    for s in day_cache.get_day(d).get("stops") or []:
+        if s.get("manager_id") is None or not s.get("has_coord"):
+            continue
+        (started if s.get("delivered_at") else left).add(int(s["manager_id"]))
+    for mid in sorted(started & left):
+        try:
+            r = preview(d, mid, purpose="eta", every=ETA_EVERY)
+        except StopCalls as e:
+            out["stopped"] = str(e)
+            break
+        except Exception:  # noqa: BLE001
+            logger.exception("route eta %s 계정 %s 실패 — 다음 주기에 다시", d, mid)
+            continue
+        out["managers"] += 1
+        out["calls"] += int(r.get("calls") or 0)
+        out["fresh"] += 1 if r.get("cached") else 0
+    return out
+
+
+def _control(d: date, mid: int, legs: list[dict], stops: list[dict], last: dict | None, rem_ids: list[str],
+             now: datetime) -> dict:
+    """[S3-P2d-4] 노선 관제: 남은 거리·예상 완료·지연 예상·정체·미지정 고객사 (NAVER 호출 없음)."""
+    name: dict = {}
+    target_of: dict = {}
+    last_at, done, late_done = None, 0, 0
+    for s in stops:
+        if s.get("manager_id") is None or int(s["manager_id"]) != mid:
+            continue
+        sid = str(s.get("delivery_id") or s.get("address_id"))
+        name[sid] = s.get("address_name") or sid
+        target_of[sid] = target_at(d, s.get("delivery_time"))
+        at = to_kst(s.get("delivered_at"))
+        if at:
+            done += 1
+            last_at = at if last_at is None or at > last_at else last_at
+            late_done += 1 if target_of[sid] and at > target_of[sid] else 0
+    dw = dwell_ms([(to_kst(x["delivered_at"]), int(x["duration_ms"] or 0)) for x in legs if x.get("delivered_at")])
+    c = control_summary((last or {}).get("groups") or [], rem_ids, last_at, dw, now, target_of, STALL_MIN,
+                        d == now.date())
+    c["late"] = [{**x, "name": name.get(x["id"], x["id"])} for x in c["late"]]
+    c["no_time"] = [name.get(i, i) for i in c.pop("no_time_ids")]
+    return {**c, "done": done, "late_done": late_done, "calc_at": (last or {}).get("calc_at")}
 
 
 def preview_all_status(d: date) -> dict:

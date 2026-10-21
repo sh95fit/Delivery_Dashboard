@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import date, datetime, time, timedelta
 
-from app.services.day_aggregate import to_kst
+from app.services.day_aggregate import KST, to_kst
 
 D5_MAX_NODES = 6     # Directions 5: 경유지 5 + 도착 1 → 1회 최대 6구간 (경유 6개는 HTTP 400 확인)
 
@@ -109,3 +110,83 @@ def preview_input(stops: list[dict], mid: int, origin: dict) -> tuple[dict, list
     left = [x[3] for x in sorted(rem, key=lambda x: x[:3])]
     raw = f'{start["lat"]:.6f},{start["lng"]:.6f}|' + ",".join(p["id"] for p in left)
     return start, left, hashlib.sha1(raw.encode()).hexdigest()[:12]
+
+
+# ---------- S3-P2d-4 관제: 남은 경로 예상 도착 · 지연 예상 · 정체 (순수 함수) ----------
+DEFAULT_DWELL_MS = 180_000                       # 정차 시간 기본 3분 (완료 3곳 미만일 때)
+DWELL_MIN_MS, DWELL_MAX_MS = 60_000, 1_200_000   # 정차 시간은 1~20분으로 제한
+
+
+def target_at(d: date, hhmm: str | None) -> datetime | None:
+    """고객 희망 시각 'HH:MM' → 그날 KST 시각. 없거나 못 읽으면 None (= 미지정 고객사)."""
+    if not hhmm:
+        return None
+    try:
+        h, m = (int(x) for x in str(hhmm).split(":")[:2])
+        return datetime.combine(d, time(h, m), tzinfo=KST)
+    except (TypeError, ValueError):
+        return None
+
+
+def dwell_ms(done: list[tuple[datetime, int]]) -> int:
+    """done = [(완료 시각, 그 지점까지 주행 시간 ms)] 완료 순.
+    1곳당 평균 정차 시간 = (첫 완료 → 마지막 완료 경과 − 그 사이 주행 시간) ÷ 구간 수."""
+    if len(done) < 3:
+        return DEFAULT_DWELL_MS
+    span = (done[-1][0] - done[0][0]).total_seconds() * 1000
+    drive = sum(x for _, x in done[1:])
+    v = int((span - drive) / (len(done) - 1))
+    return max(DWELL_MIN_MS, min(DWELL_MAX_MS, v))
+
+
+def control_summary(groups: list[dict], rem_ids: list[str], last_at: datetime | None, dwell: int, now: datetime,
+                    target_of: dict, stall_min: int, live: bool) -> dict:
+    """노선 1개 관제 요약.
+    groups = 마지막 남은 경로 계산의 묶음 [{ids, distance_m, duration_ms, skipped?}] (배송 순서)
+    rem_ids = 지금 남은 배송지(좌표 있는 곳), target_of = {배송지: 희망 시각 | None}
+    - 예상 도착: 마지막 완료 + 정차 + 다음 곳 주행 … (첫 곳이 지금보다 이르면 지금 = 이동 중)
+    - 계산 뒤 완료된 곳은 빼고 셈 → 15분 사이에도 호출 없이 갱신
+    - 지연 예상: 예상 도착 > 희망 시각. 희망 시각 없는 곳은 판단에서 빼고 no_time_ids로
+    - 정체: 오늘 · 남은 곳 있음 · 마지막 완료 후 stall_min분 이상 새 완료 없음"""
+    rem = set(rem_ids)
+    arrive: dict = {}
+    skipped: set = set()
+    t, first, dist, drive = last_at or now, True, 0, 0
+    for g in groups:
+        ids = [i for i in (g.get("ids") or []) if i in rem]
+        if not ids:
+            continue
+        if g.get("skipped"):
+            skipped.update(ids)
+            continue
+        wait = dwell if (last_at is not None or not first) else 0
+        t = t + timedelta(milliseconds=wait + int(g.get("duration_ms") or 0))
+        if first and t < now:
+            t = now
+        first = False
+        dist += int(g.get("distance_m") or 0)
+        drive += int(g.get("duration_ms") or 0)
+        for i in ids:
+            arrive[i] = t
+    late = [{"id": i, "target_at": target_of[i].isoformat(), "eta": arrive[i].isoformat()}
+            for i in rem_ids if i in arrive and target_of.get(i) and arrive[i] > target_of[i]]
+    no_time = [i for i in rem_ids if not target_of.get(i)]
+    uncalc = [i for i in rem_ids if i not in arrive and i not in skipped]
+    idle = int((now - last_at).total_seconds() // 60) if last_at else None
+    if not rem_ids:
+        state = "done"
+    elif not live:
+        state = "incomplete"
+    elif last_at is None:
+        state = "before"
+    elif idle >= stall_min:
+        state = "stalled"
+    elif late:
+        state = "late"
+    else:
+        state = "ok"
+    return {"state": state, "remaining": len(rem_ids), "remaining_m": dist, "remaining_drive_ms": drive,
+            "finish_at": max(arrive.values()).isoformat() if arrive else None,
+            "late": late, "no_time_ids": no_time, "uncalc_n": len(uncalc), "skipped_n": len(skipped),
+            "last_at": last_at.isoformat() if last_at else None, "idle_min": idle,
+            "dwell_min": round(dwell / 60000, 1)}

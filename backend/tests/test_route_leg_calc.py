@@ -1,6 +1,9 @@
 from datetime import datetime, timedelta, timezone
 
-from app.services.route_leg_calc import alloc, chunks, coord_key, d5_code, pending_groups, preview_input, split_legs
+from datetime import date
+
+from app.services.route_leg_calc import (DEFAULT_DWELL_MS, alloc, chunks, control_summary, coord_key, d5_code, dwell_ms,
+                                         pending_groups, preview_input, split_legs, target_at)
 
 KST = timezone(timedelta(hours=9))
 T = lambda m: datetime(2026, 10, 20, 7, 0, tzinfo=KST) + timedelta(minutes=m)  # noqa: E731
@@ -69,3 +72,35 @@ def test_preview_input():
     s8, left8, sig8 = preview_input(stops, 8, o)
     assert s8 == o and [p["id"] for p in left8] == ["x"] and sig8 != sig   # 완료 없으면 출발지에서
     assert preview_input(stops, 7, o)[2] == sig                # 같은 상태면 같은 sig (다시 호출 안 함)
+
+
+def test_target_at():
+    assert target_at(date(2026, 10, 21), "11:30") == datetime(2026, 10, 21, 11, 30, tzinfo=KST)
+    assert target_at(date(2026, 10, 21), None) is None
+    assert target_at(date(2026, 10, 21), "x") is None
+
+
+def test_dwell_ms():
+    assert dwell_ms([(T(0), 0), (T(10), 0)]) == DEFAULT_DWELL_MS                       # 3곳 미만 → 기본 3분
+    assert dwell_ms([(T(0), 600000), (T(10), 360000), (T(20), 360000)]) == 240000      # 20분 − 주행 12분 = 정차 4분씩
+    assert dwell_ms([(T(0), 0), (T(0), 0), (T(1), 0)]) == 60000                        # 하한 1분
+
+
+def test_control_summary():
+    now = T(60)
+    groups = [{"ids": ["a"], "distance_m": 1000, "duration_ms": 300000},     # 계산 뒤 완료 → 제외
+              {"ids": ["b"], "distance_m": 2000, "duration_ms": 600000},
+              {"ids": ["c"], "distance_m": 3000, "duration_ms": 600000},
+              {"ids": ["x"], "skipped": True}]
+    target = {"b": T(80), "c": T(70), "x": None, "n": None}
+    c = control_summary(groups, ["b", "c", "x", "n"], T(55), 180000, now, target, 20, True)
+    assert c["state"] == "late" and c["remaining"] == 4
+    assert [x["id"] for x in c["late"]] == ["c"]                               # c: 55+3+10+3+10 = 81분 > 희망 70분
+    assert c["no_time_ids"] == ["x", "n"] and c["uncalc_n"] == 1 and c["skipped_n"] == 1
+    assert (c["remaining_m"], c["remaining_drive_ms"]) == (5000, 1200000)
+    assert c["finish_at"] == T(81).isoformat() and c["idle_min"] == 5
+    s = control_summary(groups, ["b"], T(30), 180000, now, target, 20, True)
+    assert s["state"] == "stalled" and s["finish_at"] == now.isoformat()       # 예정보다 늦음 → 지금 = 이동 중
+    assert control_summary([], [], T(30), 180000, now, {}, 20, True)["state"] == "done"
+    assert control_summary(groups, ["b"], None, 180000, now, target, 20, True)["state"] == "before"
+    assert control_summary(groups, ["b"], T(30), 180000, now, target, 20, False)["state"] == "incomplete"

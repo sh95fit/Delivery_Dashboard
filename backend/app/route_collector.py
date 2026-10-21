@@ -45,6 +45,14 @@ def main():
                     logger.info("route legs: %s", r)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("route legs failed: %s", exc)        
+        # [S3-P2d-4] 관제: 출발한 노선의 남은 경로를 15분마다 다시 계산 (배송 시간대만, 같은 노선은 15분 안에 다시 호출 안 함)
+        if is_delivery_hours():
+            try:
+                r = route_leg_service.auto_eta(today_kst())
+                if r["calls"] or r.get("stopped", "").startswith("NAVER"):
+                    logger.info("route eta: %s", r)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("route eta failed: %s", exc)                
         try:
             if is_delivery_hours():
                 target = today_kst()

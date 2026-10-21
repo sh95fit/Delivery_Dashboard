@@ -248,6 +248,7 @@ export interface ManagerLegs {
   preview_sig: string | null;
   preview: RoutePreview | null;
   preview_stale: boolean;
+  control?: RouteControl;  
 }
 
 export interface RouteLegsResp {
@@ -256,6 +257,8 @@ export interface RouteLegsResp {
   enabled: boolean;
   calls_today: number;
   daily_limit: number;
+  stall_min: number;
+  eta_every_min: number;
   managers: ManagerLegs[];
 }
 
@@ -265,4 +268,31 @@ export interface PreviewAllStatus {
   done?: number;
   calls?: number;
   failed?: Array<{ manager_id: number; error: string | null }>;
+}
+
+
+/* S3-P2d-4 노선 관제 (legs_view.control) */
+export interface ControlLate {
+  id: string;
+  name: string;
+  target_at: string;
+  eta: string;
+}
+
+export interface RouteControl {
+  state: "done" | "ok" | "late" | "stalled" | "before" | "incomplete";
+  done: number;
+  remaining: number;
+  remaining_m: number;
+  remaining_drive_ms: number;
+  finish_at: string | null;
+  late: ControlLate[];
+  no_time: string[];
+  late_done: number;
+  uncalc_n: number;
+  skipped_n: number;
+  last_at: string | null;
+  idle_min: number | null;
+  dwell_min: number;
+  calc_at: string | null;
 }
