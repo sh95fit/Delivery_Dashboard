@@ -28,7 +28,7 @@ def pick_routes(rows: list[dict]) -> dict[tuple[date, int], dict]:
             continue
         d, mid, state = k
         if state not in STATE_RANK:
-            continue        
+            continue
         ts = r.get("created_at")
         rank = (STATE_RANK.get(state, 9), -(ts.timestamp() if ts else 0))
         cur = best.get((d, mid))
@@ -62,3 +62,19 @@ def direct_cost(distance_m: int, km_per_l, price) -> int | None:
     if not distance_m or not km_per_l or not price or float(km_per_l) <= 0:
         return None
     return round(distance_m / 1000 / float(km_per_l) * float(price))
+
+
+NAVER_DEFAULT_MILEAGE = 14.0   # [S3-P2d-3] NAVER Directions 연비 기본값(km/L) — 연비를 안 보내면 이 값으로 유류비 계산
+
+
+def ncp_default(amount, km_per_l) -> int:
+    """연비 없이(NAVER 기본 14km/L) 받은 유류비 → 지금 입력된 연비로 환산. 연비가 없거나 잘못되면 그대로.
+    유류비 = 거리 ÷ 연비 × 단가 → 연비에 반비례하므로 NAVER를 다시 부르지 않고 환산할 수 있다."""
+    try:
+        eff = float(km_per_l or 0)
+    except (TypeError, ValueError):
+        eff = 0.0
+    amt = int(amount or 0)
+    if eff <= 0:
+        return amt
+    return round(amt * NAVER_DEFAULT_MILEAGE / eff)

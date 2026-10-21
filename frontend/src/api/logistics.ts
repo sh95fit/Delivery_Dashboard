@@ -5,6 +5,7 @@ export type CostKey = "labor" | "labor_est" | "ot_expected" | "incentive" | "ext
 export type CostRow = Record<CostKey, number> & {
     net_revenue: number; cost_total: number; profit: number; cost_ratio: number | null;
     ncp_fuel: number; calc_fuel: number; route_m: number; route_km: number;   // S3-P2b 참고 (합계 제외)
+    route_ms: number; route_min: number;                                       // S3-P2d-3 주행 시간 (NAVER 예상, 정차 제외)
 };
 export type CostAccount = CostRow & { manager_id: number | null; manager_name: string };
 export type CostDay = CostRow & { date: string };

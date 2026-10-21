@@ -27,7 +27,8 @@ NCP_FUEL = {"gasoline": "gasoline", "diesel": "diesel", "lpg": "lpg"}   # 전기
 
 
 def _vehicle_params(target: date_type, manager_id: int) -> dict:
-    """그날 배정 차량 → {fueltype, mileage, fuelPrice}. 차량 없음·전기차·연비 없음이면 {} (NAVER 기본값)."""
+    """그날 배정 차량 → {fueltype, mileage, fuelPrice}. 차량 없음·전기차면 {} (NAVER 기본값).
+    [S3-P2d-3] 연비가 없어도 연료 종류는 보냄 → NAVER 기본 연비(14km/L)로 계산 (중고 차량 등 연비를 모를 때)."""
     try:
         with get_dash_engine().connect() as conn:
             row = conn.execute(text("""
@@ -36,7 +37,7 @@ def _vehicle_params(target: date_type, manager_id: int) -> dict:
                 WHERE a.manager_id = :m AND a.deleted_at IS NULL AND a.start_date <= :d
                 ORDER BY a.start_date DESC, a.id DESC LIMIT 1
             """), {"m": manager_id, "d": target}).fetchone()
-            if not row or row.fuel_type not in NCP_FUEL or not row.fuel_efficiency:
+            if not row or row.fuel_type not in NCP_FUEL:
                 return {}
             price = conn.execute(text("""
                 SELECT price FROM fuel_price_log
@@ -45,7 +46,9 @@ def _vehicle_params(target: date_type, manager_id: int) -> dict:
             """), {"f": row.fuel_type, "d": target}).scalar()
     except Exception:  # noqa: BLE001
         return {}
-    out = {"fueltype": NCP_FUEL[row.fuel_type], "mileage": float(row.fuel_efficiency)}
+    out = {"fueltype": NCP_FUEL[row.fuel_type]}
+    if row.fuel_efficiency:
+        out["mileage"] = float(row.fuel_efficiency)
     if price:
         out["fuelPrice"] = float(price)
     return out

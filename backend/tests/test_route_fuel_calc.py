@@ -1,6 +1,6 @@
 from datetime import date, datetime, timezone
 
-from app.services.route_fuel_calc import direct_cost, parse_key, pick_routes, price_index, price_on
+from app.services.route_fuel_calc import direct_cost, ncp_default, parse_key, pick_routes, price_index, price_on
 
 
 def test_parse_key():
@@ -55,3 +55,12 @@ def test_pick_routes_actual_only():
     got = pick_routes(rows)
     assert list(got) == [(date(2026, 9, 23), 15)]
     assert got[(date(2026, 9, 23), 15)]["distance_m"] == 26639
+
+
+def test_ncp_default():
+    assert ncp_default(1400, None) == 1400        # 연비 없음 → NAVER 기본 연비 값 그대로
+    assert ncp_default(1400, 14.0) == 1400
+    assert ncp_default(1400, 7) == 2800           # 연비 7km/L → 기본(14)의 2배
+    assert ncp_default(1400, "9.5") == 2063
+    assert ncp_default(0, 9) == 0
+    assert ncp_default(1400, "bad") == 1400

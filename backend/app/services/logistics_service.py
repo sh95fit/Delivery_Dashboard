@@ -23,7 +23,7 @@ MAX_DAYS = 366   # 1년(윤년 포함). 느리면 줄인다
 logger = logging.getLogger("logistics")
 
 COST_KEYS = ("labor", "labor_est", "ot_expected", "incentive", "extras", "vehicle", "fuel", "fuel_est")
-REF_KEYS = ("ncp_fuel", "calc_fuel", "route_m")   # S3-P2b 참고 칸 — cost_total에 넣지 않음
+REF_KEYS = ("ncp_fuel", "calc_fuel", "route_m", "route_ms")   # S3-P2b 참고 칸 — cost_total에 넣지 않음 (route_ms = S3-P2d-3 주행 시간)
 NO_ACCOUNT = "계정 미지정"
 
 
@@ -47,7 +47,8 @@ def _finish(x: dict) -> dict:
     rev = int(x["net_revenue"])
     return {**x, "cost_total": cost, "profit": rev - cost,
             "cost_ratio": round(cost * 100 / rev, 1) if rev > 0 else None,
-            "route_km": round(int(x.get("route_m") or 0) / 1000, 1)}
+            "route_km": round(int(x.get("route_m") or 0) / 1000, 1),
+            "route_min": round(int(x.get("route_ms") or 0) / 60000)}
 
 
 def _timed(timing: dict, key: str, fn):
@@ -210,6 +211,7 @@ def cost_view(frm: date, to: date) -> dict:
             c["route_m"] += x["route_m"]
             c["ncp_fuel"] += x["ncp"]
             c["calc_fuel"] += x["calc"]
+            c["route_ms"] += x["route_ms"]            
         for n in rf_notes:
             add("info", n)
         timing["route"] = round(time.perf_counter() - s, 2)        
