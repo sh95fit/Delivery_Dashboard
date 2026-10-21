@@ -21,6 +21,7 @@ from app.services.fuel_calc import add_basis, finish_basis, ref_price
 from app.services.fuel_log_calc import allocate_month, amounts, days_between, log_cost, month_bounds
 from app.services.logistics_calc import split_even
 from app.services.manager_service import today
+from app.services.route_fuel_calc import overrun
 
 FUEL_LABEL = {"gasoline": "휘발유", "diesel": "경유", "lpg": "LPG", "ev": "전기"}
 
@@ -187,7 +188,22 @@ def month_summary(month: str) -> dict:
         _add(by_d.setdefault(r["fuel_date"], _zero(date=_iso(r["fuel_date"]))), r, cost)
 
     assigns = dash_db.rows(SQL_ASSIGNS)
-    by_m: dict = {}
+    # [S3-P2e-2] 초과 주행: 주유량 × 차량 연비 − 경로 기록 거리(그날 그 차량을 배정받은 매니저의 실제 경로)
+    eff = {r["id"]: r["fuel_efficiency"] for r in dash_db.rows("SELECT id, fuel_efficiency FROM vehicles")}
+    route_m: dict[int, int] = {}
+    on_day: dict = {}
+    for r in dash_db.rows("""SELECT route_date, manager_id, SUM(distance_m) AS m FROM route_legs
+            WHERE route_date BETWEEN :f AND :t GROUP BY route_date, manager_id""", {"f": f, "t": t}):
+        rd = r["route_date"]
+        if rd not in on_day:
+            on_day[rd] = latest_by(assigns, "manager_id", "start_date", rd)
+        a = on_day[rd].get(int(r["manager_id"]))
+        if a and a.get("vehicle_id"):
+            route_m[a["vehicle_id"]] = route_m.get(a["vehicle_id"], 0) + int(r["m"] or 0)
+    over = {vid: {**overrun(x["quantity"], eff.get(vid), route_m.get(vid)),
+                  "fuel_efficiency": float(eff[vid]) if eff.get(vid) is not None else None}
+            for vid, x in by_v.items()}    
+    by_m: dict = {}    
     alloc = allocate_month({vid: x["cost"] for vid, x in by_v.items()}, open_days, f, t)
     for d, per_vid in alloc.items():
         users = users_on(assigns, d)
@@ -204,7 +220,8 @@ def month_summary(month: str) -> dict:
     return {
         "month": _ym(f), "open_days": len(open_days), "closed": _closing_out(_closing(f)),
         "totals": totals,
-        "vehicles": sorted((finish_basis(x) for x in by_v.values()), key=lambda x: x["plate_no"] or ""),
+        "vehicles": sorted(({**finish_basis(x), **over.get(x["vehicle_id"], {})} for x in by_v.values()),
+                           key=lambda x: x["plate_no"] or ""),
         "days": [by_d[k] for k in sorted(by_d)],
         "managers": managers,
     }

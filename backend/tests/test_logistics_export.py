@@ -37,5 +37,5 @@ def test_xlsx_bytes():
 def test_ref_columns_last():
     _, sheets = view_sheets(VIEW)
     labels = [c[0] for c in sheets[0]["columns"]]
-    assert labels[-4:] == ["주행거리(km, 참고)", "주행 시간(분, 참고)", "NCP 예상 유류비(참고)", "직접 계산 유류비(참고)"]
+    assert labels[-4:] == ["주행거리(km, 참고)", "주행 시간(분, 참고)", "NCP 예상 유류비(참고)", "오피넷 기준 유류비(참고)"]
     assert "물류비 합계" in labels

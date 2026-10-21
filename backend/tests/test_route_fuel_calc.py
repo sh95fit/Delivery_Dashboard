@@ -1,6 +1,7 @@
 from datetime import date, datetime, timezone
 
-from app.services.route_fuel_calc import direct_cost, ncp_default, parse_key, pick_routes, price_index, price_on
+from app.services.route_fuel_calc import (direct_cost, ncp_default, ncp_scaled, overrun, parse_key, pick_routes,
+                                          price_index, price_on)
 
 
 def test_parse_key():
@@ -64,3 +65,17 @@ def test_ncp_default():
     assert ncp_default(1400, "9.5") == 2063
     assert ncp_default(0, 9) == 0
     assert ncp_default(1400, "bad") == 1400
+
+
+def test_ncp_scaled():
+    assert ncp_scaled(1400 * 14, None) == 1400            # 연비 없음 → 기본 14 그대로
+    assert ncp_scaled(1400 * 14, 7) == 2800               # 기본 연비로 쌓인 구간 → 지금 연비 7로
+    assert ncp_scaled(1000 * 14 + 500 * 8, 7) == 2571     # 기본 14 구간 + 연비 8로 계산한 구간 → 연비 7로 바꿈
+    assert ncp_scaled(1400 * 14, "x") == 1400
+
+
+def test_overrun():
+    assert overrun(271.331, 7, 950100) == {"route_km": 950.1, "est_km": 1899.3, "over_km": 949.2, "over_pct": 50.0}
+    assert overrun(None, 7, 1000)["est_km"] is None
+    o = overrun(100, 8, 0)                                # 경로 기록 없음(차량 미배정) → 판단 안 함
+    assert o["est_km"] == 800.0 and o["over_km"] is None

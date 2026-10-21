@@ -27,7 +27,7 @@ const COLUMNS = [
   { label: "주행 km", num: true },
   { label: "주행 시간", num: true },  
   { label: "NCP 예상 유류비", num: true },
-  { label: "직접 계산", num: true },
+  { label: "오피넷 기준", num: true },
 ];
 
 const ratio = (r: CostRow) => (r.cost_ratio == null ? "-" : `${r.cost_ratio}%`);
@@ -53,12 +53,12 @@ function Cells({ r }: { r: CostRow }) {
 function fuelCard(view: CostView) {
   const t = view.totals;
   const open = t.fuel_est > 0 || view.issues.some((i) => i.msg.includes("유류비 미마감"));
-  const ref = `NCP 예상 ${won(t.ncp_fuel)} · 직접 계산 ${won(t.calc_fuel)}`;
+  const ref = `NCP 예상 ${won(t.ncp_fuel)} · 오피넷 기준 ${won(t.calc_fuel)}`;
   if (!open && t.fuel > 0) return { title: "확정 유류비", value: t.fuel, sub: `모두 마감 · 참고 ${ref}` };
   if (t.fuel > 0) {
     return { title: "유류비 (일부 확정)", value: t.fuel + t.fuel_est, sub: `확정 ${won(t.fuel)} · 미마감 주유 기록 ${won(t.fuel_est)} · 참고 ${ref}` };
   }
-  return { title: "NCP 예상 유류비", value: t.ncp_fuel, sub: `마감 전 참고 · 지금까지 주유 기록 ${won(t.fuel_est)} · 직접 계산 ${won(t.calc_fuel)}` };
+  return { title: "NCP 예상 유류비", value: t.ncp_fuel, sub: `마감 전 참고 · 지금까지 주유 기록 ${won(t.fuel_est)} · 오피넷 기준 ${won(t.calc_fuel)}` };
 }
 
 function Body({ view, showDays, onShowDays }: { view: CostView; showDays: boolean; onShowDays: (v: boolean) => void }) {
@@ -88,7 +88,7 @@ function Body({ view, showDays, onShowDays }: { view: CostView; showDays: boolea
 
       <Panel
         title="계정별"
-        desc="단위 원. 매출은 부가세 제외, 비용은 실제 부담액(부가세 공제 차량만 공급가액). 정규직 월급·차량 기간 비용·유류비는 영업일(일요일·공휴일 제외)로 나눠 배분합니다. '예상' 칸은 근무 기록이 없거나 유류비 마감 전인 금액입니다. 맨 오른쪽 4칸(주행 km·주행 시간·NCP 예상 유류비·직접 계산)은 지도에 저장된 실제 경로 기준 참고값으로 물류비 합계에 넣지 않습니다. 주행 시간은 NAVER 예상 운전 시간(정차 시간 제외), NCP 예상 유류비는 연비가 없으면 NAVER 기본 연비(14km/L) 기준입니다."
+        desc="단위 원. 매출은 부가세 제외, 비용은 실제 부담액(부가세 공제 차량만 공급가액). 정규직 월급·차량 기간 비용·유류비는 영업일(일요일·공휴일 제외)로 나눠 배분합니다. '예상' 칸은 근무 기록이 없거나 유류비 마감 전인 금액입니다. 맨 오른쪽 4칸(주행 km·주행 시간·NCP 예상 유류비·오피넷 기준)은 지도에 저장된 실제 경로 기준 참고값으로 물류비 합계에 넣지 않습니다. 주행 시간은 NAVER 예상 운전 시간(정차 시간 제외). NCP 예상 유류비는 차량 연비(없으면 NAVER 기본 14km/L), 오피넷 기준은 주행거리 ÷ 차량 연비 × 그날 오피넷 단가이며, 둘 다 연비를 넣거나 바꾸면 지난 날짜도 새 연비로 다시 계산됩니다."
       >
         {view.accounts.length === 0 ? (
           <p className="muted">이 기간에 매출·비용이 없습니다.</p>

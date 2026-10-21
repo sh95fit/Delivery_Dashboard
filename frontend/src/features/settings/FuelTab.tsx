@@ -28,6 +28,13 @@ const priceText = (p: number | null) => (p == null ? "-" : p.toLocaleString("ko-
 const diffText = (d: number | null) => (d == null ? "-" : `${d > 0 ? "+" : ""}${d.toFixed(1)}%`);
 const diffCell = (d: number | null) =>
   d != null && Math.abs(d) >= 10 ? <Chip tone="warn">{diffText(d)}</Chip> : diffText(d);
+/* S3-P2e-2 초과 주행 = 주유량 × 연비 − 경로 기록 거리. 마감 전 = 예상(회색), 마감 후 30% 이상 = 노란색 */
+const km1 = (n: number) => `${n.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}km`;
+const overCell = (v: { over_km: number | null; over_pct: number | null }, isClosed: boolean) => {
+  if (v.over_km == null) return <span className="muted" title="연비·주유량 또는 경로 기록(차량 배정)이 없습니다">-</span>;
+  const t = `${km1(v.over_km)}${v.over_pct != null ? ` (${v.over_pct}%)` : ""}`;
+  return isClosed ? <Chip tone={(v.over_pct ?? 0) >= 30 ? "warn" : "neutral"}>{t}</Chip> : <span className="muted">{t} 예상</span>;
+};
 const kindText = (d: DailyPrices["days"][number]) => {
   const ks = new Set<string>();
   FTS.forEach((ft) => {
@@ -202,10 +209,14 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
 
       {sum && sum.totals.count > 0 && (
         <>
-          <Panel title="차량별">
+          <Panel
+            title="차량별"
+            desc={`초과 주행 = 주유량 × 차량 연비(주유한 연료로 달릴 수 있는 거리) − 경로 기록 거리(그날 그 차량을 배정받은 매니저의 완료 순서 실제 경로). 출퇴근·복귀·경로 밖 이동·냉동기 공회전 등이 들어갑니다. 월초·월말 탱크 잔량만큼 오차가 있어 ${closed ? "마감 기준 값" : "마감 전이라 예상값(달이 끝나고 마감하면 확정)"}입니다. 배정 매니저가 없는 차량은 경로 기록이 없어 '-'로 표시합니다.`}
+          >
             <DataTable columns={["차량", "연료", "부가세", { label: "건수", num: true }, { label: "수량", num: true },
               { label: "합계", num: true }, { label: "비용", num: true },
-              { label: "실제 평균 단가", num: true }, { label: "오피넷 평균", num: true }, { label: "차이", num: true }]}>
+              { label: "실제 평균 단가", num: true }, { label: "오피넷 평균", num: true }, { label: "차이", num: true },
+              { label: "경로 거리", num: true }, { label: "주유량 기준 주행", num: true }, { label: "초과 주행", num: true }]}>
               {sum.vehicles.map((v) => (
                 <tr key={v.vehicle_id}>
                   <td>{v.plate_no ?? `#${v.vehicle_id}`}</td>
@@ -218,6 +229,11 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
                   <td className="num">{priceText(v.avg_unit)}</td>
                   <td className="num">{priceText(v.avg_ref)}</td>
                   <td className="num">{diffCell(v.ref_diff)}</td>
+                  <td className="num">{v.route_km ? km1(v.route_km) : "-"}</td>
+                  <td className="num" title={v.fuel_efficiency ? `연비 ${v.fuel_efficiency}km/${unit(v.fuel_type)}` : "차량 연비 없음"}>
+                    {v.est_km != null ? km1(v.est_km) : "-"}
+                  </td>
+                  <td className="num">{overCell(v, Boolean(closed))}</td>
                 </tr>
               ))}
             </DataTable>

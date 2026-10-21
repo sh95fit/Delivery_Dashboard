@@ -78,3 +78,30 @@ def ncp_default(amount, km_per_l) -> int:
     if eff <= 0:
         return amt
     return round(amt * NAVER_DEFAULT_MILEAGE / eff)
+
+
+def ncp_scaled(weighted, km_per_l) -> int:
+    """[S3-P2e-2] weighted = Σ(구간 NCP 유류비 × 그 구간 계산 당시 연비(없으면 14)). 지금 연비(없으면 14)로 나눔.
+    연비를 넣거나 바꾸면 지난 구간도 NAVER 재호출 없이 새 연비로 다시 산출된다 (유류비는 연비에 반비례)."""
+    try:
+        eff = float(km_per_l or 0)
+    except (TypeError, ValueError):
+        eff = 0.0
+    if eff <= 0:
+        eff = NAVER_DEFAULT_MILEAGE
+    return round(float(weighted or 0) / eff)
+
+
+def overrun(quantity, km_per_l, route_m) -> dict:
+    """[S3-P2e-2] 초과 주행 = 주유량 × 연비(그 연료로 달릴 수 있는 거리) − 경로 기록 거리.
+    출퇴근·복귀·경로 밖 이동·공회전 등. 연비·주유량이 없거나 경로 기록이 없으면(차량 미배정 등) 판단하지 않음."""
+    route_km = round(int(route_m or 0) / 1000, 1)
+    try:
+        q, eff = float(quantity or 0), float(km_per_l or 0)
+    except (TypeError, ValueError):
+        q, eff = 0.0, 0.0
+    est = round(q * eff, 1) if q > 0 and eff > 0 else None
+    if est is None or route_km <= 0:
+        return {"route_km": route_km, "est_km": est, "over_km": None, "over_pct": None}
+    over = round(est - route_km, 1)
+    return {"route_km": route_km, "est_km": est, "over_km": over, "over_pct": round(over * 100 / est, 1)}

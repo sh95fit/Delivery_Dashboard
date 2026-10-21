@@ -18,6 +18,7 @@ export interface FuelSummary {
   vehicles: Array<FuelAgg & {
     vehicle_id: number; plate_no: string | null; fuel_type: FuelType; vat_deductible: boolean;
     avg_unit: number | null; avg_ref: number | null; ref_diff: number | null;
+    route_km: number; est_km: number | null; over_km: number | null; over_pct: number | null; fuel_efficiency: number | null;   // S3-P2e-2 초과 주행    
   }>;
   days: Array<FuelAgg & { date: string }>;
   managers: Array<{ manager_id: number | null; cost: number; vehicle_ids: number[] }>;
