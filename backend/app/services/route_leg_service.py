@@ -21,7 +21,8 @@ from app.database import get_dash_engine
 from app.services import control_exclude_service, dash_db, day_cache, routes_service
 from app.services.day_aggregate import KST, to_kst
 from app.services.route_leg_calc import (alloc, chunks, control_summary, coord_key, d5_code, delay_min, dwell_ms,
-                                         pending_groups, preview_input, split_legs, target_at, trim_preview)
+                                         pending_groups, preview_input, split_legs, stop_dwells, target_at,
+                                         trim_preview)
 
 logger = logging.getLogger("route_legs")
 
@@ -242,8 +243,9 @@ def _all_key(d: date) -> str:
     return f"route:preview_all:v1:{d.isoformat()}"
 
 
-def legs_view(d: date) -> dict:
-    """지도용: 계정별 실제 경로 구간(실선) + 마지막 미리보기(점선, 있을 때만). NAVER 호출 없음."""
+def legs_view(d: date, dwell_min: int | None = None) -> dict:
+    """지도용: 계정별 실제 경로 구간(실선) + 마지막 미리보기(점선, 있을 때만). NAVER 호출 없음.
+    [S3-P2d-5c] dwell_min = 화면에서 고른 곳당 정차(분). 없으면 노선별 중앙값."""
     rows = dash_db.rows("""SELECT manager_id, seq, status, distance_m, duration_ms, fuel_price_naver, to_stop_ids,
             delivered_at, path FROM route_legs WHERE route_date = :d ORDER BY manager_id, seq""", {"d": d})
     stops = day_cache.get_day(d).get("stops") or []
@@ -270,11 +272,12 @@ def legs_view(d: date) -> dict:
         m["remaining_stops"] = len(left)
         m["preview_sig"] = sig if left else None
         m["preview"] = trim_preview(last, set(rem_ids))   # [S3-P2d-5] 완료된 곳까지의 점선은 바로 지움
-        m["control"] = _control(d, mid, m["legs"], stops, last, rem_ids, now, skip)
+        m["control"] = _control(d, mid, m["legs"], stops, last, rem_ids, now, skip, dwell_min)
         m["preview_stale"] = bool(last) and m["control"]["uncalc_n"] > 0   # 계산 뒤 새로 배정된 곳이 있을 때만 '반영 필요'
     today = now.date()
     return {"date": d.isoformat(), "origin": origin, "enabled": enabled(), "calls_today": calls_used(today)[0],
             "daily_limit": DAILY_LIMIT, "stall_min": STALL_MIN, "eta_every_min": ETA_EVERY // 60,
+            "dwell_manual_min": dwell_min,
             "excludes": control_exclude_service.list_items(),
             "managers": [out[m] for m in sorted(out)]}
 
@@ -385,7 +388,7 @@ def auto_eta(d: date) -> dict:
 
 
 def _control(d: date, mid: int, legs: list[dict], stops: list[dict], last: dict | None, rem_ids: list[str],
-             now: datetime, skip: set | None = None) -> dict:
+             now: datetime, skip: set | None = None, dwell_min: int | None = None) -> dict:
     """[S3-P2d-4b] 노선 관제: 배송지별 희망 시각 대비 예상 도착(남은 곳)·완료 시각(완료한 곳), 정체·대기 (NAVER 호출 없음)."""
     info: dict = {}
     target_of: dict = {}
@@ -411,7 +414,20 @@ def _control(d: date, mid: int, legs: list[dict], stops: list[dict], last: dict 
             done_stops.append({"id": sid, **info[sid], "target_at": tg.isoformat() if tg else None,
                                "done_at": at.isoformat(), "delay_min": delay_min(at, tg)})
     done_stops.sort(key=lambda x: x["done_at"])
-    dw = dwell_ms([(to_kst(x["delivered_at"]), int(x["duration_ms"] or 0)) for x in legs if x.get("delivered_at")])
+    auto = dwell_ms([(to_kst(x["delivered_at"]), int(x["duration_ms"] or 0)) for x in legs if x.get("delivered_at")])
+    dw = int(dwell_min) * 60000 if dwell_min else auto     # [S3-P2d-5c] 화면 옵션으로 고른 값이 있으면 그 값, 없으면 중앙값
+    leg_ms: dict = {}
+    for x in legs:                                          # 구간 주행 시간은 그 구간 첫 배송지에 (같은 좌표 나머지 곳은 0)
+        ids = x.get("stop_ids") or []
+        if ids:
+            leg_ms[str(ids[0])] = int(x["duration_ms"] or 0)
+    done_all = [(str(s.get("delivery_id") or s.get("address_id")), to_kst(s.get("delivered_at"))) for s in stops
+                if s.get("manager_id") is not None and int(s["manager_id"]) == mid and s.get("delivered_at")]
+    done_all = sorted((x for x in done_all if x[1] is not None), key=lambda x: (x[1], x[0]))   # 관제 제외 곳도 순서에 포함
+    dws = stop_dwells(done_all, leg_ms)
+    for s in done_stops + excluded:
+        v = dws.get(s["id"])
+        s["dwell_min"] = round(v / 60000, 1) if v is not None else None
     c = control_summary((last or {}).get("groups") or [], rem_ids, last_at, dw, now, target_of, STALL_MIN,
                         d == now.date())
     for x in c["stops"]:
@@ -419,7 +435,8 @@ def _control(d: date, mid: int, legs: list[dict], stops: list[dict], last: dict 
     c["no_time"] = [info.get(i, {}).get("name", i) for i in c.pop("no_time_ids")]
     late_done = sum(1 for x in done_stops if (x["delay_min"] or 0) >= 1)
     return {**c, "done": len(done_stops), "late_done": late_done, "done_stops": done_stops, "excluded": excluded,
-            "calc_at": (last or {}).get("calc_at")}
+            "calc_at": (last or {}).get("calc_at"),
+            "dwell_auto_min": round(auto / 60000, 1), "dwell_manual": bool(dwell_min)}
 
 
 def preview_all_status(d: date) -> dict:

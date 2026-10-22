@@ -259,6 +259,7 @@ export interface RouteLegsResp {
   daily_limit: number;
   stall_min: number;
   eta_every_min: number;
+  dwell_manual_min: number | null;   // [S3-P2d-5c]
   excludes: ControlExclude[];  
   managers: ManagerLegs[];
 }
@@ -282,6 +283,7 @@ export interface ControlStop {
   done_at?: string | null;    // 완료한 곳: 완료 시각
   delay_min: number | null;   // 희망 대비 분 (+ 지연, 0 정시, − 여유), 희망 시각 없으면 null
   skipped?: boolean;
+  dwell_min?: number | null;  // [S3-P2d-5c] 완료한 곳: 추정 정차(분), 첫 곳은 null
 }
 
 export interface RouteControl {
@@ -304,7 +306,9 @@ export interface RouteControl {
   skipped_n: number;
   last_at: string | null;
   idle_min: number | null;
-  dwell_min: number;
+  dwell_min: number;          // 예상에 쓴 곳당 정차(분)
+  dwell_auto_min: number;     // [S3-P2d-5c] 오늘 완료 간격 중앙값(분)
+  dwell_manual: boolean;      // 화면에서 임의 설정한 값으로 계산했는지
   calc_at: string | null;
 }
 

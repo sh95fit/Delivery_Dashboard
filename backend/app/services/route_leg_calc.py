@@ -115,7 +115,7 @@ def preview_input(stops: list[dict], mid: int, origin: dict, skip: set | None = 
 
 
 # ---------- S3-P2d-4 관제: 남은 경로 예상 도착 · 지연 예상 · 정체 (순수 함수) ----------
-DEFAULT_DWELL_MS = 180_000                       # 정차 시간 기본 3분 (완료 3곳 미만일 때)
+DEFAULT_DWELL_MS = 300_000                       # 정차 시간 기본 5분 (완료 3곳 미만이라 중앙값을 못 구할 때)
 DWELL_MIN_MS, DWELL_MAX_MS = 60_000, 1_200_000   # 정차 시간은 1~20분으로 제한
 
 
@@ -139,6 +139,18 @@ def dwell_ms(done: list[tuple[datetime, int]]) -> int:
     n = len(gaps)
     v = int(gaps[n // 2] if n % 2 else (gaps[n // 2 - 1] + gaps[n // 2]) / 2)
     return max(DWELL_MIN_MS, min(DWELL_MAX_MS, v))
+
+
+def stop_dwells(done: list[tuple[str, datetime]], leg_ms: dict[str, int]) -> dict[str, int | None]:
+    """[S3-P2d-5c] 배송지별 정차 시간(추정, ms). done = [(배송지, 완료 시각)] 완료 순,
+    leg_ms = {배송지: 직전 지점 → 그곳 주행 ms} (같은 좌표 묶음의 나머지 곳은 0).
+    그곳 정차 = (직전 완료 → 그곳 완료 간격) − 그 구간 주행 시간 (dwell_ms 중앙값과 같은 기준). 첫 곳 None, 음수는 0."""
+    out: dict[str, int | None] = {}
+    prev = None
+    for sid, at in done:
+        out[sid] = None if prev is None else max(0, int((at - prev).total_seconds() * 1000) - int(leg_ms.get(sid, 0)))
+        prev = at
+    return out
 
 
 LATE_MIN = 1      # 1분 이상 늦으면 지연 예상 (제때 완료되면 사라짐)

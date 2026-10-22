@@ -1,6 +1,6 @@
 from datetime import date as date_type
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.auth import get_current_email, is_admin_email
 from app.services import route_leg_service, routes_service
@@ -10,9 +10,10 @@ router = APIRouter(prefix="/routes", tags=["routes"])
 
 # [S3-P2d-2b-1] 지도: 실제 경로(route_legs) · 남은 경로 미리보기 (기존 경로 API보다 먼저 선언)
 @router.get("/{target_date}/legs")
-def get_route_legs(target_date: date_type, _: str = Depends(get_current_email)):
+def get_route_legs(target_date: date_type, dwell_min: int | None = Query(default=None, ge=1, le=30),
+                   _: str = Depends(get_current_email)):
     try:
-        return route_leg_service.legs_view(target_date)
+        return route_leg_service.legs_view(target_date, dwell_min)   # [S3-P2d-5c] dwell_min = 정차 임의 설정(분)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"실제 경로 조회 실패: {exc}") from exc
 

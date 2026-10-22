@@ -3,7 +3,8 @@ from datetime import datetime, timedelta, timezone
 from datetime import date
 
 from app.services.route_leg_calc import (DEFAULT_DWELL_MS, alloc, chunks, control_summary, coord_key, d5_code, delay_min,
-                                         dwell_ms, pending_groups, preview_input, split_legs, target_at, trim_preview)
+                                         dwell_ms, pending_groups, preview_input, split_legs, stop_dwells, target_at,
+                                         trim_preview)
 
 KST = timezone(timedelta(hours=9))
 T = lambda m: datetime(2026, 10, 20, 7, 0, tzinfo=KST) + timedelta(minutes=m)  # noqa: E731
@@ -85,6 +86,15 @@ def test_dwell_ms():
     assert dwell_ms([(T(0), 600000), (T(10), 360000), (T(20), 360000)]) == 240000      # 20분 − 주행 12분 = 정차 4분씩
     assert dwell_ms([(T(0), 0), (T(0), 0), (T(1), 0)]) == 60000                        # 하한 1분
 
+
+def test_stop_dwells():
+    done = [("a", T(0)), ("b", T(10)), ("c", T(12)), ("d", T(40))]
+    leg = {"b": 360000, "c": 0, "d": 600000}
+    # b: 10분 − 주행 6분 = 4분, c: 같은 좌표 2분, d: 28분 − 10분 = 18분, 첫 곳 a는 없음
+    assert stop_dwells(done, leg) == {"a": None, "b": 240000, "c": 120000, "d": 1080000}
+    assert stop_dwells([("a", T(0)), ("b", T(1))], {"b": 120000}) == {"a": None, "b": 0}   # 음수 → 0
+    assert stop_dwells([], {}) == {}
+    
 
 def test_delay_min():
     assert delay_min(T(68), T(68) - timedelta(seconds=30)) == 0   # 30초 늦음 → 지연 아님 (1분 미만)

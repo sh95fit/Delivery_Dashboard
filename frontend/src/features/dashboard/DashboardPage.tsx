@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import PageLayout from "@/layouts/PageLayout";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
@@ -26,6 +26,8 @@ import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { todayISO } from "@/lib/date";
 import { kstDateTime } from "@/lib/format";
 import { useMe } from "@/layouts/shell";
+
+const DWELL_KEY = "ll.dash.dwell";   // [S3-P2d-5c] 정차 시간 임의 설정(분), 빈 값 = 자동(중앙값)
 
 
 /* [S3-P2d-2b-2] 실제 경로(route_legs) → 지도 형식. 완료 구간 = 실선(completed_path), 미리보기 = 점선(remaining_path) */
@@ -77,8 +79,11 @@ export default function DashboardPage() {
   const [lastAt, setLastAt] = useState<Date | null>(null);
   const [focusStop, setFocusStop] = useState<{ id: string; n: number } | null>(null);   // [S3-P2d-5] 관제 → 지도 마커
   const isAdmin = Boolean(useMe()?.is_admin);  
+  const [dwellOpt, setDwellOpt] = useState<number | null>(() => {
+    try { const v = Number(localStorage.getItem(DWELL_KEY)); return v >= 1 && v <= 30 ? v : null; } catch { return null; }
+  });
+  const dwellFirst = useRef(true);
   const auto = useAutoRefresh();
-
   const status = useAsync(() => getStatus(date), [date]);
   const delivery = useAsync(() => getDeliveries(date), [date]);
 
@@ -107,7 +112,7 @@ export default function DashboardPage() {
     setRoutesLoading(true);
     setRoutesError("");
     try {
-      setRoutesData(await getRouteLegs(date));
+      setRoutesData(await getRouteLegs(date, dwellOpt));
     } catch (e) {
       setRoutesError(e instanceof Error ? e.message : String(e));
       setRoutesData(null);
@@ -127,6 +132,13 @@ export default function DashboardPage() {
     setFocusStop(null);    
     loadRoutes().catch(() => {});
   }, [date]);
+
+  // [S3-P2d-5c] 정차 시간 옵션을 바꾸면 바로 다시 불러옴 (서버가 예상 도착만 다시 계산, NAVER 호출 없음)
+  useEffect(() => {
+    try { localStorage.setItem(DWELL_KEY, dwellOpt ? String(dwellOpt) : ""); } catch { /* 무시 */ }
+    if (dwellFirst.current) { dwellFirst.current = false; return; }
+    loadRoutes().catch(() => {});
+  }, [dwellOpt]);
 
   useEffect(() => {
     if (status.data) setLastAt(new Date());
@@ -253,6 +265,8 @@ export default function DashboardPage() {
           selected={selectedManagerId}
           onSelect={setSelectedManagerId}
           live={liveNow}
+          dwellOpt={dwellOpt}
+          onDwell={setDwellOpt}
           isAdmin={isAdmin}
           onFocusStop={(id) => {
             setFocusStop((p) => ({ id, n: (p?.n ?? 0) + 1 }));

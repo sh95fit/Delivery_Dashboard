@@ -22,6 +22,10 @@ const dur = (ms: number) => {
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const stopMin = (c: RouteControl) => Math.round(c.dwell_min * c.remaining);
 const totalMs = (c: RouteControl) => c.remaining_drive_ms + stopMin(c) * 60000;
+/* [S3-P2d-5c] 정차 시간: 기본 = 오늘 완료 간격 중앙값, 화면에서 임의 값으로 바꿔 볼 수 있음 */
+const DWELL_OPTS = [1, 2, 3, 4, 5, 7, 10, 15];
+const LONG_DWELL = 20;      // 이보다 길면 휴식·상차 등으로 보고 강조
+const dwellSrc = (c: RouteControl) => (c.dwell_manual ? `임의 설정 · 자동이면 ${c.dwell_auto_min}분` : "오늘 완료 간격 중앙값");
 
 const STATE: Record<RouteControl["state"], { tone: ChipTone; label: string; rank: number }> = {
   stalled: { tone: "warn", label: "정체", rank: 0 },
@@ -50,11 +54,13 @@ type Props = {
   isAdmin: boolean;
   onFocusStop: (id: string) => void;    // 배송지 → 지도 마커로 이동
   onChanged: () => void;                // 관제 제외 추가·해제 후 다시 불러오기
+  dwellOpt: number | null;              // [S3-P2d-5c] 곳당 정차 임의 설정(분), null = 자동(중앙값)
+  onDwell: (v: number | null) => void;
 };
 
 const rowStyle = (on: boolean) => ({ cursor: "pointer", background: on ? "rgba(37, 99, 235, 0.08)" : undefined });
 
-export default function ControlTable({ data, names, selected, onSelect, live, isAdmin, onFocusStop, onChanged }: Props) {
+export default function ControlTable({ data, names, selected, onSelect, live, isAdmin, onFocusStop, onChanged, dwellOpt, onDwell }: Props) {
   const detailRef = useRef<HTMLDivElement>(null);
   const [jump, setJump] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -132,12 +138,24 @@ export default function ControlTable({ data, names, selected, onSelect, live, is
       <Panel
         title="노선별 관제"
         right={
-          <span className="muted small">
-            {live
-              ? `정체 ${count("stalled")} · 지연 예상 ${count("late")} · 대기 ${count("wait")} · 정상 ${count("ok")} · 출발 전 ${count("before")} · 완료 ${count("done")}`
-              : `완료 ${count("done")} · 미완료 ${count("incomplete")}`}
-            {excludes.length ? ` · 관제 제외 ${excludes.length}곳` : ""}
-          </span>
+          <>
+            <span className="muted small">
+              {live
+                ? `정체 ${count("stalled")} · 지연 예상 ${count("late")} · 대기 ${count("wait")} · 정상 ${count("ok")} · 출발 전 ${count("before")} · 완료 ${count("done")}`
+                : `완료 ${count("done")} · 미완료 ${count("incomplete")}`}
+              {excludes.length ? ` · 관제 제외 ${excludes.length}곳` : ""}
+            </span>
+            {live && (
+              <select
+                className="input input-sm" value={dwellOpt ?? ""} aria-label="정차 시간"
+                title="예상 도착 = 주행 + 곳당 정차. 자동 = 오늘 완료 간격에서 구한 중앙값 (내 화면에만 적용)"
+                onChange={(e) => onDwell(e.target.value ? Number(e.target.value) : null)}
+              >
+                <option value="">정차 자동(중앙값)</option>
+                {DWELL_OPTS.map((v) => <option key={v} value={v}>정차 {v}분으로 보기</option>)}
+              </select>
+            )}
+          </>
         }
         desc={live
           ? `다음 곳 = 다음 배송지 예상 도착(마우스를 올리면 고객사) · 남은 전체 = 남은 곳을 모두 도는 거리 · 소요(주행 + 정차, 마우스를 올리면 나눠 보기) · 예상 완료 = 마지막 곳 예상 도착 · 남은 경로는 출발한 노선만 ${data.eta_every_min}분마다 다시 계산 · 정체 = 다음 곳 예상 도착보다 ${data.stall_min}분 넘게 지났는데 새 완료 없음 · 대기 = 정체 조건이지만 지금 출발해도 다음 곳 희망 시각에 맞출 수 있음 · 행을 누르면 지도에서 그 노선만 보고 아래 상세로 이동`
@@ -170,7 +188,7 @@ export default function ControlTable({ data, names, selected, onSelect, live, is
                 </td>
                 <td>{hm(c.last_at)}{show && c.idle_min != null ? ` (${c.idle_min}분 전)` : ""}</td>
                 <td title={show && next ? `다음 곳: ${next}` : undefined}>{show ? hm(c.next_eta) : "-"}</td>
-                <td className="num" title={show ? `남은 ${c.remaining}곳 · 주행 ${dur(c.remaining_drive_ms)} + 정차 ${stopMin(c)}분 (곳당 ${c.dwell_min}분)` : undefined}>
+                <td className="num" title={show ? `남은 ${c.remaining}곳 · 주행 ${dur(c.remaining_drive_ms)} + 정차 ${stopMin(c)}분 (곳당 ${c.dwell_min}분, ${dwellSrc(c)})` : undefined}>
                   {show ? `${km(c.remaining_m)} · ${dur(totalMs(c))}` : "-"}
                 </td>
                 <td>{show ? hm(c.finish_at) : "-"}</td>
@@ -237,11 +255,11 @@ function RouteDetail({ m, name, live, isAdmin, busy, excludes, onClose, onFocus,
       right={<Button size="sm" onClick={onClose}>닫기</Button>}
       desc={
         live && c.remaining
-          ? `${hm(c.last_at)} 마지막 완료 기준 · 남은 ${c.remaining}곳 모두 도는 데 ${km(c.remaining_m)} · ${dur(totalMs(c))} (주행 ${dur(c.remaining_drive_ms)} + 정차 ${stopMin(c)}분, 곳당 ${c.dwell_min}분) · ${hm(c.calc_at)} 경로 계산 · 남은 곳은 앱 배송 순서대로 간다고 보고 계산 · 행을 누르면 지도에서 그 배송지로 이동`
+          ? `${hm(c.last_at)} 마지막 완료 기준 · 남은 ${c.remaining}곳 모두 도는 데 ${km(c.remaining_m)} · ${dur(totalMs(c))} (주행 ${dur(c.remaining_drive_ms)} + 정차 ${stopMin(c)}분, 곳당 ${c.dwell_min}분 · ${dwellSrc(c)}) · ${hm(c.calc_at)} 경로 계산 · 남은 곳은 앱 배송 순서대로 간다고 보고 계산 · 정차 = 완료한 곳은 직전 완료부터 걸린 시간 − 주행 시간 · 행을 누르면 지도에서 그 배송지로 이동`
           : `완료 ${c.done}곳 · 마지막 완료 ${hm(c.last_at)} · 늦게 완료 ${c.late_done}곳 · 행을 누르면 지도에서 그 배송지로 이동`
       }
     >
-      <DataTable columns={[{ label: "순서", num: true }, "고객사", "희망", "완료 / 예상 도착", "구분", { label: "희망 대비", num: true }, ...(isAdmin ? ["관제"] : [])]}>
+      <DataTable columns={[{ label: "순서", num: true }, "고객사", "희망", "완료 / 예상 도착", "구분", { label: "정차", num: true }, { label: "희망 대비", num: true }, ...(isAdmin ? ["관제"] : [])]}>
         {list.map(({ s, kind }) => {
           const ex = kind === "excluded" ? exOf(s) : undefined;
           return (
@@ -252,6 +270,15 @@ function RouteDetail({ m, name, live, isAdmin, busy, excludes, onClose, onFocus,
               <td>{hm(s.target_at)}</td>
               <td>{kind === "left" ? (s.skipped ? "연결 불가" : live ? hm(s.eta) : "-") : hm(s.done_at)}</td>
               <td>{kind === "done" ? "완료" : kind === "left" ? "남음" : <Chip>관제 제외</Chip>}</td>
+              <td className="num">
+                {kind === "left"
+                  ? <span className="muted">{c.dwell_min}분 (예상)</span>
+                  : s.dwell_min == null
+                    ? <span className="muted">-</span>
+                    : s.dwell_min > LONG_DWELL
+                      ? <Chip tone="caution">{Math.round(s.dwell_min)}분 · 긴 정차</Chip>
+                      : `${Math.round(s.dwell_min)}분`}
+              </td>
               <td className="num">
                 {kind === "excluded" || (kind === "left" && !live)
                   ? <span className="muted">-</span>
