@@ -84,6 +84,9 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
   const [income, setIncome] = useState<IncomeType>(row?.income_type ?? "employee");
   const [active, setActive] = useState(row?.active ?? true);
   const [memo, setMemo] = useState(row?.memo ?? "");
+  const [endDate, setEndDate] = useState(row?.end_date ?? "");          // [S2-P0c] 퇴사일
+  const [lastFull, setLastFull] = useState(row?.last_pay_full ?? true); // 정규직 마지막 달 월급 그대로
+  const [lastAmt, setLastAmt] = useState(row?.last_pay_amount != null ? String(row.last_pay_amount) : "");
 
   // 계약 (저장된 구분 기준 — 서버도 저장된 구분으로 검증)
   const payType = INCOME_PAY[row?.income_type ?? income];
@@ -144,11 +147,23 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
   const basicDirty = isNew
     ? name.trim() !== ""
     : name.trim() !== row.name || income !== row.income_type || active !== row.active ||
-      memo.trim() !== (row.memo ?? "").trim();
+      memo.trim() !== (row.memo ?? "").trim() ||
+      (!active && (endDate !== (row.end_date ?? "") || lastFull !== row.last_pay_full ||
+        lastAmt !== (row.last_pay_amount != null ? String(row.last_pay_amount) : "")));
 
   async function saveBasic() {
     if (!name.trim()) return setError("이름을 입력하세요");
-    const body = { name: name.trim(), income_type: income, active, memo: memo.trim() || null };
+    const lastNum = lastAmt.trim() ? parseAmount(lastAmt) : NaN;
+    if (!active && !endDate) return setError("비활성(퇴사·중단)으로 바꾸려면 퇴사일을 입력하세요 — 퇴사일까지의 물류비 이력은 그대로 남습니다");
+    if (!active && income === "regular" && !lastFull && (Number.isNaN(lastNum) || lastNum < 0)) {
+      return setError("마지막 달 지급액을 숫자로 입력하세요 (월급 그대로면 '월급 그대로 지급'을 체크)");
+    }
+    const body = {
+      name: name.trim(), income_type: income, active, memo: memo.trim() || null,
+      end_date: active ? null : endDate,
+      last_pay_full: active || income !== "regular" ? true : lastFull,
+      last_pay_amount: !active && income === "regular" && !lastFull ? lastNum : null,
+    };
     if (row === null) {
       setBusy("basic");
       setError("");
@@ -325,6 +340,28 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
                   <option value="0">비활성 (퇴사·중단)</option>
                 </select>
               </label>
+              {!active && (
+                <>
+                  <label className="field">퇴사일
+                    <input type="date" className="input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                  </label>
+                  {income === "regular" && (
+                    <div className="field">마지막 달 월급
+                      <label className={`wd-chk${lastFull ? " on" : ""}`}>
+                        <input type="checkbox" checked={lastFull} onChange={(e) => setLastFull(e.target.checked)} /> 월급 그대로 지급
+                      </label>
+                    </div>
+                  )}
+                  {income === "regular" && !lastFull && (
+                    <label className="field">마지막 달 지급액(원)
+                      <input className="input" inputMode="numeric" value={lastAmt} onChange={(e) => setLastAmt(e.target.value)} placeholder="예: 1,500,000" />
+                    </label>
+                  )}
+                  <span className="muted small field-wide">
+                    퇴사일까지의 물류비 인건비는 그대로 남고, 다음 날부터 0원{income === "regular" ? " · 퇴사 달은 1일~퇴사일 영업일로 나눔" : " · 근무표 기준"}
+                  </span>
+                </>
+              )}
               <label className="field field-wide">메모
                 <input className="input" value={memo} maxLength={500} onChange={(e) => setMemo(e.target.value)} />
               </label>
@@ -340,7 +377,7 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
               </div>
             </div>
           ) : row && (
-            <div className="muted small">{INCOME_LABEL[row.income_type]} · {row.active ? "활성" : "비활성"} · {row.memo || "메모 없음"}</div>
+            <div className="muted small">{INCOME_LABEL[row.income_type]} · {row.active ? "활성" : `비활성${row.end_date ? ` (퇴사 ${row.end_date})` : ""}`} · {row.memo || "메모 없음"}</div>
           )}
           {isNew && <p className="muted small">등록 후 계약 조건과 고정 계정을 입력할 수 있습니다.</p>}
         </>

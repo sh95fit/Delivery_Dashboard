@@ -47,6 +47,8 @@ type Props = {
   autoFitKey: string;
   loading?: boolean;
   routesLoading?: boolean;
+  /** [S3-P2d-5b] 관제 → 지도: 이 배송지(delivery_id) 마커로 이동. n은 같은 곳을 다시 눌러도 다시 실행하기 위한 번호 */
+  focusStop?: { id: string; n: number } | null;
 };
 
 /* ---------- 유틸 ---------- */
@@ -350,6 +352,7 @@ function popupEl(
 /* ---------- 컴포넌트 ---------- */
 export default function MapSection({
   stops, routes, state, selectedManagerId, onSelectManager, autoFitKey, loading = false, routesLoading = false,
+  focusStop = null,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -680,6 +683,22 @@ export default function MapSection({
     if (!ready || loading || fitKeyRef.current === autoFitKey) return;
     if (fit(true)) fitKeyRef.current = autoFitKey;
   }, [ready, loading, autoFitKey, groups, effectiveRoutes, sized]);
+
+  
+  // 7) [S3-P2d-5b] 관제 → 지도: 그 배송지 마커로 이동 + 정보창 (폴링으로 마커가 다시 만들어져도 다시 이동하지 않음)
+  useEffect(() => {
+    const naver = window.naver;
+    const map = mapRef.current;
+    if (!ready || !naver?.maps || !map || !focusStop) return;
+    const e = entriesRef.current.find((x) => x.group.items.some((s) => String(s.delivery_id) === focusStop.id));
+    if (!e) return;
+    map.setZoom(Math.max(map.getZoom?.() ?? 0, 16));
+    map.panTo(new naver.maps.LatLng(e.group.latitude, e.group.longitude));
+    overlayClickAt.current = Date.now();
+    openInfo(e);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, focusStop]);
+
 
   const onShowAll = () => {
     if (selectedManagerId != null) select(null);

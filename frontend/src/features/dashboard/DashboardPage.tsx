@@ -241,6 +241,7 @@ export default function DashboardPage() {
           autoFitKey={`${date}:${selectedManagerId ?? "all"}`}
           loading={delivery.loading}
           routesLoading={routesLoading}
+          focusStop={focusStop}
         />        
       )}
 
@@ -255,7 +256,7 @@ export default function DashboardPage() {
           isAdmin={isAdmin}
           onFocusStop={(id) => {
             setFocusStop((p) => ({ id, n: (p?.n ?? 0) + 1 }));
-            document.querySelector(".map-wrap, #dash-map-anchor")?.scrollIntoView({ behavior: "smooth", block: "center" });
+            document.querySelector(".map-box")?.scrollIntoView({ behavior: "smooth", block: "center" });
           }}
           onChanged={() => { void loadRoutes(); }}
         />

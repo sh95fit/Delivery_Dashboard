@@ -45,15 +45,28 @@ def monthly_day(amount: int, d: date, month_open: list[date] | None = None) -> i
 
 
 def labor_day(rate: dict | None, log: dict | None, off: bool, d: date, today: date,
-              month_open: list[date] | None = None) -> dict | None:
+              month_open: list[date] | None = None, end: date | None = None,
+              last_pay: int | None = None) -> dict | None:
     """한 사람·하루 인건비 → {cost, ot_pay, paid_min, kind} 또는 None(비용 없음).
     kind = actual(근무 기록) / monthly(정규직 월급, 영업일 기준) / estimate(오늘 이후 계약 시간) / missing(지난 근무일 미입력 → 계약 시간)
-    month_open = 그 달 영업일 목록. 휴무일에는 기록이 없으면 비용 없음, 기록이 있으면 실제 비용."""
+    month_open = 그 달 영업일 목록. 휴무일에는 기록이 없으면 비용 없음, 기록이 있으면 실제 비용.
+    [S2-P0c] end = 퇴사일: 다음 날부터 비용 없음 (시급제는 근무 기록이 있으면 실제 비용).
+    정규직 퇴사 달 = 월급(또는 last_pay 지급액)을 그 달 1일~퇴사일 영업일로 나눔."""
     if rate is None:
         return None
     pt = rate.get("pay_type")
+    if end is not None and d > end and (log is None or pt == "monthly"):
+        return None
     if pt == "monthly":
-        cost = monthly_day(int(rate["amount"]), d, month_open)
+        amount, days = int(rate["amount"]), month_open
+        if end is not None and (d.year, d.month) == (end.year, end.month):
+            if days is None:
+                md = month_days(d)
+                days = business_days(md[0], md[-1])
+            days = [x for x in days if x <= end] or [end]   # 퇴사일 전 영업일이 없으면 퇴사일에 몰아서
+            if last_pay is not None:
+                amount = int(last_pay)
+        cost = monthly_day(amount, d, days)
         return {"cost": cost, "ot_pay": 0, "paid_min": 0, "kind": "monthly"} if cost else None
     if pt != "hourly":
         return None

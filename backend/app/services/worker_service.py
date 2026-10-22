@@ -76,6 +76,8 @@ def list_workers() -> list[dict]:
         out.append({
             "id": wid, "name": w["name"], "income_type": w["income_type"], "active": bool(w["active"]),
             "memo": w.get("memo"), "legacy_manager_id": w.get("legacy_manager_id"),
+            "end_date": _iso(w.get("end_date")), "last_pay_full": w.get("last_pay_full") is not False,
+            "last_pay_amount": w.get("last_pay_amount"),
             "updated_at": _iso(w.get("updated_at")), "updated_by": w.get("updated_by"),
             "rate": rate_out(rates[wid]) if wid in rates else None,
             "account": account_out(a, mgrs) if a and a["manager_id"] is not None else None,
@@ -90,31 +92,45 @@ def worker_detail(wid: int) -> dict:
     return {"rates": [rate_out(r) for r in rates], "accounts": [account_out(a, mgrs) for a in accs]}
 
 
-def save_worker(wid: int | None, name: str, income_type: str, active: bool, memo: str | None, email: str) -> int:
+def save_worker(wid: int | None, name: str, income_type: str, active: bool, memo: str | None, email: str,
+                end_date: date | None = None, last_pay_full: bool = True, last_pay_amount: int | None = None) -> int:
+    """[S2-P0c] 비활성(퇴사·중단)이면 퇴사일 필수 → 물류비 인건비는 퇴사일까지 그대로 계산.
+    정규직 마지막 달: 월급 그대로(last_pay_full) 또는 지급액(last_pay_amount)을 퇴사일까지 영업일로 나눔."""
     name = (name or "").strip()
     if not name:
         raise ValueError("이름을 입력하세요")
+    if active:
+        end_date, last_pay_full, last_pay_amount = None, True, None
+    else:
+        if end_date is None:
+            raise ValueError("비활성(퇴사·중단)으로 바꾸려면 퇴사일을 입력하세요 — 퇴사일까지의 물류비 이력은 그대로 남습니다")
+        if income_type != "regular" or last_pay_full:
+            last_pay_full, last_pay_amount = True, None
+        elif last_pay_amount is None:
+            raise ValueError("마지막 달 지급액을 입력하세요 (월급 그대로면 '월급 그대로 지급'을 체크)")
     with get_dash_engine().begin() as conn:
         dup = conn.execute(text(
             "SELECT 1 FROM workers WHERE name = :n AND deleted_at IS NULL AND id <> :w"
         ), {"n": name, "w": wid or 0}).fetchone()
         if dup:
             raise ValueError("같은 이름의 인력이 이미 있습니다. 동명이인은 '김민수B'처럼 구분해 입력하세요")
-        p = {"n": name, "t": income_type, "a": active, "m": memo, "e": email}
+        p = {"n": name, "t": income_type, "a": active, "m": memo, "e": email,
+             "ed": end_date, "lf": last_pay_full, "la": last_pay_amount}
         if wid is None:
             return int(conn.execute(text("""
-                INSERT INTO workers (name, income_type, active, memo, created_by, updated_by)
-                VALUES (:n, :t, :a, :m, :e, :e) RETURNING id
+                INSERT INTO workers (name, income_type, active, memo, end_date, last_pay_full, last_pay_amount,
+                                     created_by, updated_by)
+                VALUES (:n, :t, :a, :m, :ed, :lf, :la, :e, :e) RETURNING id
             """), p).scalar_one())
         res = conn.execute(text("""
             UPDATE workers SET name = :n, income_type = :t, active = :a, memo = :m,
+                   end_date = :ed, last_pay_full = :lf, last_pay_amount = :la,
                    updated_by = :e, updated_at = NOW()
             WHERE id = :w AND deleted_at IS NULL
         """), {**p, "w": wid})
         if res.rowcount == 0:
             raise ValueError("인력을 찾을 수 없습니다")
         return wid
-
 
 def insert_rate(conn, wid: int, r: dict, email: str) -> int:
     """check_rate를 통과한 값 r 저장. 같은 적용 시작일이 있으면 ValueError."""

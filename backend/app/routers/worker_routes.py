@@ -40,14 +40,14 @@ def worker_detail(wid: int, _: str = Depends(get_current_email)):
 @router.post("")
 def create_worker(body: WorkerIn, email: str = Depends(require_admin)):
     new_id = guard(svc.save_worker, None, body.name, body.income_type, body.active, memo(body.memo), email,
-                   fail="인력 등록 실패")
+                   body.end_date, body.last_pay_full, body.last_pay_amount, fail="인력 등록 실패")
     return {"ok": True, "id": new_id}
 
 
 @router.put("/{wid}")
 def update_worker(wid: int, body: WorkerIn, email: str = Depends(require_admin)):
     guard(svc.save_worker, wid, body.name, body.income_type, body.active, memo(body.memo), email,
-          fail="인력 저장 실패")
+          body.end_date, body.last_pay_full, body.last_pay_amount, fail="인력 저장 실패")
     return {"ok": True, "id": wid}
 
 

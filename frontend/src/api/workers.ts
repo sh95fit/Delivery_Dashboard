@@ -24,11 +24,15 @@ export interface WorkerAccount {
 export interface WorkerRow {
   id: number; name: string; income_type: IncomeType; active: boolean; memo: string | null;
   legacy_manager_id: number | null; updated_at: string | null; updated_by: string | null;
+  end_date: string | null; last_pay_full: boolean; last_pay_amount: number | null;   // [S2-P0c] 퇴사일 · 정규직 마지막 달
   rate: WorkerRate | null; account: WorkerAccount | null;
 }
 export interface WorkerDetail { rates: WorkerRate[]; accounts: WorkerAccount[] }
 
-export type WorkerInput = { name: string; income_type: IncomeType; active: boolean; memo: string | null };
+export type WorkerInput = {
+  name: string; income_type: IncomeType; active: boolean; memo: string | null;
+  end_date?: string | null; last_pay_full?: boolean; last_pay_amount?: number | null;
+};
 export type WorkerRateInput = {
   effective_from: string; pay_type: PayType; amount: number; vat_applied: boolean; memo: string | null;
   work_start?: string; work_end?: string; break_min?: number; break_paid?: boolean;

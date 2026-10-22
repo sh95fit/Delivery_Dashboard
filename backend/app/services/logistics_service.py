@@ -104,7 +104,8 @@ def cost_view(frm: date, to: date) -> dict:
             return month_open[k]
 
         # ---------- 인건비 ----------
-        workers = dash_db.rows("SELECT id, name, active FROM workers WHERE deleted_at IS NULL")
+        workers = dash_db.rows("""SELECT id, name, active, end_date, last_pay_full, last_pay_amount
+            FROM workers WHERE deleted_at IS NULL""")
         rates = _group(dash_db.rows("SELECT * FROM worker_pay_rates WHERE deleted_at IS NULL"), "worker_id")
         accs = _group(dash_db.rows(
             "SELECT worker_id, manager_id, start_date FROM worker_accounts WHERE deleted_at IS NULL"), "worker_id")
@@ -119,13 +120,19 @@ def cost_view(frm: date, to: date) -> dict:
         missing: dict[str, list[str]] = {}
         no_acc: dict[str, int] = {}
         nocontract: set[str] = set()
+        no_end: set[str] = set()
         for w in workers:
             wid, rs = w["id"], rates.get(w["id"], [])
+            end = w.get("end_date")                     # [S2-P0c] 퇴사일까지는 활성 인력과 똑같이 계산
+            last_pay = w.get("last_pay_amount") if w.get("last_pay_full") is False else None
+            if not w["active"] and end is None:
+                no_end.add(w["name"])
             for d in days:
                 lg = logs.get((wid, d))
-                if lg is None and not w["active"]:
-                    continue
-                res = labor_day(effective_on(rs, d, "effective_from"), lg, (wid, d) in offs, d, t, open_in_month(d))
+                if lg is None and not w["active"] and end is None:
+                    continue                            # 퇴사일 없는 예전 비활성 인력: 근무 기록 있는 날만
+                res = labor_day(effective_on(rs, d, "effective_from"), lg, (wid, d) in offs, d, t, open_in_month(d),
+                                end=end, last_pay=last_pay)
                 if res is None:
                     if lg is not None and effective_on(rs, d, "effective_from") is None:
                         nocontract.add(w["name"])
@@ -147,6 +154,8 @@ def cost_view(frm: date, to: date) -> dict:
             add("warn", f"{name}: 그날 계정·고정 계정이 없어 인건비 {amt:,}원이 '{NO_ACCOUNT}'로 들어감")
         for name in sorted(nocontract):
             add("warn", f"{name}: 계약 없는 날 근무 기록이 있어 그날 인건비 0원 — 계약 시작일 확인")
+        for name in sorted(no_end):
+            add("warn", f"{name}: 비활성인데 퇴사일이 없어 근무 기록 있는 날만 계산 — 인력 화면에서 퇴사일을 넣으면 그 전 기간 인건비가 다시 잡힘")            
         if not any(r.get("pay_type") == "monthly" for rs in rates.values() for r in rs):
             add("info", "월급(정규직)으로 등록된 인력이 없어 정규직 인건비가 0원 — 인력 화면에서 정규직 등록 후 계약을 '월급'으로 입력")
         timing["labor"] = round(time.perf_counter() - s, 2)

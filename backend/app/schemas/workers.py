@@ -11,6 +11,9 @@ class WorkerIn(BaseModel):
     income_type: IncomeType = "employee"
     active: bool = True
     memo: str | None = Field(default=None, max_length=500)
+    end_date: date | None = None              # [S2-P0c] 퇴사일 (비활성일 때 필수)
+    last_pay_full: bool = True                # 정규직 마지막 달 월급 그대로 지급
+    last_pay_amount: int | None = Field(default=None, ge=0, le=100_000_000)
 
 
 class WorkerRateIn(BaseModel):
