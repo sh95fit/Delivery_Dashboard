@@ -12,6 +12,7 @@ import type { ManagerRow, Vehicle } from "@/api/masters";
 import { errText, parseAmount } from "@/lib/form";
 import { kstDateTime, todayKst, won } from "@/lib/format";
 import FuelImport from "./FuelImport";
+import EvRatePanel from "./EvRatePanel";
 
 /* S3-P1b-2b 유류비 탭 — 주유 기록 입력·월 집계(차량·매니저·일자)·월 마감 */
 
@@ -335,6 +336,7 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
         </Panel>
       )}
 
+      <EvRatePanel isAdmin={isAdmin} />
 
       {imports.length > 0 && (
         <Panel title={`엑셀 업로드 기록 ${imports.length}건`}>

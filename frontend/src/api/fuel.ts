@@ -89,3 +89,28 @@ export interface DailyPrices {
   days: Array<{ date: string } & Record<FuelType, DailyPriceCell | null>>;
 }
 export const getDailyPrices = (month: string) => http<DailyPrices>(`/api/fuel/prices/daily?month=${month}`);
+
+
+/* ---------- S3-P2g-1 전기차 충전 단가 (로밍 요금 매트릭스) ---------- */
+export type EvSpeed = "slow" | "fast" | "ultra";
+export const EV_SPEED_LABEL: Record<EvSpeed, string> = { slow: "완속", fast: "급속", ultra: "초급속" };
+export interface EvSettings { ev_speed: EvSpeed; ev_km_per_kwh: number }
+export interface EvRateSet {
+  id: number; speed: EvSpeed; effective_from: string; issuer: string; base_price: number; rate_count: number;
+  file_name: string | null; memo: string | null; created_by: string | null; created_at: string | null;
+}
+export interface EvRate { operator: string; price: number }
+export interface EvRatePreview {
+  file_name: string | null; issuer: string; base_operator: string; base_price: number; header_row: number;
+  rate_count: number; skipped: number; speed: EvSpeed | null; effective_from: string | null;
+  duplicate_id: number | null; rates: EvRate[];
+}
+export const listEvRates = () => http<{ settings: EvSettings; sets: EvRateSet[] }>("/api/fuel/ev-rates");
+export const getEvRates = (id: number) => http<EvRate[]>(`/api/fuel/ev-rates/${id}/rates`);
+export const previewEvRates = (body: { file_name: string; content_b64: string }) =>
+  post<EvRatePreview>("/api/fuel/ev-rates/preview", body);
+export const commitEvRates = (body: {
+  file_name: string; content_b64: string; speed: EvSpeed; effective_from: string; memo: string | null;
+}) => post<{ ok: boolean; id: number; rate_count: number; base_price: number }>("/api/fuel/ev-rates", body);
+export const deleteEvRates = (id: number) => del<{ ok: boolean }>(`/api/fuel/ev-rates/${id}`);
+export const saveEvSettings = (body: EvSettings) => post<EvSettings>("/api/fuel/ev-rates/settings", body);

@@ -4,12 +4,13 @@ from fastapi import APIRouter, Depends, Query
 
 from app.auth import get_current_email
 from app.deps import guard, memo, require_admin
-from app.schemas.masters import (FuelCloseIn, FuelImportIn, FuelImportPreviewIn, FuelLogIn, FuelPriceIn,
-                                 FuelReleaseIn, FuelUndoIn)
+from app.schemas.masters import (EvRateCommitIn, EvRateFileIn, EvSettingsIn, FuelCloseIn, FuelImportIn,
+                                 FuelImportPreviewIn, FuelLogIn, FuelPriceIn, FuelReleaseIn, FuelUndoIn)
 from app.services import fuel_price_service as svc
 from app.services import fuel_log_service as logs_svc
 from app.services import fuel_export
 from app.services import fuel_import_service as import_svc
+from app.services import ev_rate_service as ev_svc
 from app.services.excel_export import xlsx_response
 
 router = APIRouter(prefix="/fuel", tags=["fuel"])
@@ -110,4 +111,36 @@ def export_month(month: str = Query(...), _: str = Depends(get_current_email)):
     name, sheets = guard(fuel_export.month_sheets, month, fail="유류비 내보내기 실패") 
     return xlsx_response(name, sheets)
 
+
+# ---------- S3-P2g-1 전기차 충전 단가 (로밍 요금 매트릭스) · 예상 충전비 설정 ----------
+@router.get("/ev-rates")
+def ev_rates(_: str = Depends(get_current_email)):
+    return guard(ev_svc.list_sets, fail="충전 단가 조회 실패")
+
+
+@router.get("/ev-rates/{sid}/rates")
+def ev_rate_detail(sid: int, _: str = Depends(get_current_email)):
+    return guard(ev_svc.rates_of, sid, fail="충전 단가 조회 실패")
+
+
+@router.post("/ev-rates/preview")
+def ev_rate_preview(body: EvRateFileIn, _: str = Depends(require_admin)):
+    return guard(ev_svc.preview, body.content_b64, body.file_name, fail="요금 매트릭스 미리보기 실패")
+
+
+@router.post("/ev-rates/settings")
+def ev_settings(body: EvSettingsIn, email: str = Depends(require_admin)):
+    return guard(ev_svc.save_settings, body.ev_speed, body.ev_km_per_kwh, email, fail="충전비 설정 저장 실패")
+
+
+@router.post("/ev-rates")
+def ev_rate_commit(body: EvRateCommitIn, email: str = Depends(require_admin)):
+    return guard(ev_svc.commit, body.content_b64, body.file_name, body.speed, body.effective_from,
+                 memo(body.memo), email, fail="충전 단가 저장 실패")
+
+
+@router.delete("/ev-rates/{sid}")
+def ev_rate_delete(sid: int, email: str = Depends(require_admin)):
+    guard(ev_svc.delete_set, sid, email, fail="충전 단가 삭제 실패")
+    return {"ok": True}
 

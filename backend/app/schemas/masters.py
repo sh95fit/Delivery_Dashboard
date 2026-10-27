@@ -99,3 +99,19 @@ class FuelImportIn(FuelImportPreviewIn):
 
 class FuelUndoIn(BaseModel):
     reason: str = Field(min_length=1, max_length=200)
+
+
+class EvRateFileIn(BaseModel):
+    file_name: str | None = Field(default=None, max_length=200)
+    content_b64: str = Field(min_length=1, max_length=3_000_000)
+
+
+class EvRateCommitIn(EvRateFileIn):
+    speed: Literal["slow", "fast", "ultra"]
+    effective_from: date
+    memo: str | None = Field(default=None, max_length=200)
+
+
+class EvSettingsIn(BaseModel):
+    ev_speed: Literal["slow", "fast", "ultra"]
+    ev_km_per_kwh: float = Field(gt=0, le=20)

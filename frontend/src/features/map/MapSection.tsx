@@ -378,7 +378,7 @@ export default function MapSection({
   const [built, setBuilt] = useState(0);
   const [sized, setSized] = useState(0);
   const [mapError, setMapError] = useState("");
-  const [zoom, setZoom] = useState(11);  
+  const [zoom, setZoom] = useState(11);
   const [listOpen, setListOpen] = useState(() => {
     try { return localStorage.getItem(LIST_KEY) !== "0"; } catch { return true; }
   });
