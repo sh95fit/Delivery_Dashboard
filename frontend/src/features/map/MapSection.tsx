@@ -6,6 +6,7 @@ import Chip from "@/components/ui/Chip";
 import ErrorBox from "@/components/ui/ErrorBox";
 import type { RouteSummary, StatusState, StopPoint } from "@/api/types";
 import { num, won } from "@/lib/format";
+import { arrowPoints, metersPerPixel, offsetPath } from "./routeGeom";
 
 const DEFAULT_CENTER = { lat: 37.5665, lng: 126.978 };
 const FIT_MARGIN = { top: 56, right: 56, bottom: 56, left: 56 };
@@ -13,6 +14,9 @@ const FALLBACK_COLOR = "#2563eb";
 const UNASSIGNED_COLOR = "#6b7280";
 const DIM_LINE = "#9ca3af";
 const LIST_KEY = "ll.map.list";
+const OFFSET_PX = 3;        // [S3-P2d-2c] 경로선을 진행 방향 오른쪽으로 띄우는 폭(화면 px)
+const ARROW_GAP_PX = 90;    // 선택 노선 화살표 간격(화면 px)
+const MAX_ARROWS = 300;     // 선 하나당 화살표 최대 개수
 
 declare global {
   interface Window {
@@ -364,6 +368,7 @@ export default function MapSection({
   const infoRef = useRef<any>(null);
   const entriesRef = useRef<Entry[]>([]);
   const linesRef = useRef<any[]>([]);
+  const arrowsRef = useRef<any[]>([]);
   const originRef = useRef<any>(null);
   const openKeyRef = useRef<string | null>(null);
   const fitKeyRef = useRef<string | null>(null);
@@ -373,6 +378,7 @@ export default function MapSection({
   const [built, setBuilt] = useState(0);
   const [sized, setSized] = useState(0);
   const [mapError, setMapError] = useState("");
+  const [zoom, setZoom] = useState(11);  
   const [listOpen, setListOpen] = useState(() => {
     try { return localStorage.getItem(LIST_KEY) !== "0"; } catch { return true; }
   });
@@ -537,6 +543,7 @@ export default function MapSection({
           if (Date.now() - overlayClickAt.current < 300) return;
           closeInfo();
         });
+        naver.maps.Event.addListener(map, "zoom_changed", () => setZoom(map.getZoom()));   // [S3-P2d-2c]
         mapRef.current = map;
         setReady(true);
       })
@@ -619,26 +626,32 @@ export default function MapSection({
     }
   }, [ready, built, order, selectedManagerId, phase]);
 
-  // 4) 경로선
+  // 4) 경로선 — [S3-P2d-2c] 진행 방향 오른쪽으로 OFFSET_PX만큼 띄워 그림 → 같은 길을 왕복하면 두 줄로 갈라짐
+  //    선택한 노선은 진행 방향 화살표 추가. 확대 단계가 바뀌면 다시 계산 (화면 기준 폭·간격 유지)
   useEffect(() => {
     const naver = window.naver;
     const map = mapRef.current;
     if (!ready || !naver?.maps || !map) return;
     linesRef.current.forEach((l) => l.setMap(null));
     linesRef.current = [];
+    arrowsRef.current.forEach((a) => a.setMap(null));
+    arrowsRef.current = [];
     const sel = selectedManagerId;
     for (const r of effectiveRoutes) {
       const focus = sel != null && r.manager_id === sel;
       const dim = sel != null && !focus;
       const opacity = focus ? 1 : dim ? 0.18 : 0.85;
+      const color = dim ? DIM_LINE : colorById.get(r.manager_id) ?? safeColor(r.manager_color);
       const segments: Array<[Array<Pt> | undefined, boolean]> = [[r.completed_path, false], [r.remaining_path, true]];
       for (const [path, dashed] of segments) {
-        const pts = (path ?? []).filter(okPt);
-        if (pts.length < 2) continue;
+        const raw = (path ?? []).filter(okPt);
+        if (raw.length < 2) continue;
+        const mpp = metersPerPixel(zoom, raw[0].lat);
+        const pts = offsetPath(raw, OFFSET_PX * mpp);
         const line = new naver.maps.Polyline({
           map,
           path: pts.map((p) => new naver.maps.LatLng(p.lat, p.lng)),
-          strokeColor: dim ? DIM_LINE : colorById.get(r.manager_id) ?? safeColor(r.manager_color),
+          strokeColor: color,
           strokeOpacity: opacity,
           strokeWeight: focus ? 6 : dim ? 3 : 4,
           strokeLineCap: "round",
@@ -652,9 +665,22 @@ export default function MapSection({
           live.current.select(r.manager_id);
         });
         linesRef.current.push(line);
+        if (!focus) continue;
+        for (const a of arrowPoints(pts, ARROW_GAP_PX * mpp, MAX_ARROWS)) {
+          arrowsRef.current.push(new naver.maps.Marker({
+            map,
+            position: new naver.maps.LatLng(a.lat, a.lng),
+            clickable: false,
+            zIndex: 60,
+            icon: {
+              content: `<div class="mk-arrow" style="color:${color};transform:rotate(${Math.round(a.deg)}deg)">▲</div>`,
+              anchor: new naver.maps.Point(6, 6),
+            },
+          }));
+        }
       }
     }
-  }, [ready, effectiveRoutes, selectedManagerId, colorById]);
+  }, [ready, effectiveRoutes, selectedManagerId, colorById, zoom]);
 
   // 5) 출발지
   useEffect(() => {

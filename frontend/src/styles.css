@@ -596,3 +596,6 @@ tr.wl-dirty td { background: #fffbeb; }
 
 /* S3-P2f 배송 취소 마커: 회색 + 점선 테두리, 번호 없음 */
 .mk-num.st-cancel { background: #9ca3af !important; border: 2px dashed #4b5563; opacity: 0.8; }
+
+/* S3-P2d-2c 경로 진행 방향 화살표 (선택한 노선만) */
+.mk-arrow { width: 12px; height: 12px; line-height: 12px; font-size: 10px; text-align: center; pointer-events: none; text-shadow: 0 0 2px #fff, 0 0 2px #fff; }
