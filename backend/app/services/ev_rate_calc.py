@@ -23,6 +23,11 @@ def _key(v) -> str:
     return re.sub(r"\s+", "", str(v)) if v is not None else ""
 
 
+def _is_issuer(k: str) -> bool:
+    """'기후에너지환경부' · '환경부' · '기후에너지환경부(환경부)'처럼 괄호 표기도 인정 (한국자동차환경협회 등은 제외)."""
+    return any(k == n or k.startswith(n + "(") for n in ISSUER_NAMES)
+
+
 def _price(v) -> float | None:
     if v is None or isinstance(v, bool):
         return None
@@ -42,15 +47,17 @@ def parse_matrix(rows: list[list]) -> dict:
     h = None
     for i, r in enumerate(rows[:HEADER_SCAN]):
         keys = [_key(v) for v in r]
-        if sum(1 for k in keys if k) >= MIN_OPERATORS and any(k in ISSUER_NAMES for k in keys[1:]):
+        if sum(1 for k in keys if k) >= MIN_OPERATORS and any(_is_issuer(k) for k in keys[1:]):
             h = i
             break
     if h is None:
-        raise ValueError("요금 매트릭스 머리글(충전 사업자 이름 줄)을 찾지 못했습니다 — 로밍 요금 매트릭스 파일인지 확인하세요")
+        top = " / ".join(_key(v) for r in rows[:2] for v in r[:6] if _key(v))[:120]
+        raise ValueError("요금 매트릭스 머리글(충전 사업자 이름 줄)을 찾지 못했습니다 — 로밍 요금 매트릭스 파일인지 확인하세요"
+                         + (f" (읽힌 위쪽 내용: {top})" if top else " (읽힌 내용 없음)"))
     head = rows[h]
     keys = [_key(v) for v in head]
     first = next(j for j, k in enumerate(keys) if k)
-    label_col = first - 1 if keys[first] in ISSUER_NAMES and first > 0 else first
+    label_col = first - 1 if _is_issuer(keys[first]) and first > 0 else first
 
     ops: dict[int, str] = {}
     seen: set[str] = set()
@@ -60,11 +67,8 @@ def parse_matrix(rows: list[list]) -> dict:
             ops[j] = str(head[j]).strip()[:100]
             seen.add(k)
 
-    row = None
-    for name in ISSUER_NAMES:
-        row = next((r for r in rows[h + 1:] if len(r) > label_col and _key(r[label_col]) == name), None)
-        if row is not None:
-            break
+    row = next((r for r in rows[h + 1:] if len(r) > label_col and _is_issuer(_key(r[label_col]))), None)
+
     if row is None:
         raise ValueError("기후에너지환경부 카드 행을 찾지 못했습니다 — 첫 칸에 '기후에너지환경부'가 있는 줄이 필요합니다")
 
@@ -77,7 +81,7 @@ def parse_matrix(rows: list[list]) -> dict:
             skipped += 1
             continue
         rates.append({"operator": name, "price": p})
-        if base is None and _key(name) in ISSUER_NAMES:
+        if base is None and _is_issuer(_key(name)):
             base_op, base = name, p
     if base is None:
         raise ValueError("기후에너지환경부 충전기 단가 칸이 비어 있습니다 — 파일을 확인하세요")

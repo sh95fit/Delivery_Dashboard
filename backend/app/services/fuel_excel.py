@@ -192,7 +192,11 @@ def _read_xlsx(data: bytes) -> list[list[list]]:
     from openpyxl import load_workbook
     wb = load_workbook(BytesIO(data), read_only=True, data_only=True)
     try:
-        return [[list(r) for r in ws.iter_rows(values_only=True)] for ws in wb.worksheets]
+        out = []
+        for ws in wb.worksheets:
+            ws.reset_dimensions()   # 파일에 적힌 사용 범위가 틀린 경우(A1:A1 등) 대비 — 실제 칸을 끝까지 읽음
+            out.append([list(r) for r in ws.iter_rows(values_only=True)])
+        return out
     finally:
         wb.close()
 

@@ -62,3 +62,16 @@ def test_read_settings():
         {"ev_speed": "ultra", "ev_km_per_kwh": 4.2}
     assert read_settings([{"key": "ev_speed", "value": "x"}, {"key": "ev_km_per_kwh", "value": "abc"}]) == \
         {"ev_speed": "fast", "ev_km_per_kwh": 3.1}
+
+
+def test_parse_matrix_issuer_suffix():
+    rows = [["발급/이용", "기후에너지환경부(환경부)", "한국전력공사", "채비"],
+            ["기후에너지환경부(환경부)", 393.1, "393.1", "470.5"]]
+    m = parse_matrix(rows)
+    assert m["base_price"] == 393.1
+    assert len(m["rates"]) == 3
+
+
+def test_parse_matrix_header_error_shows_top():
+    with pytest.raises(ValueError, match="읽힌 위쪽 내용: 아무"):
+        parse_matrix([["아무", "내용"]])
