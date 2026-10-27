@@ -24,6 +24,9 @@ export interface DayTotals {
   internal_gross: number;
   internal_refund: number;
   internal_net: number;
+  cancel_stops?: number;   // [S3-P2f] 배송 취소
+  cancel_meals?: number;
+  cancel_loss?: number;
 }
 
 export interface DayWarnings {
@@ -39,6 +42,8 @@ export interface DayWarnings {
   unplaced_lines?: number;
   unplaced_qty?: number;
   no_coord_stops?: number;
+  delivery_cancel_stops?: number;   // [S3-P2f]
+  delivery_cancel_loss?: number;
 }
 
 export interface InternalPlace {
@@ -121,6 +126,8 @@ export interface ManagerRow {
   internal_stops: number;
   internal_meals: number;
   internal_net: number;
+  cancel_stops?: number;   // [S3-P2f]
+  cancel_loss?: number;
   lineups?: Record<string, StopLineup>;
 }
 
@@ -147,6 +154,8 @@ export interface StopPoint {
   app_pending_qty: number;
   net_revenue: number;
   is_internal: boolean;
+  cancelled?: boolean;     // [S3-P2f] 배송 취소
+  cancel_loss?: number;  
   internal_meals: number;
   internal_net: number;
   lineups: Record<string, StopLineup>;
@@ -298,6 +307,7 @@ export interface RouteControl {
   stops: ControlStop[];
   done_stops: ControlStop[];
   excluded: ControlStop[];    // S3-P2d-5 관제 제외 배송지 (이 노선)  
+  cancelled?: ControlStop[];  // [S3-P2f] 배송 취소 (관제 제외, 상세에만 표시)  
   late: ControlStop[];
   max_delay_min: number;
   no_time: string[];

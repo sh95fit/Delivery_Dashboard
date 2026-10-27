@@ -30,6 +30,9 @@ class ManagerDelivery(BaseModel):
     internal_gross: int = 0
     internal_refund: int = 0
     internal_net: int = 0
+    cancel_stops: int = 0       # [S3-P2f] 배송 취소
+    cancel_meals: int = 0
+    cancel_loss: int = 0
     lineups: dict[str, LineupQty]
 
 
@@ -56,6 +59,8 @@ class StopPoint(BaseModel):
     app_pending_qty: int = 0
     net_revenue: int = 0
     is_internal: bool = False
+    cancelled: bool = False     # [S3-P2f]
+    cancel_loss: int = 0    
     internal_meals: int = 0
     internal_net: int = 0
     lineups: dict[str, LineupQty]

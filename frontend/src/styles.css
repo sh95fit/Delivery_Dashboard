@@ -585,7 +585,6 @@ tr.wl-dirty td { background: #fffbeb; }
 .inc-mini .ed-editing .input-sm { width: 100%; }
 .inc-legend .lg-extra::before { content: none; }
 
-
 /* S3-P1b-2b-3b 유류비 업로드: 끝번호별 차량 연결 표 — 칸 너비 고정, 차량 선택 너비 통일 */
 .fi-codes .tbl { table-layout: fixed; }
 .fi-codes .tbl th:nth-child(1) { width: 90px; }
@@ -594,3 +593,6 @@ tr.wl-dirty td { background: #fffbeb; }
 .fi-codes .tbl th:nth-child(4) { width: 120px; }
 .fi-codes .tbl td { padding: 6px 10px; vertical-align: middle; }
 .fi-codes .input-sm { width: 280px; max-width: 100%; }
+
+/* S3-P2f 배송 취소 마커: 회색 + 점선 테두리, 번호 없음 */
+.mk-num.st-cancel { background: #9ca3af !important; border: 2px dashed #4b5563; opacity: 0.8; }

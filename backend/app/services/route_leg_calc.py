@@ -99,6 +99,8 @@ def preview_input(stops: list[dict], mid: int, origin: dict, skip: set | None = 
     for s in stops:
         if not s.get("has_coord") or s.get("manager_id") is None or int(s["manager_id"]) != mid:
             continue
+        if s.get("cancelled"):
+            continue                                   # [S3-P2f] 배송 취소 → 남은 경로·출발점에서 뺌        
         if skip and s.get("address_id") is not None and int(s["address_id"]) in skip:
             continue                                   # [S3-P2d-5] 관제 제외 배송지 → 남은 경로·출발점에서 뺌        
         p = {"id": str(s.get("delivery_id") or s.get("address_id")), "lat": float(s["latitude"]), "lng": float(s["longitude"])}

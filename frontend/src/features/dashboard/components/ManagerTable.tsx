@@ -166,7 +166,12 @@ export default function ManagerTable({ rows, stops, showProgress, meta }: Props)
                     {num(m.stops)}
                     {m.internal_stops > 0 && <span className="text-internal tag-inline">직원식 {m.internal_stops}</span>}
                   </td>
-                  {showProgress && <td className="num">{num(doneOf(m))} / {num(m.stops)}</td>}
+                  {showProgress && (
+                    <td className="num">
+                      {num(doneOf(m))} / {num(m.stops - (m.cancel_stops ?? 0))}
+                      {m.cancel_stops ? <span className="muted small"> 취소 {m.cancel_stops}</span> : null}
+                    </td>
+                  )}
                   <td className="num">{num(m.meals)}</td>
                   <td className="num">{qtyCell(m.lunch_meals)}</td>
                   <td className="num">{qtyCell(m.dinner_meals)}</td>
@@ -182,7 +187,7 @@ export default function ManagerTable({ rows, stops, showProgress, meta }: Props)
           <tr {...rowProps(TOTAL, " sum")}>
             <td>{nameBtn(TOTAL, "합계")}</td>
             <td className="num">{num(sum((m) => m.stops))}</td>
-            {showProgress && <td className="num">{num(sum(doneOf))} / {num(sum((m) => m.stops))}</td>}
+            {showProgress && <td className="num">{num(sum(doneOf))} / {num(sum((m) => m.stops - (m.cancel_stops ?? 0)))}</td>}
             <td className="num">{num(sum((m) => m.meals))}</td>
             <td className="num">{num(sum((m) => m.lunch_meals))}</td>
             <td className="num">{num(sum((m) => m.dinner_meals))}</td>

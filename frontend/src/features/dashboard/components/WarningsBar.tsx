@@ -1,7 +1,7 @@
 import Chip from "@/components/ui/Chip";
 import type { ChipTone } from "@/components/ui/Chip";
 import type { DayWarnings } from "@/api/types";
-import { num } from "@/lib/format";
+import { num, won } from "@/lib/format";
 
 const SRC_LABEL: Record<string, string> = { web: "웹", admin: "어드민", app: "앱" };
 
@@ -21,6 +21,8 @@ export default function WarningsBar({ warnings }: { warnings?: DayWarnings | nul
       text: `주문 취소 ${num(w.cancelled_orders)}건 · ${num(w.cancelled_qty)}식${lost}${bySrc ? ` — ${bySrc}` : ""}`,
     });
   }
+  if (n(w.delivery_cancel_stops) > 0)
+    chips.push({ key: "dcancel", tone: "danger", text: `배송 취소 ${num(w.delivery_cancel_stops)}곳 · 받지 못한 매출 ${won(n(w.delivery_cancel_loss))} (매출에서 제외)` });  
   if (n(w.unconverted_app_qty) > 0)
     chips.push({ key: "unconv", tone: "neutral", text: `마감 후 앱 미전환 ${num(w.unconverted_app_qty)}식 (합계 제외)` });
   if (n(w.insufficient_records) > 0)

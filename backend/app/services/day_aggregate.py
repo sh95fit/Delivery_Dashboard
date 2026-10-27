@@ -204,6 +204,7 @@ def _bucket() -> dict:
         "web_qty": 0, "admin_qty": 0, "app_converted_qty": 0, "app_pending_qty": 0,
         "refund_qty": 0, "gross_revenue": 0, "refund_amount": 0, "estimated_revenue": 0,
         "internal_meals": 0, "internal_gross": 0, "internal_refund": 0,
+        "cancel_meals": 0, "cancel_gross": 0, "cancel_refund": 0,     # [S3-P2f] 배송 취소 (받지 못한 매출)        
     }
 
 
@@ -218,6 +219,11 @@ def _add_line(b: dict, ln: dict) -> None:
         b["internal_meals"] += q
         b["internal_gross"] += ln["gross_ex"]
         b["internal_refund"] += ln["refund_ex"]
+        return
+    if ln.get("cancelled"):          # [S3-P2f] 배송 취소: 주문은 남아 있지만 돈을 못 받음 → 매출 대신 취소 손실
+        b["cancel_meals"] += q
+        b["cancel_gross"] += ln["gross_ex"]
+        b["cancel_refund"] += ln["refund_ex"]
         return
     b["gross_revenue"] += ln["gross_ex"]
     b["refund_amount"] += ln["refund_ex"]
@@ -235,6 +241,7 @@ def _finish(b: dict) -> dict:
     out["app_qty"] = b["app_converted_qty"] + b["app_pending_qty"]
     out["net_revenue"] = b["gross_revenue"] - b["refund_amount"]
     out["internal_net"] = b["internal_gross"] - b["internal_refund"]
+    out["cancel_loss"] = b["cancel_gross"] - b["cancel_refund"]    
     return out
 
 
@@ -320,7 +327,10 @@ def assemble(target: date_type, mode: str, cutoff_at: datetime, cutoff_source: s
         stops[key] = {"info": info, "b": _bucket(), "accounts": set(), "lineups": {}}
         if info.get("address_id") is not None:
             # 같은 주소에 delivery 행이 여러 개면 첫 행에만 주문을 붙인다 (이중 합산 방지)
-            addr_to_key.setdefault(int(info["address_id"]), key)
+            aid = int(info["address_id"])
+            prev = addr_to_key.get(aid)
+            if prev is None or (stops[prev]["info"].get("cancelled") and not info.get("cancelled")):
+                addr_to_key[aid] = key      # [S3-P2f] 같은 주소에 취소·정상 행이 같이 있으면 정상 행에 붙임
 
     total = _bucket()
     all_accounts: set = set()
@@ -335,6 +345,9 @@ def assemble(target: date_type, mode: str, cutoff_at: datetime, cutoff_source: s
             unplaced_qty += ln["qty"]
             continue
         s = stops[key]
+        is_int = bool(ln.get("internal"))
+        is_cx = bool(s["info"].get("cancelled")) and not is_int   # [S3-P2f] 배송 취소 → 매출 대신 취소 손실
+        ln = {**ln, "cancelled": is_cx}
         _add_line(s["b"], ln)
         _add_line(total, ln)
         if ln["qty"] > 0 and ln["account_key"] is not None:
@@ -344,25 +357,27 @@ def assemble(target: date_type, mode: str, cutoff_at: datetime, cutoff_source: s
         pid = str(ln["product_id"])
         name = ln["product_name"] or pid
         net = ln["gross_ex"] - ln["refund_ex"]
-        is_int = bool(ln.get("internal"))
 
         lu = s["lineups"].setdefault(pid, {"name": name, "qty": 0, "amount": 0, "internal_qty": 0})
         lu["qty"] += ln["qty"]
         if is_int:
             lu["internal_qty"] += ln["qty"]
-        else:
+        elif not is_cx:
             lu["amount"] += net
 
         bl = by_lineup.setdefault(pid, {
             "name": name, "meal": meal_of(ln["product_id"]), "qty": 0, "refund_qty": 0,
             "gross_revenue": 0, "refund_amount": 0, "net_revenue": 0,
-            "internal_qty": 0, "internal_net": 0,
+            "internal_qty": 0, "internal_net": 0, "cancel_qty": 0, "cancel_net": 0,
         })
         bl["qty"] += ln["qty"]
         bl["refund_qty"] += ln["refund_qty"]
         if is_int:
             bl["internal_qty"] += ln["qty"]
             bl["internal_net"] += net
+        elif is_cx:
+            bl["cancel_qty"] += ln["qty"]
+            bl["cancel_net"] += net
         else:
             bl["gross_revenue"] += ln["gross_ex"]
             bl["refund_amount"] += ln["refund_ex"]
@@ -391,6 +406,7 @@ def assemble(target: date_type, mode: str, cutoff_at: datetime, cutoff_source: s
             "delivered_at": info.get("delivered_at"),
             "seq": _to_int(info.get("seq")),       
             "is_internal": bool(info.get("is_internal")),
+            "cancelled": bool(info.get("cancelled")),            
             "accounts": len(s["accounts"]),
             "lineups": s["lineups"],
             "_key": key,
@@ -407,10 +423,11 @@ def assemble(target: date_type, mode: str, cutoff_at: datetime, cutoff_source: s
         mk = st["manager_id"]
         m = mgrs.setdefault(mk, {
             "manager_id": mk, "manager_name": st["manager_name"], "color": st["manager_color"],
-            "b": _bucket(), "accounts": set(), "stops": 0, "internal_stops": 0, "lineups": {},
+            "b": _bucket(), "accounts": set(), "stops": 0, "internal_stops": 0, "cancel_stops": 0, "lineups": {},
         })
         m["stops"] += 1
         m["internal_stops"] += 1 if st["is_internal"] else 0
+        m["cancel_stops"] += 1 if st["cancelled"] else 0
         _merge(m["b"], s["b"])
         m["accounts"] |= s["accounts"]
         _merge_lineups(m["lineups"], s["lineups"])
@@ -424,6 +441,7 @@ def assemble(target: date_type, mode: str, cutoff_at: datetime, cutoff_source: s
             "manager_color": m["color"],
             "stops": m["stops"],
             "internal_stops": m["internal_stops"],
+            "cancel_stops": m["cancel_stops"],            
             "accounts": len(m["accounts"]),
             "lineups": m["lineups"],
         }
@@ -443,11 +461,14 @@ def assemble(target: date_type, mode: str, cutoff_at: datetime, cutoff_source: s
         "unassigned_stops": sum(1 for st in stops_out if st["manager_id"] is None),
         "no_coord_stops": no_coord,
         "internal_stops": sum(1 for st in stops_out if st["is_internal"]),
+        "cancel_stops": sum(1 for st in stops_out if st["cancelled"]),        
     })
     warnings.update({
         "unplaced_lines": unplaced_lines,
         "unplaced_qty": unplaced_qty,
         "no_coord_stops": no_coord,
+        "delivery_cancel_stops": totals["cancel_stops"],
+        "delivery_cancel_loss": totals["cancel_loss"],        
     })
 
     ordered_lineup = {k: by_lineup[k] for k in [str(p) for p in LINEUP_ORDER] if k in by_lineup}
@@ -476,7 +497,8 @@ def status_view(agg: dict, now: datetime) -> dict:
     cutoff_at = datetime.fromisoformat(agg["cutoff_at"])
     t = agg["totals"]
     has_delivery = agg["mode"] == MODE_DELIVERY
-    delivery_total = t["stops"] if has_delivery else 0
+    active = t["stops"] - t.get("cancel_stops", 0)      # [S3-P2f] 배송 취소는 진행률·완료 판정에서 뺌
+    delivery_total = active if has_delivery else 0
     completed = t["completed_stops"] if has_delivery else 0
     has_orders = t["stops"] > 0
 
@@ -498,7 +520,7 @@ def status_view(agg: dict, now: datetime) -> dict:
     else:
         state = "PREVIEW"
 
-    show_total = t["stops"] if (has_delivery or state == "PREVIEW") else 0
+    show_total = active if (has_delivery or state == "PREVIEW") else 0
     progress = {"completed": completed, "total": show_total, "unassigned": t["unassigned_stops"]}
 
     estimate = None
@@ -569,7 +591,7 @@ def delivery_view(agg: dict) -> dict:
 SQL_CUTOFF = "SELECT MAX(order_completed_at) FROM schedules WHERE delivery_on = :d"
 
 SQL_DELIVERY_STOPS = """
-SELECT d.id AS delivery_id, d.address_id, d.manager_id, d.delivered_at, d.ordering AS seq, a.account_id,
+SELECT d.id AS delivery_id, d.address_id, d.manager_id, d.delivered_at, d.ordering AS seq, d.status, a.account_id,
        m.name AS manager_name, m.color AS manager_color,
        a.name AS address_name, a.detail_address, a.latitude, a.longitude, a.delivery_hour
 FROM delivery d
@@ -696,6 +718,7 @@ def delivery_row_to_info(r) -> dict:
         "manager_color": manager_color(r["manager_id"], r["manager_color"]),
         "delivered_at": to_kst(r["delivered_at"]),
         "seq": r.get("seq"),        
+        "cancelled": r.get("status") == "cancel",     # [S3-P2f] 운영 앱 배송 취소        
     }
 
 
@@ -727,6 +750,7 @@ def fetch_address_stops(conn, address_ids: list[int]) -> list[dict]:
         "manager_color": manager_color(r["manager_id"], r["manager_color"]),
         "delivered_at": None,
         "seq": None,
+        "cancelled": False,        
     } for r in sorted(rows, key=lambda x: x["address_id"])]
 
 

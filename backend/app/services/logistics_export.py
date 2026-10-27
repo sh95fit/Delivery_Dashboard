@@ -6,6 +6,7 @@ from datetime import date
 WD = "월화수목금토일"
 MONEY = [
     ("순매출(부가세 제외)", "net_revenue"),
+    ("취소 손실(받지 못한 매출, 참고)", "cancel_loss"),    
     ("인건비", "labor"),
     ("인건비 예상(기록 없음)", "labor_est"),
     ("연장 예상", "ot_expected"),

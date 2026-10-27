@@ -185,6 +185,7 @@ export default function ControlTable({ data, names, selected, onSelect, live, is
                 <td className="num">
                   {c.done}/{c.done + c.remaining}
                   {c.excluded?.length ? <span className="muted small"> +제외 {c.excluded.length}</span> : null}
+                  {c.cancelled?.length ? <span className="muted small"> 취소 {c.cancelled.length}</span> : null}
                 </td>
                 <td>{hm(c.last_at)}{show && c.idle_min != null ? ` (${c.idle_min}분 전)` : ""}</td>
                 <td title={show && next ? `다음 곳: ${next}` : undefined}>{show ? hm(c.next_eta) : "-"}</td>
@@ -247,6 +248,7 @@ function RouteDetail({ m, name, live, isAdmin, busy, excludes, onClose, onFocus,
     ...c.done_stops.map((s) => ({ s, kind: "done" as const })),
     ...c.stops.map((s) => ({ s, kind: "left" as const })),
     ...(c.excluded ?? []).map((s) => ({ s, kind: "excluded" as const })),
+    ...(c.cancelled ?? []).map((s) => ({ s, kind: "cancelled" as const })),    
   ];
   const exOf = (s: ControlStop) => excludes.find((x) => x.address_id === s.address_id);
   return (
@@ -269,7 +271,7 @@ function RouteDetail({ m, name, live, isAdmin, busy, excludes, onClose, onFocus,
               <td>{s.name}</td>
               <td>{hm(s.target_at)}</td>
               <td>{kind === "left" ? (s.skipped ? "연결 불가" : live ? hm(s.eta) : "-") : hm(s.done_at)}</td>
-              <td>{kind === "done" ? "완료" : kind === "left" ? "남음" : <Chip>관제 제외</Chip>}</td>
+              <td>{kind === "done" ? "완료" : kind === "left" ? "남음" : kind === "cancelled" ? <Chip tone="danger">배송 취소</Chip> : <Chip>관제 제외</Chip>}</td>
               <td className="num">
                 {kind === "left"
                   ? <span className="muted">{c.dwell_min}분 (예상)</span>
@@ -280,15 +282,17 @@ function RouteDetail({ m, name, live, isAdmin, busy, excludes, onClose, onFocus,
                       : `${Math.round(s.dwell_min)}분`}
               </td>
               <td className="num">
-                {kind === "excluded" || (kind === "left" && !live)
+                {kind === "excluded" || kind === "cancelled" || (kind === "left" && !live)
                   ? <span className="muted">-</span>
                   : <Gap m={s.delay_min} done={kind === "done"} />}
               </td>
               {isAdmin && (
                 <td onClick={(e) => e.stopPropagation()}>
-                  {kind === "excluded"
-                    ? ex && <Button size="sm" disabled={busy} onClick={() => onRelease(ex)}>해제</Button>
-                    : s.address_id != null && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onExclude(s)}>제외</Button>}
+                  {kind === "cancelled"
+                    ? null
+                    : kind === "excluded"
+                      ? ex && <Button size="sm" disabled={busy} onClick={() => onRelease(ex)}>해제</Button>
+                      : s.address_id != null && <Button size="sm" variant="ghost" disabled={busy} onClick={() => onExclude(s)}>제외</Button>}
                 </td>
               )}
             </tr>

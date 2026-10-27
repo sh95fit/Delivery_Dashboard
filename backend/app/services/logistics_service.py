@@ -23,7 +23,7 @@ MAX_DAYS = 366   # 1년(윤년 포함). 느리면 줄인다
 logger = logging.getLogger("logistics")
 
 COST_KEYS = ("labor", "labor_est", "ot_expected", "incentive", "extras", "vehicle", "fuel", "fuel_est")
-REF_KEYS = ("ncp_fuel", "calc_fuel", "route_m", "route_ms")   # S3-P2b 참고 칸 — cost_total에 넣지 않음 (route_ms = S3-P2d-3 주행 시간)
+REF_KEYS = ("ncp_fuel", "calc_fuel", "route_m", "route_ms", "cancel_loss")   # 참고 칸 — cost_total에 넣지 않음 (route_ms = 주행 시간, cancel_loss = S3-P2f 배송 취소로 받지 못한 매출, 순매출에서 이미 뺌)
 NO_ACCOUNT = "계정 미지정"
 
 
@@ -232,7 +232,8 @@ def cost_view(frm: date, to: date) -> dict:
         d = _d(v["date"])
         for m in v.get("managers") or []:
             mid = m.get("manager_id")
-            cell(d, mid)["net_revenue"] += int(m.get("net_revenue") or 0)
+            cell(d, mid)["net_revenue"] += int(m.get("net_revenue") or 0)            
+            cell(d, mid)["cancel_loss"] += int(m.get("cancel_loss") or 0)
             if m.get("manager_name"):
                 names[mid] = m["manager_name"]
 
@@ -262,6 +263,8 @@ def cost_view(frm: date, to: date) -> dict:
         rows.append(_finish({**acc, "manager_name": name}))
     rows.sort(key=lambda x: (x["manager_id"] is None, -x["net_revenue"]))
     totals = _finish({k: sum(r[k] for r in rows) for k in ("net_revenue",) + COST_KEYS + REF_KEYS})
+    if totals["cancel_loss"]:
+        add("info", f"배송 취소로 받지 못한 매출 {totals['cancel_loss']:,}원 — 순매출에서 이미 빠져 이익에 반영됨 (물류비 합계에는 넣지 않음)")    
     if totals["labor_est"]:
         add("info", f"인건비 중 {totals['labor_est']:,}원은 근무 기록이 없는 날의 예상 금액")
     timing["total"] = round(time.perf_counter() - started, 2)

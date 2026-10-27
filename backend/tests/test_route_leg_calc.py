@@ -154,3 +154,9 @@ def test_trim_preview():
     old = {"path": [[0, 0], [1, 1]], "groups": [{"ids": ["a"], "distance_m": 1, "duration_ms": 1}]}
     assert trim_preview(old, {"a"}) is old                        # 예전 계산(묶음별 선 없음) → 그대로
     assert trim_preview(None, {"a"}) is None
+
+
+def test_preview_input_cancelled():
+    o = {"lat": 37.0, "lng": 127.0}
+    stops = [P("c", 7, 37.3, None, 3), {**P("d", 7, 37.4, None, 4), "cancelled": True}]
+    assert [p["id"] for p in preview_input(stops, 7, o)[1]] == ["c"]   # [S3-P2f] 배송 취소는 남은 경로에서 뺌

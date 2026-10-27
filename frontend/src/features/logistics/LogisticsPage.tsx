@@ -20,6 +20,7 @@ const MAX_DAYS = 366;
 
 const COLUMNS = [
   { label: "순매출", num: true },
+  { label: "취소 손실", num: true },  
   ...api.COST_COLS.map(([, label]) => ({ label, num: true })),
   { label: "물류비 합계", num: true },
   { label: "이익", num: true },
@@ -37,6 +38,7 @@ function Cells({ r }: { r: CostRow }) {
   return (
     <>
       <td className="num">{num(r.net_revenue)}</td>
+      <td className="num">{r.cancel_loss ? <span className="neg">−{num(r.cancel_loss)}</span> : "-"}</td>
       {api.COST_COLS.map(([k]) => <td key={k} className="num">{num(r[k])}</td>)}
       <td className="num"><b>{num(r.cost_total)}</b></td>
       <td className="num">{num(r.profit)}</td>
@@ -68,7 +70,7 @@ function Body({ view, showDays, onShowDays }: { view: CostView; showDays: boolea
   return (
     <>
       <section className="stat-grid mt">
-        <Card title="순매출" sub="부가세 제외">{won(t.net_revenue)}</Card>
+        <Card title="순매출" sub={t.cancel_loss ? `부가세 제외 · 배송 취소 −${won(t.cancel_loss)} 반영` : "부가세 제외"}>{won(t.net_revenue)}</Card>
         <Card title="물류비" sub={est ? `예상분 ${won(est)} 포함` : "확정"}>{won(t.cost_total)}</Card>
         <Card title="이익" sub="순매출 − 물류비">{won(t.profit)}</Card>
         <Card title="비용률" sub="물류비 ÷ 순매출">{ratio(t)}</Card>

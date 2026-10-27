@@ -161,7 +161,7 @@ function buildStopOrder(stops: StopPoint[], phase: Phase, origin: Pt | null) {
     const done = phase === "preview" ? [] : list
       .filter((s) => s.delivered_at)
       .sort((a, b) => doneAt(a) - doneAt(b) || byId(a, b));
-    const todo = phase === "result" ? [] : list.filter((s) => phase === "preview" || !s.delivered_at);
+    const todo = phase === "result" ? [] : list.filter((s) => !s.cancelled && (phase === "preview" || !s.delivered_at));
     const last = [...done].reverse().find(hasXY);
     const a = chainBy(todo.filter((s) => s.seq != null), (s) => s.seq as number, last ? xy(last) : origin);
     const b = chainBy(todo.filter((s) => s.seq == null), (s) => s.delivery_time || "99:99", a.end);
@@ -243,12 +243,14 @@ function mergeWithStaleRoutes(current: RouteSummary[], previous: RouteSummary[])
 }
 
 /* ---------- 마커 ---------- */
-type MkState = "done" | "miss" | "plan";
+type MkState = "done" | "miss" | "plan" | "cancel";
 
 /** 바탕 = 매니저 색(노선), 빨강 링 = 미완료(delivered_at 없음). 같은 위치는 하나라도 미완료면 링 */
 function markerState(vis: StopPoint[], phase: Phase): MkState {
   if (phase === "preview" || vis.every(isPreviewStop)) return "plan";
-  return vis.every((x) => x.delivered_at) ? "done" : "miss";
+  const act = vis.filter((x) => !x.cancelled);          // [S3-P2f] 배송 취소는 완료·미완료 판단에서 뺌
+  if (act.length === 0) return "cancel";
+  return act.every((x) => x.delivered_at) ? "done" : "miss";
 }
 
 function markerStyle(naver: any, g: StopGroup, order: Map<string, number>, sel: number | null, phase: Phase) {
@@ -272,6 +274,7 @@ function markerStyle(naver: any, g: StopGroup, order: Map<string, number>, sel: 
 /* ---------- 정보창 ---------- */
 function statusChip(s: StopPoint, phase: Phase) {
   if (phase === "preview" || isPreviewStop(s)) return `<span class="chip chip-warn">예상</span>`;
+  if (s.cancelled) return `<span class="chip chip-danger">배송 취소</span>`;  
   if (s.delivered_at) return `<span class="chip chip-ok">완료 ${esc(hhmm(s.delivered_at))}</span>`;
   return `<span class="chip chip-danger">미완료</span>`;
 }
@@ -414,7 +417,7 @@ export default function MapSection({
         id: s.manager_id, name: s.manager_name ?? String(s.manager_id), color: safeColor(s.manager_color),
         stops: 0, done: 0, meals: 0, km: 0, min: 0, hasLine: false, hasOrder: false,
       };
-      it.stops += 1;
+      if (!s.cancelled) it.stops += 1;     // [S3-P2f] 배송 취소는 완료/전체 수에서 뺌
       it.meals += s.meals ?? 0;
       if (s.delivered_at) it.done += 1;
       if (stopNo(s, order) != null) it.hasOrder = true;       
@@ -443,7 +446,7 @@ export default function MapSection({
 
   const totals = useMemo(
     () => ({
-      stops: stops.length,
+      stops: stops.filter((s) => !s.cancelled).length,
       done: stops.filter((s) => s.delivered_at).length,
       unassigned: stops.filter((s) => s.manager_id == null).length,
     }),
@@ -709,7 +712,7 @@ export default function MapSection({
   const selRow = rows.find((r) => r.id === selectedManagerId) ?? null;
   const missingNo = useMemo(() => {
     if (selectedManagerId == null || phase !== "result") return 0;
-    return stops.filter((s) => s.manager_id === selectedManagerId && stopNo(s, order) == null).length;
+    return stops.filter((s) => s.manager_id === selectedManagerId && !s.cancelled && stopNo(s, order) == null).length;
   }, [stops, order, selectedManagerId, selRow, phase]);
   const srcLabel: Record<string, string> = { cache: "캐시", naver: "새 계산", pending: "경로 계산 전", unavailable: "경로선 없음" };
 

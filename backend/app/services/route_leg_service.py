@@ -369,7 +369,7 @@ def auto_eta(d: date) -> dict:
         return out
     started, left = set(), set()
     for s in day_cache.get_day(d).get("stops") or []:
-        if s.get("manager_id") is None or not s.get("has_coord"):
+        if s.get("manager_id") is None or not s.get("has_coord") or s.get("cancelled"):
             continue
         (started if s.get("delivered_at") else left).add(int(s["manager_id"]))
     for mid in sorted(started & left):
@@ -394,6 +394,7 @@ def _control(d: date, mid: int, legs: list[dict], stops: list[dict], last: dict 
     target_of: dict = {}
     done_stops: list[dict] = []
     excluded: list[dict] = []    
+    cancelled: list[dict] = []    
     last_at = None
     for s in stops:
         if s.get("manager_id") is None or int(s["manager_id"]) != mid:
@@ -401,6 +402,9 @@ def _control(d: date, mid: int, legs: list[dict], stops: list[dict], last: dict 
         sid = str(s.get("delivery_id") or s.get("address_id"))
         aid = int(s["address_id"]) if s.get("address_id") is not None else None
         info[sid] = {"name": s.get("address_name") or sid, "seq": s.get("seq"), "address_id": aid}
+        if s.get("cancelled"):            # [S3-P2f] 배송 취소 → 관제에서 빼고 상세에 '배송 취소'로만 표시
+            cancelled.append({"id": sid, **info[sid], "target_at": None, "delay_min": None, "done_at": None})
+            continue        
         if skip and aid in skip:          # [S3-P2d-5] 관제 제외 → 완료·지연·정체 판단에서 뺌 (지도에는 그대로)
             at_x = to_kst(s.get("delivered_at"))
             excluded.append({"id": sid, **info[sid], "target_at": None, "delay_min": None,
@@ -435,6 +439,7 @@ def _control(d: date, mid: int, legs: list[dict], stops: list[dict], last: dict 
     c["no_time"] = [info.get(i, {}).get("name", i) for i in c.pop("no_time_ids")]
     late_done = sum(1 for x in done_stops if (x["delay_min"] or 0) >= 1)
     return {**c, "done": len(done_stops), "late_done": late_done, "done_stops": done_stops, "excluded": excluded,
+            "cancelled": cancelled,
             "calc_at": (last or {}).get("calc_at"),
             "dwell_auto_min": round(auto / 60000, 1), "dwell_manual": bool(dwell_min)}
 
@@ -451,7 +456,8 @@ def start_preview_all(d: date) -> dict:
         return st
     stops = day_cache.get_day(d).get("stops") or []
     mids = sorted({int(s["manager_id"]) for s in stops
-                   if s.get("manager_id") is not None and s.get("has_coord") and not s.get("delivered_at")})
+                   if s.get("manager_id") is not None and s.get("has_coord") and not s.get("delivered_at")
+                   and not s.get("cancelled")})
     st = {"status": "running", "total": len(mids), "done": 0, "calls": 0, "failed": [], "started_ts": now_ts}
     _jset(_all_key(d), st)
     threading.Thread(target=_run_all, args=(d, mids, st), daemon=True).start()

@@ -6,6 +6,8 @@ export type CostRow = Record<CostKey, number> & {
     net_revenue: number; cost_total: number; profit: number; cost_ratio: number | null;
     ncp_fuel: number; calc_fuel: number; route_m: number; route_km: number;   // S3-P2b 참고 (합계 제외)
     route_ms: number; route_min: number;                                       // S3-P2d-3 주행 시간 (NAVER 예상, 정차 제외)
+    cancel_loss: number;                                                       // S3-P2f 배송 취소로 받지 못한 매출 (순매출에서 이미 뺌)
+
 };
 export type CostAccount = CostRow & { manager_id: number | null; manager_name: string };
 export type CostDay = CostRow & { date: string };

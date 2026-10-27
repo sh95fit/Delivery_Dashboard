@@ -21,11 +21,11 @@ _TOTAL_FIELDS = (
     "stops", "accounts", "meals", "lunch_meals", "dinner_meals",
     "web_qty", "admin_qty", "app_qty", "refund_qty",
     "gross_revenue", "refund_amount", "net_revenue", "estimated_revenue",
-    "internal_meals", "internal_net",
+    "internal_meals", "internal_net", "cancel_stops", "cancel_meals", "cancel_loss",
 )
 _MGR_FIELDS = (
     "stops", "meals", "accounts", "lunch_meals", "dinner_meals",
-    "gross_revenue", "refund_amount", "net_revenue", "internal_meals", "internal_net",
+    "gross_revenue", "refund_amount", "net_revenue", "internal_meals", "internal_net", "cancel_loss",
 )
 _LU_FIELDS = (
     "qty", "refund_qty", "gross_revenue", "refund_amount", "net_revenue",

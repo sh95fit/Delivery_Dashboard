@@ -351,3 +351,28 @@ def test_seq_passthrough():
     agg = _agg([s], [_line("web", 1, 10, 4, 1, 1000)], mode=da.MODE_DELIVERY)
     assert agg["stops"][0]["seq"] == 7
     assert _agg([_addr(2)], [_line("web", 2, 10, 4, 1, 1000)])["stops"][0]["seq"] is None
+
+
+# ---- [S3-P2f] 배송 취소: 매출에서 빼고 취소 손실로, 진행률에서 제외 ----
+def test_delivery_cancel_is_loss_not_revenue():
+    done = datetime(2026, 10, 1, 11, 0)
+    c = _dlv(2, 2, 1)
+    c["cancelled"] = True
+    agg = _agg([_dlv(1, 1, 1, delivered=done), c],
+               [_line("web", 1, 10, 4, 1, 8800), _line("web", 2, 20, 4, 2, 17600)], mode=da.MODE_DELIVERY)
+    t = agg["totals"]
+    assert t["net_revenue"] == 8000 and t["cancel_loss"] == 16000 and t["cancel_meals"] == 2
+    assert t["stops"] == 2 and t["cancel_stops"] == 1 and t["meals"] == 3
+    assert agg["managers"][0]["cancel_stops"] == 1 and agg["managers"][0]["cancel_loss"] == 16000
+    assert agg["warnings"]["delivery_cancel_stops"] == 1 and agg["warnings"]["delivery_cancel_loss"] == 16000
+    assert next(s for s in agg["stops"] if s["delivery_id"] == "2")["cancelled"] is True
+    sv = da.status_view(agg, datetime(2026, 10, 1, 12, 0, tzinfo=KST))
+    assert sv["state"] == "RESULT" and sv["progress"]["total"] == 1 and sv["incomplete"] == 0
+    _check_invariants(agg)
+
+
+def test_same_address_cancel_and_live_row():
+    c = _dlv(1, 1, 1)
+    c["cancelled"] = True
+    agg = _agg([c, _dlv(2, 1, 2)], [_line("web", 1, 10, 4, 1, 8800)], mode=da.MODE_DELIVERY)
+    assert agg["totals"]["net_revenue"] == 8000 and agg["totals"]["cancel_loss"] == 0
