@@ -15,7 +15,7 @@ import { kstDateTime } from "@/lib/format";
 
 type Props = { isAdmin: boolean };
 
-const SPEEDS: EvSpeed[] = ["fast", "ultra", "slow"];
+const SPEEDS: EvSpeed[] = ["slow", "mid", "fast50", "fast100", "ultra"];
 const MAX_BYTES = 2 * 1024 * 1024;
 const price = (p: number) => p.toLocaleString("ko-KR", { maximumFractionDigits: 2 });
 const toB64 = (f: File) =>
@@ -29,7 +29,7 @@ const toB64 = (f: File) =>
 export default function EvRatePanel({ isAdmin }: Props) {
   const [sets, setSets] = useState<EvRateSet[] | null>(null);
   const [cfg, setCfg] = useState<EvSettings | null>(null);
-  const [speedIn, setSpeedIn] = useState<EvSpeed>("fast");
+  const [speedIn, setSpeedIn] = useState<EvSpeed>("fast50");
   const [kmIn, setKmIn] = useState("3.1");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -124,6 +124,8 @@ export default function EvRatePanel({ isAdmin }: Props) {
   }
 
   const has = (sp: EvSpeed) => (sets ?? []).some((s) => s.speed === sp);
+  const latest = (sp: EvSpeed) =>
+    (sets ?? []).filter((s) => s.speed === sp).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0];
 
   return (
     <>
@@ -154,10 +156,22 @@ export default function EvRatePanel({ isAdmin }: Props) {
             )}
           </div>
         )}
+        {sets && (
+          <div className="row-gap mt">
+            {SPEEDS.map((sp) => {
+              const cur = latest(sp);
+              return (
+                <Chip key={sp} tone={cur ? "ok" : "warn"}>
+                  {EV_SPEED_LABEL[sp]} {cur ? `${price(cur.base_price)}원 · ${cur.effective_from}부터` : "없음"}
+                </Chip>
+              );
+            })}
+          </div>
+        )}        
         {!sets ? (
           <p className="muted">불러오는 중…</p>
         ) : sets.length === 0 ? (
-          <p className="muted mt">올린 요금 매트릭스가 없습니다. 무공해차 누리집에서 급속 로밍 요금 매트릭스를 내려받아 올리세요.</p>
+          <p className="muted mt">올린 요금 매트릭스가 없습니다. 무공해차 누리집에서 속도별 로밍 요금 매트릭스(완속 · 중속 · 급속 50~99kW · 급속 100~199kW · 초급속) 5개를 내려받아 하나씩 올리세요.</p>
         ) : (
           <div className="mt">
             <DataTable columns={["속도", "적용 시작일", { label: "기준 단가(원/kWh)", num: true }, { label: "사업자", num: true },

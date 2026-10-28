@@ -10,13 +10,14 @@ from __future__ import annotations
 import re
 from datetime import date
 
-SPEEDS = ("fast", "ultra", "slow")
-SPEED_LABEL = {"fast": "급속", "ultra": "초급속", "slow": "완속"}
+SPEEDS = ("slow", "mid", "fast50", "fast100", "ultra")     # 느린 순 (대체 속도는 가까운 순으로 고름)
+SPEED_LABEL = {"slow": "완속", "mid": "중속", "fast50": "급속 50~99kW", "fast100": "급속 100~199kW", "ultra": "초급속"}
+LEGACY_SPEED = {"fast": "fast50"}                          # S3-P2g-1 시절 값
 ISSUER_NAMES = ("기후에너지환경부", "환경부")
 HEADER_SCAN = 20
 MIN_OPERATORS = 3
 MAX_PRICE = 2000
-DEFAULT_SETTINGS = {"ev_speed": "fast", "ev_km_per_kwh": 3.1}
+DEFAULT_SETTINGS = {"ev_speed": "fast50", "ev_km_per_kwh": 2.5}
 
 
 def _key(v) -> str:
@@ -92,7 +93,18 @@ def parse_matrix(rows: list[list]) -> dict:
 def guess_meta(file_name: str | None) -> dict:
     """파일 이름 '로밍 요금 매트릭스(초급속(200kW 이상))_2026-10-22.xlsx' → {speed: 'ultra', effective_from: 2026-10-22}."""
     s = _key(file_name or "")
-    speed = "ultra" if "초급속" in s else "fast" if "급속" in s else "slow" if "완속" in s else None
+    speed = None
+    if "초급속" in s:
+        speed = "ultra"
+    elif "중속" in s:
+        speed = "mid"
+    elif "완속" in s:
+        speed = "slow"
+    elif "급속" in s:                       # '급속(50~99kW)' · '급속(100~199kW)' → 앞 숫자로 구분, 숫자 없으면 직접 선택
+        k = re.search(r"급속\(?(\d+)", s)
+        if k:
+            kw = int(k[1])
+            speed = "fast100" if kw >= 100 else "fast50" if kw >= 50 else None
     eff = None
     m = re.search(r"(20\d{2})[-._]?(\d{2})[-._]?(\d{2})", s)
     if m:
@@ -106,7 +118,8 @@ def guess_meta(file_name: str | None) -> dict:
 def rate_on(sets: list[dict], speed: str, d: date) -> dict | None:
     """sets = [{speed, effective_from, base_price}]. 반환 = {price, speed, effective_from, early} 또는 None.
     1) 설정 속도에서 그날 이전 가장 최근 단가 2) 없으면 다른 속도 3) 그날 이전 단가가 전혀 없으면 가장 이른 단가(early=True)."""
-    order = [speed] + [s for s in SPEEDS if s != speed]
+    i = SPEEDS.index(speed) if speed in SPEEDS else SPEEDS.index(DEFAULT_SETTINGS["ev_speed"])
+    order = sorted(SPEEDS, key=lambda s: (abs(SPEEDS.index(s) - i), SPEEDS.index(s)))   # 설정 속도 → 가까운 속도 순
     for sp in order:
         cand = [s for s in sets if s["speed"] == sp and s["effective_from"] <= d]
         if cand:
@@ -124,8 +137,9 @@ def read_settings(rows: list[dict]) -> dict:
     """cost_settings 행 → {ev_speed, ev_km_per_kwh}. 값이 없거나 잘못되면 기본값 (급속 · 3.1km/kWh)."""
     raw = {r["key"]: r["value"] for r in rows}
     out = dict(DEFAULT_SETTINGS)
-    if raw.get("ev_speed") in SPEEDS:
-        out["ev_speed"] = raw["ev_speed"]
+    sp = LEGACY_SPEED.get(raw.get("ev_speed"), raw.get("ev_speed"))
+    if sp in SPEEDS:
+        out["ev_speed"] = sp
     try:
         km = float(raw.get("ev_km_per_kwh"))
         if 0 < km <= 20:

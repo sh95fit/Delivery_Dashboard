@@ -92,8 +92,10 @@ export const getDailyPrices = (month: string) => http<DailyPrices>(`/api/fuel/pr
 
 
 /* ---------- S3-P2g-1 전기차 충전 단가 (로밍 요금 매트릭스) ---------- */
-export type EvSpeed = "slow" | "fast" | "ultra";
-export const EV_SPEED_LABEL: Record<EvSpeed, string> = { slow: "완속", fast: "급속", ultra: "초급속" };
+export type EvSpeed = "slow" | "mid" | "fast50" | "fast100" | "ultra";
+export const EV_SPEED_LABEL: Record<EvSpeed, string> = {
+  slow: "완속", mid: "중속", fast50: "급속 50~99kW", fast100: "급속 100~199kW", ultra: "초급속",
+};
 export interface EvSettings { ev_speed: EvSpeed; ev_km_per_kwh: number }
 export interface EvRateSet {
   id: number; speed: EvSpeed; effective_from: string; issuer: string; base_price: number; rate_count: number;

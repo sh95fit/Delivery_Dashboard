@@ -41,27 +41,34 @@ def test_parse_matrix_errors():
 
 def test_guess_meta():
     assert guess_meta("로밍 요금 매트릭스(초급속(200kW 이상))_2026-10-22.xlsx") == {"speed": "ultra", "effective_from": date(2026, 10, 22)}
-    assert guess_meta("로밍 요금 매트릭스(급속)_20261101.xlsx") == {"speed": "fast", "effective_from": date(2026, 11, 1)}
+    assert guess_meta("로밍 요금 매트릭스(급속)_20261101.xlsx") == {"speed": None, "effective_from": date(2026, 11, 1)}
+    assert guess_meta("로밍 요금 매트릭스(급속(50~99kW))_2026-10-27.xlsx")["speed"] == "fast50"
+    assert guess_meta("로밍 요금 매트릭스(급속(100~199kW))_2026-10-27.xlsx")["speed"] == "fast100"
+    assert guess_meta("로밍 요금 매트릭스(중속(30~49kW))_2026-10-27.xlsx")["speed"] == "mid"
+    assert guess_meta("로밍 요금 매트릭스(완속(30kW 미만))_2026-10-27.xlsx")["speed"] == "slow"
     assert guess_meta("matrix.xlsx") == {"speed": None, "effective_from": None}
     assert guess_meta(None) == {"speed": None, "effective_from": None}
 
 
 def test_rate_on():
     sets = [{"speed": "ultra", "effective_from": date(2026, 10, 22), "base_price": 393.1},
-            {"speed": "fast", "effective_from": date(2026, 11, 1), "base_price": 347.2}]
-    assert rate_on(sets, "fast", date(2026, 11, 5)) == {"price": 347.2, "speed": "fast", "effective_from": date(2026, 11, 1), "early": False}
-    assert rate_on(sets, "fast", date(2026, 10, 25))["speed"] == "ultra"          # 급속 없음 → 초급속 대체
-    r = rate_on(sets, "fast", date(2026, 9, 1))                                    # 이전 단가 없음 → 가장 이른 단가
-    assert r["speed"] == "fast" and r["early"] is True
-    assert rate_on([], "fast", date(2026, 9, 1)) is None
+            {"speed": "fast50", "effective_from": date(2026, 11, 1), "base_price": 325.6},
+            {"speed": "fast100", "effective_from": date(2026, 11, 1), "base_price": 348.4}]
+    assert rate_on(sets, "fast50", date(2026, 11, 5)) == {"price": 325.6, "speed": "fast50", "effective_from": date(2026, 11, 1), "early": False}
+    assert rate_on(sets, "fast50", date(2026, 10, 25))["speed"] == "ultra"        # 그날 이전 급속 없음 → 있는 속도
+    assert rate_on(sets, "mid", date(2026, 11, 5))["speed"] == "fast50"           # 중속 없음 → 가까운 속도
+    r = rate_on(sets, "fast50", date(2026, 9, 1))                                  # 이전 단가 없음 → 가장 이른 단가
+    assert r["speed"] == "fast50" and r["early"] is True
+    assert rate_on([], "fast50", date(2026, 9, 1)) is None
 
 
 def test_read_settings():
-    assert read_settings([]) == {"ev_speed": "fast", "ev_km_per_kwh": 3.1}
+    assert read_settings([]) == {"ev_speed": "fast50", "ev_km_per_kwh": 3.1}
     assert read_settings([{"key": "ev_speed", "value": "ultra"}, {"key": "ev_km_per_kwh", "value": "4.2"}]) == \
         {"ev_speed": "ultra", "ev_km_per_kwh": 4.2}
+    assert read_settings([{"key": "ev_speed", "value": "fast"}])["ev_speed"] == "fast50"     # 예전 값 → 급속 50~99kW
     assert read_settings([{"key": "ev_speed", "value": "x"}, {"key": "ev_km_per_kwh", "value": "abc"}]) == \
-        {"ev_speed": "fast", "ev_km_per_kwh": 3.1}
+        {"ev_speed": "fast50", "ev_km_per_kwh": 2.5}
 
 
 def test_parse_matrix_issuer_suffix():

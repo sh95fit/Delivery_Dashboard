@@ -107,11 +107,11 @@ class EvRateFileIn(BaseModel):
 
 
 class EvRateCommitIn(EvRateFileIn):
-    speed: Literal["slow", "fast", "ultra"]
+    speed: Literal["slow", "mid", "fast50", "fast100", "ultra"]
     effective_from: date
     memo: str | None = Field(default=None, max_length=200)
 
 
 class EvSettingsIn(BaseModel):
-    ev_speed: Literal["slow", "fast", "ultra"]
+    ev_speed: Literal["slow", "mid", "fast50", "fast100", "ultra"]
     ev_km_per_kwh: float = Field(gt=0, le=20)
