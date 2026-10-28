@@ -116,3 +116,12 @@ export const commitEvRates = (body: {
 }) => post<{ ok: boolean; id: number; rate_count: number; base_price: number }>("/api/fuel/ev-rates", body);
 export const deleteEvRates = (id: number) => del<{ ok: boolean }>(`/api/fuel/ev-rates/${id}`);
 export const saveEvSettings = (body: EvSettings) => post<EvSettings>("/api/fuel/ev-rates/settings", body);
+
+/* S3-P2g-1d 여러 파일 한 번에 (최대 5개) — 읽지 못한 파일은 error에 이유, 나머지 칸은 비어 있음 */
+export type EvRateBatchPreview = EvRatePreview & { error: string | null };
+export const previewEvRatesBatch = (files: Array<{ file_name: string; content_b64: string }>) =>
+  post<EvRateBatchPreview[]>("/api/fuel/ev-rates/batch/preview", { files });
+export const commitEvRatesBatch = (items: Array<{
+  file_name: string; content_b64: string; speed: EvSpeed; effective_from: string; memo: string | null;
+}>) => post<{ ok: boolean; saved: Array<{ id: number; speed: EvSpeed; rate_count: number; base_price: number }> }>(
+  "/api/fuel/ev-rates/batch", { items });

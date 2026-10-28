@@ -112,6 +112,14 @@ class EvRateCommitIn(EvRateFileIn):
     memo: str | None = Field(default=None, max_length=200)
 
 
+class EvRateBatchFileIn(BaseModel):      # S3-P2g-1d 여러 파일 미리보기 (최대 5개)
+    files: list[EvRateFileIn] = Field(min_length=1, max_length=5)
+
+
+class EvRateBatchCommitIn(BaseModel):    # S3-P2g-1d 여러 파일 저장 (최대 5개 · 하나라도 문제 있으면 전부 저장 안 함)
+    items: list[EvRateCommitIn] = Field(min_length=1, max_length=5)
+
+
 class EvSettingsIn(BaseModel):
     ev_speed: Literal["slow", "mid", "fast50", "fast100", "ultra"]
     ev_km_per_kwh: float = Field(gt=0, le=20)

@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from app.services.ev_rate_calc import guess_meta, parse_matrix, rate_on, read_settings
+from app.services.ev_rate_calc import SPEEDS, batch_problems, guess_meta, parse_matrix, rate_on, read_settings
 
 HEAD = ["발급/이용", "기후에너지환경부", "한국전력공사", "GS차지비", "채비", "에버온"]
 ROWS = [
@@ -55,7 +55,9 @@ def test_rate_on():
             {"speed": "fast50", "effective_from": date(2026, 11, 1), "base_price": 325.6},
             {"speed": "fast100", "effective_from": date(2026, 11, 1), "base_price": 348.4}]
     assert rate_on(sets, "fast50", date(2026, 11, 5)) == {"price": 325.6, "speed": "fast50", "effective_from": date(2026, 11, 1), "early": False}
-    assert rate_on(sets, "fast50", date(2026, 10, 25))["speed"] == "ultra"        # 그날 이전 급속 없음 → 있는 속도
+    r = rate_on(sets, "fast50", date(2026, 10, 25))                                # 그날 이전 급속 없음 → 다른 속도보다 같은 속도
+    assert r["speed"] == "fast50" and r["early"] is True and r["price"] == 325.6
+    assert rate_on([sets[0]], "fast50", date(2026, 10, 25))["speed"] == "ultra"    # 급속 단가 자체가 없을 때만 다른 속도
     assert rate_on(sets, "mid", date(2026, 11, 5))["speed"] == "fast50"           # 중속 없음 → 가까운 속도
     r = rate_on(sets, "fast50", date(2026, 9, 1))                                  # 이전 단가 없음 → 가장 이른 단가
     assert r["speed"] == "fast50" and r["early"] is True
@@ -82,3 +84,20 @@ def test_parse_matrix_issuer_suffix():
 def test_parse_matrix_header_error_shows_top():
     with pytest.raises(ValueError, match="읽힌 위쪽 내용: 아무"):
         parse_matrix([["아무", "내용"]])
+        
+
+def test_batch_problems():
+    d = date(2026, 8, 1)
+    ok = [{"file_name": f"{s}.xlsx", "speed": s, "effective_from": d, "file_hash": s} for s in SPEEDS]
+    assert batch_problems(ok) == []
+    six = ok + [{"file_name": "x.xlsx", "speed": "slow", "effective_from": d, "file_hash": "x"}]
+    assert any("5개까지" in p for p in batch_problems(six))
+    two = [{"file_name": "a.xlsx", "speed": "fast50", "effective_from": d, "file_hash": "a"},
+           {"file_name": "b.xlsx", "speed": "fast50", "effective_from": d, "file_hash": "b"}]
+    assert any("속도마다 1개" in p for p in batch_problems(two))
+    same = [{"file_name": "a.xlsx", "speed": "slow", "effective_from": d, "file_hash": "h"},
+            {"file_name": "b.xlsx", "speed": "mid", "effective_from": d, "file_hash": "h"}]
+    assert any("같은 내용" in p for p in batch_problems(same))
+    assert any("속도를 선택" in p for p in batch_problems([{"file_name": "a", "speed": None, "effective_from": d}]))
+    assert any("시작일" in p for p in batch_problems([{"file_name": "a", "speed": "slow", "effective_from": None}]))
+    assert batch_problems([]) == ["올릴 파일이 없습니다"]

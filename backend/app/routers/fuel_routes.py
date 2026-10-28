@@ -4,8 +4,9 @@ from fastapi import APIRouter, Depends, Query
 
 from app.auth import get_current_email
 from app.deps import guard, memo, require_admin
-from app.schemas.masters import (EvRateCommitIn, EvRateFileIn, EvSettingsIn, FuelCloseIn, FuelImportIn,
-                                 FuelImportPreviewIn, FuelLogIn, FuelPriceIn, FuelReleaseIn, FuelUndoIn)
+from app.schemas.masters import (EvRateBatchCommitIn, EvRateBatchFileIn, EvRateCommitIn, EvRateFileIn, EvSettingsIn,
+                                 FuelCloseIn, FuelImportIn, FuelImportPreviewIn, FuelLogIn, FuelPriceIn, FuelReleaseIn,
+                                 FuelUndoIn)
 from app.services import fuel_price_service as svc
 from app.services import fuel_log_service as logs_svc
 from app.services import fuel_export
@@ -137,6 +138,18 @@ def ev_settings(body: EvSettingsIn, email: str = Depends(require_admin)):
 def ev_rate_commit(body: EvRateCommitIn, email: str = Depends(require_admin)):
     return guard(ev_svc.commit, body.content_b64, body.file_name, body.speed, body.effective_from,
                  memo(body.memo), email, fail="충전 단가 저장 실패")
+
+
+# ---------- S3-P2g-1d 여러 파일 한 번에 (최대 5개) ----------
+@router.post("/ev-rates/batch/preview")
+def ev_rate_batch_preview(body: EvRateBatchFileIn, _: str = Depends(require_admin)):
+    return guard(ev_svc.preview_batch, [f.model_dump() for f in body.files], fail="요금 매트릭스 미리보기 실패")
+
+
+@router.post("/ev-rates/batch")
+def ev_rate_batch_commit(body: EvRateBatchCommitIn, email: str = Depends(require_admin)):
+    items = [{**i.model_dump(), "memo": memo(i.memo)} for i in body.items]
+    return guard(ev_svc.commit_batch, items, email, fail="충전 단가 저장 실패")
 
 
 @router.delete("/ev-rates/{sid}")

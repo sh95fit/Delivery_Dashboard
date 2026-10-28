@@ -18,6 +18,7 @@ HEADER_SCAN = 20
 MIN_OPERATORS = 3
 MAX_PRICE = 2000
 DEFAULT_SETTINGS = {"ev_speed": "fast50", "ev_km_per_kwh": 2.5}
+MAX_BATCH = 5                                              # S3-P2g-1d 한 번에 올릴 수 있는 파일 수 (속도 5단계)
 
 
 def _key(v) -> str:
@@ -117,19 +118,24 @@ def guess_meta(file_name: str | None) -> dict:
 
 def rate_on(sets: list[dict], speed: str, d: date) -> dict | None:
     """sets = [{speed, effective_from, base_price}]. 반환 = {price, speed, effective_from, early} 또는 None.
-    1) 설정 속도에서 그날 이전 가장 최근 단가 2) 없으면 다른 속도 3) 그날 이전 단가가 전혀 없으면 가장 이른 단가(early=True)."""
+    1) 설정 속도에서 그날 이전 가장 최근 단가  2) 설정 속도의 가장 이른 단가(early=True)
+    3) 다른 속도(가까운 순)에서 그날 이전 단가  4) 다른 속도의 가장 이른 단가(early=True).
+    속도 차이(급속↔초급속 약 20%)가 시기 차이보다 크므로 같은 속도를 먼저 쓴다."""
     i = SPEEDS.index(speed) if speed in SPEEDS else SPEEDS.index(DEFAULT_SETTINGS["ev_speed"])
     order = sorted(SPEEDS, key=lambda s: (abs(SPEEDS.index(s) - i), SPEEDS.index(s)))   # 설정 속도 → 가까운 속도 순
-    for sp in order:
-        cand = [s for s in sets if s["speed"] == sp and s["effective_from"] <= d]
-        if cand:
-            best = max(cand, key=lambda s: s["effective_from"])
-            return {"price": float(best["base_price"]), "speed": sp, "effective_from": best["effective_from"], "early": False}
-    for sp in order:
-        cand = [s for s in sets if s["speed"] == sp]
-        if cand:
-            best = min(cand, key=lambda s: s["effective_from"])
-            return {"price": float(best["base_price"]), "speed": sp, "effective_from": best["effective_from"], "early": True}
+
+    def pick(sp: str, early: bool) -> dict | None:
+        cand = [s for s in sets if s["speed"] == sp and (early or s["effective_from"] <= d)]
+        if not cand:
+            return None
+        best = (min if early else max)(cand, key=lambda s: s["effective_from"])
+        return {"price": float(best["base_price"]), "speed": sp, "effective_from": best["effective_from"], "early": early}
+
+    steps = [(order[0], False), (order[0], True)] + [(sp, False) for sp in order[1:]] + [(sp, True) for sp in order[1:]]
+    for sp, early in steps:
+        hit = pick(sp, early)
+        if hit:
+            return hit
     return None
 
 
@@ -146,4 +152,34 @@ def read_settings(rows: list[dict]) -> dict:
             out["ev_km_per_kwh"] = km
     except (TypeError, ValueError):
         pass
+    return out
+
+
+def batch_problems(items: list[dict]) -> list[str]:
+    """S3-P2g-1d 여러 파일 저장 전 검사. items = [{file_name, speed, effective_from, file_hash}].
+    빈 목록 반환 = 저장 가능. 최대 5개 · 속도마다 1개 · 같은 내용 파일 2번 금지."""
+    if not items:
+        return ["올릴 파일이 없습니다"]
+    out: list[str] = []
+    if len(items) > MAX_BATCH:
+        out.append(f"한 번에 {MAX_BATCH}개까지 올릴 수 있습니다 (지금 {len(items)}개)")
+    by_speed: dict[str, list[str]] = {}
+    by_hash: dict[str, list[str]] = {}
+    for n, it in enumerate(items, 1):
+        name = it.get("file_name") or f"{n}번째 파일"
+        sp = it.get("speed")
+        if sp in SPEEDS:
+            by_speed.setdefault(sp, []).append(name)
+        else:
+            out.append(f"{name}: 충전 속도를 선택하세요")
+        if not it.get("effective_from"):
+            out.append(f"{name}: 적용 시작일을 입력하세요")
+        if it.get("file_hash"):
+            by_hash.setdefault(it["file_hash"], []).append(name)
+    for sp, names in by_speed.items():
+        if len(names) > 1:
+            out.append(f"{SPEED_LABEL[sp]} 파일이 {len(names)}개입니다 — 속도마다 1개만 올리세요 ({', '.join(names)})")
+    for names in by_hash.values():
+        if len(names) > 1:
+            out.append(f"같은 내용의 파일이 {len(names)}개입니다 ({', '.join(names)})")
     return out
