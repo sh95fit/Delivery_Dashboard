@@ -134,7 +134,7 @@ def rate_on(sets: list[dict], speed: str, d: date) -> dict | None:
 
 
 def read_settings(rows: list[dict]) -> dict:
-    """cost_settings 행 → {ev_speed, ev_km_per_kwh}. 값이 없거나 잘못되면 기본값 (급속 · 3.1km/kWh)."""
+    """cost_settings 행 → {ev_speed, ev_km_per_kwh}. 값이 없거나 잘못되면 기본값 (급속 50~99kW · 2.5km/kWh, 주행 외 소모 포함)."""
     raw = {r["key"]: r["value"] for r in rows}
     out = dict(DEFAULT_SETTINGS)
     sp = LEGACY_SPEED.get(raw.get("ev_speed"), raw.get("ev_speed"))

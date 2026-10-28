@@ -8,3 +8,6 @@ ALTER TABLE ev_rate_sets ADD CONSTRAINT ev_rate_sets_speed_check
     CHECK (speed IN ('slow', 'mid', 'fast50', 'fast100', 'ultra'));
 
 UPDATE cost_settings SET value = 'fast50', updated_at = NOW() WHERE key = 'ev_speed' AND value = 'fast';
+
+-- 기본 전비 3.1 → 2.5 km/kWh (냉장·냉난방 등 주행 외 소모 포함 실사용 기준). 직접 바꾼 값은 그대로 둔다
+UPDATE cost_settings SET value = '2.5', updated_at = NOW() WHERE key = 'ev_km_per_kwh' AND value = '3.1';

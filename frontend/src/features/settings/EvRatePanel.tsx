@@ -30,7 +30,7 @@ export default function EvRatePanel({ isAdmin }: Props) {
   const [sets, setSets] = useState<EvRateSet[] | null>(null);
   const [cfg, setCfg] = useState<EvSettings | null>(null);
   const [speedIn, setSpeedIn] = useState<EvSpeed>("fast50");
-  const [kmIn, setKmIn] = useState("3.1");
+  const [kmIn, setKmIn] = useState("2.5");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
@@ -138,6 +138,7 @@ export default function EvRatePanel({ isAdmin }: Props) {
           예상 충전비 = 주행거리 ÷ 전비(차량 연비 칸, 없으면 기본 전비) × 기후에너지환경부 카드로 기후에너지환경부 충전기를 쓸 때 단가.
           물류비 화면의 NCP 예상·오피넷 기준 참고 칸에 같은 값으로 표시하고, 물류비 합계에는 넣지 않습니다.
           실제 비용은 법인카드 결제금액을 주유 기록(전기 차량)으로 입력하면 됩니다.
+          전비는 공인 전비가 아니라 냉장·냉난방 등 주행 외 소모를 포함한 실사용 값으로 넣으세요 (기본 2.5km/kWh · 차량 연비 칸에 넣으면 그 값이 우선).          
         </p>
         {cfg && (
           <div className="row-gap">

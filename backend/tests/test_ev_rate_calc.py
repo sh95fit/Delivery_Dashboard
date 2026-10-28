@@ -63,7 +63,7 @@ def test_rate_on():
 
 
 def test_read_settings():
-    assert read_settings([]) == {"ev_speed": "fast50", "ev_km_per_kwh": 3.1}
+    assert read_settings([]) == {"ev_speed": "fast50", "ev_km_per_kwh": 2.5}
     assert read_settings([{"key": "ev_speed", "value": "ultra"}, {"key": "ev_km_per_kwh", "value": "4.2"}]) == \
         {"ev_speed": "ultra", "ev_km_per_kwh": 4.2}
     assert read_settings([{"key": "ev_speed", "value": "fast"}])["ev_speed"] == "fast50"     # 예전 값 → 급속 50~99kW
