@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.database import get_dash_engine
 from app.services import dash_db
+from app.services.assign_service import Assign
 from app.services.calendar_service import open_checker
 from app.services.cost_calc import latest_by
 from app.services.fuel_calc import add_basis, finish_basis, ref_price
@@ -187,26 +188,22 @@ def month_summary(month: str) -> dict:
         add_basis(by_v[r["vehicle_id"]], r["quantity"], r["total_amount"], log_ref(r, prices)["ref_price"])
         _add(by_d.setdefault(r["fuel_date"], _zero(date=_iso(r["fuel_date"]))), r, cost)
 
-    assigns = dash_db.rows(SQL_ASSIGNS)
+    asg = Assign(f, t)   # [S3-P2h-1b] 날짜별 계정 → 인력 → 차량
     # [S3-P2e-2] 초과 주행: 주유량 × 차량 연비 − 경로 기록 거리(그날 그 차량을 배정받은 매니저의 실제 경로)
     eff = {r["id"]: r["fuel_efficiency"] for r in dash_db.rows("SELECT id, fuel_efficiency FROM vehicles")}
     route_m: dict[int, int] = {}
-    on_day: dict = {}
     for r in dash_db.rows("""SELECT route_date, manager_id, SUM(distance_m) AS m FROM route_legs
             WHERE route_date BETWEEN :f AND :t GROUP BY route_date, manager_id""", {"f": f, "t": t}):
-        rd = r["route_date"]
-        if rd not in on_day:
-            on_day[rd] = latest_by(assigns, "manager_id", "start_date", rd)
-        a = on_day[rd].get(int(r["manager_id"]))
-        if a and a.get("vehicle_id"):
-            route_m[a["vehicle_id"]] = route_m.get(a["vehicle_id"], 0) + int(r["m"] or 0)
+        vid = asg.vehicle(r["route_date"], int(r["manager_id"]))
+        if vid:
+            route_m[vid] = route_m.get(vid, 0) + int(r["m"] or 0)
     over = {vid: {**overrun(x["quantity"], eff.get(vid), route_m.get(vid)),
                   "fuel_efficiency": float(eff[vid]) if eff.get(vid) is not None else None}
             for vid, x in by_v.items()}    
     by_m: dict = {}    
     alloc = allocate_month({vid: x["cost"] for vid, x in by_v.items()}, open_days, f, t)
     for d, per_vid in alloc.items():
-        users = users_on(assigns, d)
+        users = asg.users(d)
         for vid, amt in per_vid.items():
             shares = split_even(amt, users[vid]) if users.get(vid) else {None: amt}
             for mid, share in shares.items():

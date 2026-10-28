@@ -13,7 +13,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 
 from app.services import calendar_service, dash_db
-from app.services.cost_calc import days_incl, effective_on, latest_by
+from app.services.assign_service import Assign
+from app.services.cost_calc import days_incl, effective_on
 from app.services.day_aggregate import KST
 from app.services.logistics_calc import labor_day, month_days, split_even, vehicle_costs
 from app.services.manager_service import today
@@ -165,18 +166,14 @@ def cost_view(frm: date, to: date) -> dict:
         expenses = dash_db.rows("""SELECT vehicle_id, category, expense_date, amount FROM vehicle_expenses
             WHERE deleted_at IS NULL AND expense_date BETWEEN :a AND :b""", p)
         deductible = {r["id"] for r in dash_db.rows("SELECT id FROM vehicles WHERE vat_deductible")}
-        assigns = dash_db.rows(
-            "SELECT manager_id, vehicle_id, start_date FROM vehicle_assignments WHERE deleted_at IS NULL")
+        asg = Assign(frm, to)   # [S3-P2h-1b] 날짜별 계정 → 인력 → 차량 (인센티브 담당 판정과 같은 결과)
         vcost = vehicle_costs(periods, expenses, deductible, is_open, frm, to)
         loose = 0
         for d in days:
             day_cost = vcost.get(d)
             if not day_cost:
                 continue
-            users: dict[int, list[int]] = {}
-            for mid, a in latest_by(assigns, "manager_id", "start_date", d).items():
-                if a["vehicle_id"]:
-                    users.setdefault(a["vehicle_id"], []).append(mid)
+            users = asg.users(d)
             for vid, amt in day_cost.items():
                 if not users.get(vid):
                     cell(d, None)["vehicle"] += amt
@@ -193,10 +190,7 @@ def cost_view(frm: date, to: date) -> dict:
             key = "fuel" if (d.year, d.month) in fuel_closed else "fuel_est"
             if key == "fuel_est":
                 fuel_open.add((d.year, d.month))
-            users = {}
-            for mid, a in latest_by(assigns, "manager_id", "start_date", d).items():
-                if a["vehicle_id"]:
-                    users.setdefault(a["vehicle_id"], []).append(mid)
+            users = asg.users(d)
             for vid, amt in per_vid.items():
                 if not users.get(vid):
                     cell(d, None)[key] += amt
@@ -214,7 +208,7 @@ def cost_view(frm: date, to: date) -> dict:
 
         # ---------- 참고: NCP 예상 유류비 · 직접 계산 (S3-P2b, 합계에 넣지 않음) ----------
         s = time.perf_counter()
-        rf, rf_notes = route_fuel(frm, to, assigns)
+        rf, rf_notes = route_fuel(frm, to, asg)
         for (d, mid), x in rf.items():
             c = cell(d, mid)
             c["route_m"] += x["route_m"]
@@ -222,6 +216,8 @@ def cost_view(frm: date, to: date) -> dict:
             c["calc_fuel"] += x["calc"]
             c["route_ms"] += x["route_ms"]            
         for n in rf_notes:
+            add("info", n)
+        for n in asg.notes():
             add("info", n)
         timing["route"] = round(time.perf_counter() - s, 2)        
         rev_views = f_rev.result()

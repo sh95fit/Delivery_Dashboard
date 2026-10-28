@@ -27,16 +27,17 @@ NCP_FUEL = {"gasoline": "gasoline", "diesel": "diesel", "lpg": "lpg"}   # 전기
 
 
 def _vehicle_params(target: date_type, manager_id: int) -> dict:
-    """그날 배정 차량 → {fueltype, mileage, fuelPrice}. 차량 없음·전기차면 {} (NAVER 기본값).
-    [S3-P2d-3] 연비가 없어도 연료 종류는 보냄 → NAVER 기본 연비(14km/L)로 계산 (중고 차량 등 연비를 모를 때)."""
+    """그날 계정 차량 → {fueltype, mileage, fuelPrice}. 차량 없음·전기차면 {} (NAVER 기본값).
+    [S3-P2d-3] 연비가 없어도 연료 종류는 보냄 → NAVER 기본 연비(14km/L)로 계산 (중고 차량 등 연비를 모를 때).
+    [S3-P2h-1b] 계정 차량 = 그날 담당 인력의 차량 (assign_service — 물류비와 같은 판정, 이력 없으면 기존 계정 차량 배정)"""
+    from app.services.assign_service import vehicle_on   # 함수 안 import = 순환 import 방지
     try:
+        vid = vehicle_on(target, manager_id)
+        if vid is None:
+            return {}
         with get_dash_engine().connect() as conn:
-            row = conn.execute(text("""
-                SELECT v.fuel_type, v.fuel_efficiency
-                FROM vehicle_assignments a LEFT JOIN vehicles v ON v.id = a.vehicle_id
-                WHERE a.manager_id = :m AND a.deleted_at IS NULL AND a.start_date <= :d
-                ORDER BY a.start_date DESC, a.id DESC LIMIT 1
-            """), {"m": manager_id, "d": target}).fetchone()
+            row = conn.execute(text("SELECT fuel_type, fuel_efficiency FROM vehicles WHERE id = :v"),
+                               {"v": vid}).fetchone()
             if not row or row.fuel_type not in NCP_FUEL:
                 return {}
             price = conn.execute(text("""

@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import date
 
 from app.services import dash_db, ev_rate_service
-from app.services.cost_calc import latest_by
+from app.services.assign_service import Assign
 from app.services.ev_rate_calc import SPEED_LABEL, rate_on
 from app.services.route_fuel_calc import NAVER_DEFAULT_MILEAGE, direct_cost, ncp_scaled, price_index, price_on
 
@@ -37,8 +37,8 @@ def _ev_cost(dist: int, eff, d: date, idx: dict, ev_cfg: dict, ev_sets: list[dic
     return direct_cost(dist, km, price) or 0
 
 
-def route_fuel(frm: date, to: date, assigns: list[dict]) -> tuple[dict[tuple[date, int], dict], list[str]]:
-    """반환 = ({(날짜, 계정): {route_m, route_ms, ncp, calc}}, 안내 문구). assigns = vehicle_assignments 행."""
+def route_fuel(frm: date, to: date, asg: Assign) -> tuple[dict[tuple[date, int], dict], list[str]]:
+    """반환 = ({(날짜, 계정): {route_m, route_ms, ncp, calc}}, 안내 문구). asg = 날짜별 계정 → 인력 → 차량 (assign_service)."""
     rows = dash_db.rows("""SELECT route_date, manager_id, SUM(distance_m) AS dist, SUM(duration_ms) AS dur,
             COALESCE(SUM(fuel_price_naver * COALESCE(ncp_mileage, CAST(:base AS NUMERIC))), 0) AS ncp_w,
             COUNT(*) FILTER (WHERE status = 'unreachable') AS bad
@@ -51,15 +51,12 @@ def route_fuel(frm: date, to: date, assigns: list[dict]) -> tuple[dict[tuple[dat
         WHERE deleted_at IS NULL AND price_date <= :b""", {"b": to}))
     ev_cfg, ev_sets = ev_rate_service.basis()
     evc = {"matrix": 0, "fallback": 0, "early": 0, "manual": 0, "none": 0}
-    assigned: dict[date, dict] = {}
     out: dict[tuple[date, int], dict] = {}
     no_calc = other = default_n = scaled_n = bad = 0
     for r in rows:
         d, mid = r["route_date"], int(r["manager_id"])
-        if d not in assigned:
-            assigned[d] = latest_by(assigns, "manager_id", "start_date", d)
-        a = assigned[d].get(mid)
-        v = vehicles.get(a["vehicle_id"]) if a and a.get("vehicle_id") else None
+        vid = asg.vehicle(d, mid)
+        v = vehicles.get(vid) if vid else None
         eff = v["fuel_efficiency"] if v else None
         dist = int(r["dist"])
         if v and v["fuel_type"] == "ev":            # [S3-P2g-1] 전기차 → 예상 충전비 (NCP·오피넷 기준 칸에 같은 값)
