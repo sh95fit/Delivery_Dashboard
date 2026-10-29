@@ -69,6 +69,29 @@ export const otText = (r: WorkerRate) =>
   r.ot_unit_min > 0 && r.ot_unit_amount > 0 ? `${r.ot_unit_min}분당 ${won(r.ot_unit_amount)}` : "없음";
 export const needsName = (w: WorkerRow) => w.name.startsWith("계정#");
 
+// [S3-P2h-2a/2b] 차량 이용 이력 · 그날 예외
+export type VehicleMode = "company" | "own" | "none";
+export type DayReason = "breakdown" | "swap" | "other";
+export const VEHICLE_MODE_LABEL: Record<VehicleMode, string> = { company: "회사 차량", own: "자차", none: "차량 없음" };
+export const DAY_REASON_LABEL: Record<DayReason, string> = { breakdown: "고장·정비", swap: "교대·대체", other: "기타" };
+export interface WorkerVehicle {
+  id: number; start_date: string; mode: VehicleMode; mode_label: string;
+  vehicle_id: number | null; plate_no: string | null; memo: string | null; created_by: string | null;
+}
+export interface WorkerVehicleDay {
+  id: number; work_date: string; vehicle_id: number | null; plate_no: string | null;
+  reason: DayReason; reason_label: string; memo: string | null; created_by: string | null;
+}
+export interface WorkerVehicles { history: WorkerVehicle[]; days: WorkerVehicleDay[] }
+export type WorkerVehicleInput = { start_date: string; mode: VehicleMode; vehicle_id: number | null; memo: string | null };
+export type WorkerVehicleDayInput = { work_date: string; vehicle_id: number | null; reason: DayReason; memo: string | null };
+
+export const getWorkerVehicles = (id: number) => http<WorkerVehicles>(`/api/workers/${id}/vehicles`);
+export const addWorkerVehicle = (id: number, body: WorkerVehicleInput) => post<Ok>(`/api/workers/${id}/vehicles`, body);
+export const updateWorkerVehicle = (hid: number, body: WorkerVehicleInput) => put<Ok>(`/api/workers/vehicles/${hid}`, body);
+export const deleteWorkerVehicle = (hid: number) => del<Ok>(`/api/workers/vehicles/${hid}`);
+export const addWorkerVehicleDay = (id: number, body: WorkerVehicleDayInput) => post<Ok>(`/api/workers/${id}/vehicle-days`, body);
+export const deleteWorkerVehicleDay = (did: number) => del<Ok>(`/api/workers/vehicle-days/${did}`);
 
 export type ImportStatus = "new" | "exists" | "dup" | "invalid";
 export interface ImportRowPreview {

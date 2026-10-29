@@ -8,19 +8,23 @@ import Spinner from "@/components/ui/Spinner";
 import SaveNote, { nowHms } from "@/components/ui/SaveNote";
 import type { SaveNoteState } from "@/components/ui/SaveNote";
 import * as api from "@/api/workers";
-import { DAY_BITS, INCOME_LABEL, INCOME_PAY, needsName, otText, rateText, workText } from "@/api/workers";
-import type { IncomeType, WorkerAccount, WorkerDetail, WorkerRate, WorkerRateInput, WorkerRow } from "@/api/workers";
-import type { ManagerRow } from "@/api/masters";
+import { DAY_BITS, DAY_REASON_LABEL, INCOME_LABEL, INCOME_PAY, VEHICLE_MODE_LABEL, needsName, otText, rateText, workText } from "@/api/workers";
+import type { DayReason, IncomeType, VehicleMode, WorkerAccount, WorkerDetail, WorkerRate, WorkerRateInput, WorkerRow,
+  WorkerVehicle, WorkerVehicleDay, WorkerVehicles } from "@/api/workers";
+import { FUEL_LABEL, listVehicles } from "@/api/masters";
+import type { ManagerRow, Vehicle } from "@/api/masters";
 import { errText, parseAmount } from "@/lib/form";
 import { hm, todayKst, won } from "@/lib/format";
 
-type Tab = "basic" | "rate" | "account";
+type Tab = "basic" | "rate" | "account" | "vehicle";
 type Mode = { kind: "add" } | { kind: "edit"; id: number } | null;
 type RateForm = {
   amount: string; from: string; vat: boolean; ws: string; we: string;
   brk: string; brkPaid: boolean; otMin: string; otAmt: string; memo: string; days: number;
 };
 type AccForm = { mgr: string; from: string };
+type VehForm = { from: string; mode: VehicleMode; vid: string; memo: string };   // [S3-P2h-2b] 차량 이용 이력
+type DayForm = { date: string; vid: string; reason: DayReason; memo: string };   // [S3-P2h-2b] 그날 예외
 type Props = {
   row: WorkerRow | null; // null = 새 인력
   workers: WorkerRow[];
@@ -99,9 +103,26 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
   const [aMode, setAMode] = useState<Mode>(null);
   const [af, setAf] = useState<AccForm>({ mgr: "", from: today });
 
-  const load = async () => { if (row) setDetail(await api.getWorker(row.id)); };
+  // [S3-P2h-2b] 차량 이용 이력 · 그날 예외
+  const [vdata, setVdata] = useState<WorkerVehicles | null>(null);
+  const [cars, setCars] = useState<Vehicle[]>([]);
+  const [vMode, setVMode] = useState<Mode>(null);
+  const [vf, setVf] = useState<VehForm>({ from: today, mode: "company", vid: "", memo: "" });
+  const [dOpen, setDOpen] = useState(false);
+  const [df, setDf] = useState<DayForm>({ date: today, vid: "", reason: "swap", memo: "" });
+
+  const load = async () => {
+    if (!row) return;
+    const [d, v] = await Promise.all([api.getWorker(row.id), api.getWorkerVehicles(row.id)]);
+    setDetail(d);
+    setVdata(v);
+  };
   useEffect(() => {
     load().catch((e) => setError(errText(e)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row?.id]);
+  useEffect(() => {
+    if (row) listVehicles().then((r) => setCars(r.items)).catch(() => setCars([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [row?.id]);
 
@@ -115,6 +136,15 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
   const editAccId = aMode?.kind === "edit" ? aMode.id : null;
   const editingRate = editRateId != null ? rates.find((r) => r.id === editRateId) ?? null : null;
   const editingAcc = editAccId != null ? accounts.find((a) => a.id === editAccId) ?? null : null;
+  const vHist = vdata?.history ?? [];
+  const vDays = vdata?.days ?? [];
+  const vPeriods = useMemo(() => periods(vHist.map((h) => h.start_date), today), [vHist, today]);
+  const editVehId = vMode?.kind === "edit" ? vMode.id : null;
+  const editingVeh = editVehId != null ? vHist.find((h) => h.id === editVehId) ?? null : null;
+  const carOptions = useMemo(() => [...cars].sort((a, b) =>
+    Number(b.active) - Number(a.active) || a.plate_no.localeCompare(b.plate_no, "ko", { numeric: true })), [cars]);
+  const carText = (c: Vehicle) =>
+    `${c.plate_no} · ${FUEL_LABEL[c.fuel_type]}${c.model ? ` · ${c.model}` : ""}${c.active ? "" : " (사용 안 함)"}`;
 
   async function run(sec: Tab, okText: string, fn: () => Promise<{ id?: number } | void>, after?: () => void) {
     if (!row) return;
@@ -279,8 +309,65 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
     run("account", "계정 이력 삭제됨", () => api.deleteWorkerAccount(a.id));
   };
 
+  /* ---------- 차량 이용 [S3-P2h-2b] ---------- */
+  function openVehAdd() {
+    setError("");
+    setNote(null);
+    const cur = vHist[vPeriods.findIndex((p) => p.state === "current")] ?? null;
+    setVf({ from: today, mode: cur?.mode ?? "company", vid: cur?.vehicle_id != null ? String(cur.vehicle_id) : "", memo: "" });
+    setVMode({ kind: "add" });
+  }
+  function openVehEdit(h: WorkerVehicle) {
+    setError("");
+    setNote(null);
+    setVf({ from: h.start_date, mode: h.mode, vid: h.vehicle_id != null ? String(h.vehicle_id) : "", memo: h.memo ?? "" });
+    setVMode({ kind: "edit", id: h.id });
+  }
+  function saveVeh() {
+    if (!row || !vMode) return;
+    if (!vf.from) return setError("시작일을 입력하세요");
+    if (vf.mode === "company" && !vf.vid) return setError("회사 차량은 차량을 선택하세요");
+    if (vHist.some((h) => h.start_date === vf.from && h.id !== editVehId)) {
+      return setError(`${vf.from}에 시작하는 차량 이용 이력이 이미 있습니다. 이력에서 그 행의 [수정]을 누르세요`);
+    }
+    const body = {
+      start_date: vf.from, mode: vf.mode, vehicle_id: vf.mode === "company" ? Number(vf.vid) : null,
+      memo: vf.memo.trim() || null,
+    };
+    const id = row.id;
+    const hid = editVehId;
+    run("vehicle", hid != null ? `차량 이용 이력 수정됨 (${vf.from}부터)` : `차량 이용 이력 추가됨 (${vf.from}부터)`,
+      () => (hid != null ? api.updateWorkerVehicle(hid, body) : api.addWorkerVehicle(id, body)),
+      () => setVMode(null));
+  }
+  const delVeh = (h: WorkerVehicle) => {
+    if (!window.confirm(`${h.start_date} 시작 차량 이용 이력을 삭제할까요?\n삭제하면 그 기간은 직전 이력으로 계산됩니다.`)) return;
+    run("vehicle", "차량 이용 이력 삭제됨", () => api.deleteWorkerVehicle(h.id));
+  };
+  function openDayAdd() {
+    setError("");
+    setNote(null);
+    setDf({ date: today, vid: "", reason: "swap", memo: "" });
+    setDOpen(true);
+  }
+  function saveDay() {
+    if (!row) return;
+    if (!df.date) return setError("날짜를 입력하세요");
+    if (vDays.some((d) => d.work_date === df.date)) {
+      return setError(`${df.date} 그날 예외가 이미 있습니다. 삭제한 뒤 다시 입력하세요`);
+    }
+    const body = { work_date: df.date, vehicle_id: df.vid ? Number(df.vid) : null, reason: df.reason, memo: df.memo.trim() || null };
+    const id = row.id;
+    run("vehicle", `그날 예외 추가됨 (${df.date})`, () => api.addWorkerVehicleDay(id, body),
+      () => { setDOpen(false); setHl(null); });
+  }
+  const delDay = (d: WorkerVehicleDay) => {
+    if (!window.confirm(`${d.work_date} 그날 예외를 삭제할까요?\n삭제하면 그날은 차량 이용 이력대로 계산됩니다.`)) return;
+    run("vehicle", "그날 예외 삭제됨", () => api.deleteWorkerVehicleDay(d.id), () => setHl(null));
+  };
+
   function close() {
-    if (basicDirty || rMode || aMode) {
+    if (basicDirty || rMode || aMode || vMode || dOpen) {
       if (!window.confirm("저장하지 않은 입력이 있습니다. 닫을까요?")) return;
     }
     onClose();
@@ -292,6 +379,7 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
     ["basic", "기본 정보", false],
     ["rate", `계약 조건 ${rates.length}`, rMode !== null],
     ["account", `고정 계정 ${accounts.length}`, aMode !== null],
+    ["vehicle", `차량 이용 ${vHist.length}`, vMode !== null || dOpen],
   ];
 
   return (
@@ -591,6 +679,161 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
                 <Button variant="primary" disabled={locked} onClick={saveAcc}>
                   {label("account", aMode.kind === "edit" ? "수정 저장" : "계정 저장")}
                 </Button>
+              </div>
+            </section>
+          )}
+        </>
+      )}
+
+      {/* ---------- 차량 이용 [S3-P2h-2b] ---------- */}
+      {row && tab === "vehicle" && (
+        <>
+          <p className="muted small">
+            물류비의 차량비·유류비는 날짜별로 <b>계정 → 그날 담당 인력 → 그 인력의 차량</b>으로 나눕니다.
+            이력이 없는 날은 기존 계정 차량 배정을 씁니다. 유류비가 마감된 달에 걸리는 이력·예외는 바꿀 수 없습니다.
+            {row.end_date ? ` 퇴사일(${row.end_date}) 뒤로는 계산에 쓰이지 않습니다.` : ""}
+          </p>
+          <section className="ed-hist">
+            <div className="ed-head">
+              <h3 className="sub-title">차량 이용 이력 <span className="muted small">시작일부터 다음 이력 전날까지 적용</span></h3>
+              <div className="kv-line">
+                <SaveNote note={note} sec="vehicle" />
+                {isAdmin && <Button size="sm" variant="primary" disabled={locked || vMode !== null || dOpen} onClick={openVehAdd}>+ 차량 변경 추가</Button>}
+              </div>
+            </div>
+            {!vdata ? <Spinner /> : vHist.length === 0 ? (
+              <div className="muted small">차량 이용 이력이 없습니다. 지금은 기존 계정 차량 배정으로 계산됩니다.</div>
+            ) : (
+              <DataTable columns={["상태", "적용 기간", "이용 구분", "차량", "메모 · 입력자", ...(isAdmin ? ["관리"] : [])]}>
+                {vHist.map((h, i) => {
+                  const p = vPeriods[i];
+                  const cls = [h.id === editVehId ? "ed-editing" : "", h.id === hl ? "row-new" : "",
+                    p.state === "past" ? "off" : ""].filter(Boolean).join(" ");
+                  return (
+                    <tr key={h.id} className={cls || undefined}>
+                      <td><StateChip s={p.state} /></td>
+                      <td className="ed-nowrap">{p.from} ~ {p.to ?? ""}</td>
+                      <td>{VEHICLE_MODE_LABEL[h.mode]}</td>
+                      <td>{h.plate_no ?? "-"}</td>
+                      <td className="small">{h.memo ?? ""}<div className="muted">{h.created_by ?? ""}</div></td>
+                      {isAdmin && (
+                        <td className="ed-nowrap">
+                          <Button size="sm" disabled={locked || vMode !== null || dOpen} onClick={() => openVehEdit(h)}>수정</Button>{" "}
+                          <Button size="sm" variant="danger" disabled={locked || vMode !== null || dOpen} onClick={() => delVeh(h)}>삭제</Button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </DataTable>
+            )}
+          </section>
+
+          {isAdmin && vMode && (
+            <section className={`ed-form ${vMode.kind === "edit" ? "is-edit" : "is-add"}`}>
+              <div className="ed-head">
+                <h3 className="sub-title">
+                  {vMode.kind === "edit" ? `차량 이용 이력 수정 — ${editingVeh?.start_date ?? ""} 시작분` : "차량 변경 추가"}
+                </h3>
+                <span className="muted small">
+                  {vMode.kind === "edit"
+                    ? "차량이나 시작일을 잘못 입력했을 때 (변경 기록은 남음)"
+                    : "시작일부터 이 차량을 계속 사용 (이전 기간은 기존 이력 유지) · 하루만 바뀌면 아래 '그날 예외'"}
+                </span>
+              </div>
+              <div className="form-grid">
+                <label className="field">이용 구분
+                  <select className="input" value={vf.mode} onChange={(e) => setVf((f) => ({ ...f, mode: e.target.value as VehicleMode }))}>
+                    {(Object.keys(VEHICLE_MODE_LABEL) as VehicleMode[]).map((k) => (
+                      <option key={k} value={k}>{VEHICLE_MODE_LABEL[k]}</option>
+                    ))}
+                  </select>
+                </label>
+                {vf.mode === "company" && (
+                  <label className="field">차량
+                    <select className="input" value={vf.vid} onChange={(e) => setVf((f) => ({ ...f, vid: e.target.value }))}>
+                      <option value="">선택</option>
+                      {carOptions.map((c) => <option key={c.id} value={c.id}>{carText(c)}</option>)}
+                    </select>
+                  </label>
+                )}
+                <label className="field">시작일
+                  <input type="date" className="input" value={vf.from} onChange={(e) => setVf((f) => ({ ...f, from: e.target.value }))} />
+                </label>
+                <label className="field field-wide">메모
+                  <input className="input" value={vf.memo} maxLength={200} onChange={(e) => setVf((f) => ({ ...f, memo: e.target.value }))} />
+                </label>
+              </div>
+              {vf.mode !== "company" && (
+                <div className="stack">
+                  <Chip tone="caution">자차·차량 없음 기간에는 이 인력이 담당한 계정에 회사 차량비·유류비가 배정되지 않습니다</Chip>
+                </div>
+              )}
+              <div className="form-actions">
+                <Button disabled={locked} onClick={() => setVMode(null)}>취소</Button>
+                <Button variant="primary" disabled={locked} onClick={saveVeh}>
+                  {label("vehicle", vMode.kind === "edit" ? "수정 저장" : "이력 저장")}
+                </Button>
+              </div>
+            </section>
+          )}
+
+          <section className="ed-hist">
+            <div className="ed-head">
+              <h3 className="sub-title">그날 예외 <span className="muted small">고장·교대 등으로 하루만 다른 차량을 쓴 날 (같은 날 두 사람이 같은 차량을 써도 됨)</span></h3>
+              {isAdmin && <Button size="sm" variant="primary" disabled={locked || vMode !== null || dOpen} onClick={openDayAdd}>+ 그날 예외 추가</Button>}
+            </div>
+            {!vdata ? <Spinner /> : vDays.length === 0 ? (
+              <div className="muted small">그날 예외가 없습니다.</div>
+            ) : (
+              <DataTable columns={["날짜", "차량", "사유", "메모 · 입력자", ...(isAdmin ? ["관리"] : [])]}>
+                {vDays.map((d) => (
+                  <tr key={d.id}>
+                    <td className="ed-nowrap">{d.work_date}</td>
+                    <td>{d.plate_no ?? "회사 차량 없음"}</td>
+                    <td>{DAY_REASON_LABEL[d.reason]}</td>
+                    <td className="small">{d.memo ?? ""}<div className="muted">{d.created_by ?? ""}</div></td>
+                    {isAdmin && (
+                      <td className="ed-nowrap">
+                        <Button size="sm" variant="danger" disabled={locked || vMode !== null || dOpen} onClick={() => delDay(d)}>삭제</Button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </DataTable>
+            )}
+          </section>
+
+          {isAdmin && dOpen && (
+            <section className="ed-form is-add">
+              <div className="ed-head">
+                <h3 className="sub-title">그날 예외 추가</h3>
+                <span className="muted small">그날만 이 차량으로 계산 · 차량을 비우면 그날은 회사 차량 없음</span>
+              </div>
+              <div className="form-grid">
+                <label className="field">날짜
+                  <input type="date" className="input" value={df.date} onChange={(e) => setDf((f) => ({ ...f, date: e.target.value }))} />
+                </label>
+                <label className="field">차량
+                  <select className="input" value={df.vid} onChange={(e) => setDf((f) => ({ ...f, vid: e.target.value }))}>
+                    <option value="">회사 차량 없음</option>
+                    {carOptions.map((c) => <option key={c.id} value={c.id}>{carText(c)}</option>)}
+                  </select>
+                </label>
+                <label className="field">사유
+                  <select className="input" value={df.reason} onChange={(e) => setDf((f) => ({ ...f, reason: e.target.value as DayReason }))}>
+                    {(Object.keys(DAY_REASON_LABEL) as DayReason[]).map((k) => (
+                      <option key={k} value={k}>{DAY_REASON_LABEL[k]}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field field-wide">메모
+                  <input className="input" value={df.memo} maxLength={200} onChange={(e) => setDf((f) => ({ ...f, memo: e.target.value }))} />
+                </label>
+              </div>
+              <div className="form-actions">
+                <Button disabled={locked} onClick={() => setDOpen(false)}>취소</Button>
+                <Button variant="primary" disabled={locked} onClick={saveDay}>{label("vehicle", "예외 저장")}</Button>
               </div>
             </section>
           )}
