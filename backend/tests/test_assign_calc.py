@@ -1,6 +1,7 @@
 from datetime import date as D
 
-from app.services.assign_calc import find_conflict, group_by_worker, resolve, spans, users_by_vehicle, vehicle_of
+from app.services.assign_calc import (check_mode, find_conflict, group_by_worker, lock_until, resolve, spans,
+                                      users_by_vehicle, vehicle_of)
 
 HIST = [
     {"worker_id": 2, "start_date": D(2026, 10, 1), "mode": "company", "vehicle_id": 1},
@@ -59,3 +60,13 @@ def test_conflict_respects_end_date():
             {"worker_id": 6, "start_date": D(2026, 10, 16), "mode": "company", "vehicle_id": 1}]
     assert find_conflict(rows) is not None
     assert find_conflict(rows, ends={2: D(2026, 10, 15)}) is None
+
+
+def test_check_mode_and_lock():
+    assert check_mode("company", None) == "회사 차량은 차량을 선택하세요"
+    assert check_mode("company", 3) is None
+    assert check_mode("own", None) is None
+    assert check_mode("x", None).startswith("이용 구분")
+    assert lock_until([]) is None
+    assert lock_until([D(2026, 8, 1), D(2026, 9, 1)]) == D(2026, 9, 30)
+    assert lock_until([D(2026, 12, 1)]) == D(2026, 12, 31)

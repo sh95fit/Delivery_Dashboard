@@ -2,9 +2,11 @@ from fastapi import APIRouter, Depends
 
 from app.auth import get_current_email
 from app.deps import guard, memo, require_admin
-from app.schemas.workers import ImportCommitIn, ImportExcelIn, WorkerAccountIn, WorkerIn, WorkerRateIn
+from app.schemas.workers import (ImportCommitIn, ImportExcelIn, WorkerAccountIn, WorkerIn, WorkerRateIn,
+                                 WorkerVehicleDayIn, WorkerVehicleIn)
 from app.services import dash_db, worker_import
 from app.services import worker_service as svc
+from app.services import worker_vehicle_service as wv
 
 router = APIRouter(prefix="/workers", tags=["workers"])
 
@@ -86,4 +88,43 @@ def update_account(aid: int, body: WorkerAccountIn, email: str = Depends(require
 @router.delete("/accounts/{aid}")
 def delete_account(aid: int, email: str = Depends(require_admin)):
     guard(svc.delete_account, aid, email, fail="삭제 실패")
+    return {"ok": True}
+
+
+# ---------- S3-P2h-2a 차량 이용 이력 · 그날 예외 ----------
+@router.get("/{wid}/vehicles")
+def worker_vehicles(wid: int, _: str = Depends(get_current_email)):
+    return guard(wv.list_vehicles, wid, fail="차량 이용 이력 조회 실패")
+
+
+@router.post("/{wid}/vehicles")
+def add_worker_vehicle(wid: int, body: WorkerVehicleIn, email: str = Depends(require_admin)):
+    data = body.model_dump()
+    data["memo"] = memo(body.memo)
+    return {"ok": True, "id": guard(wv.add_history, wid, data, email, fail="차량 이용 이력 저장 실패")}
+
+
+@router.put("/vehicles/{hid}")
+def update_worker_vehicle(hid: int, body: WorkerVehicleIn, email: str = Depends(require_admin)):
+    data = body.model_dump()
+    data["memo"] = memo(body.memo)
+    return {"ok": True, "id": guard(wv.update_history, hid, data, email, fail="차량 이용 이력 수정 실패")}
+
+
+@router.delete("/vehicles/{hid}")
+def delete_worker_vehicle(hid: int, email: str = Depends(require_admin)):
+    guard(wv.delete_history, hid, email, fail="삭제 실패")
+    return {"ok": True}
+
+
+@router.post("/{wid}/vehicle-days")
+def add_worker_vehicle_day(wid: int, body: WorkerVehicleDayIn, email: str = Depends(require_admin)):
+    data = body.model_dump()
+    data["memo"] = memo(body.memo)
+    return {"ok": True, "id": guard(wv.add_day, wid, data, email, fail="그날 예외 저장 실패")}
+
+
+@router.delete("/vehicle-days/{did}")
+def delete_worker_vehicle_day(did: int, email: str = Depends(require_admin)):
+    guard(wv.delete_day, did, email, fail="삭제 실패")
     return {"ok": True}

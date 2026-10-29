@@ -98,3 +98,22 @@ def find_conflict(rows: list[dict], ends: dict[int, date | None] | None = None) 
                 return {"vehicle_id": a["vehicle_id"], "workers": (a["worker_id"], b["worker_id"]),
                         "from": max(a["start"], b["start"])}
     return None
+
+
+def check_mode(mode: str, vehicle_id: int | None) -> str | None:
+    """[S3-P2h-2a] 차량 이용 이력 저장 전 검사. 문제 없으면 None."""
+    if mode not in MODES:
+        return "이용 구분을 확인하세요 (회사 차량 / 자차 / 차량 없음)"
+    if mode == "company" and not vehicle_id:
+        return "회사 차량은 차량을 선택하세요"
+    return None
+
+
+def lock_until(close_months: list[date]) -> date | None:
+    """[S3-P2h-2a] 유류비 마감된 달 중 가장 늦은 달의 말일 (없으면 None).
+    이 날까지 걸리는 차량 이용 이력·그날 예외는 추가·수정·삭제 불가 (마감된 달의 계정별 금액이 바뀌므로)."""
+    if not close_months:
+        return None
+    m = max(close_months)
+    nxt = date(m.year + (m.month == 12), m.month % 12 + 1, 1)
+    return nxt - timedelta(days=1)

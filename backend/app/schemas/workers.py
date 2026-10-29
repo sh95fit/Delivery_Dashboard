@@ -54,3 +54,17 @@ class ImportRow(BaseModel):
 class ImportCommitIn(BaseModel):
     rows: list[ImportRow] = Field(min_length=1, max_length=300)
     
+    
+class WorkerVehicleIn(BaseModel):          # [S3-P2h-2a] 차량 이용 이력 (시작일부터 다음 이력 전날까지)
+    start_date: date
+    mode: Literal["company", "own", "none"]
+    vehicle_id: int | None = None
+    memo: str | None = Field(default=None, max_length=200)
+
+
+class WorkerVehicleDayIn(BaseModel):       # [S3-P2h-2a] 그날 예외 (vehicle_id 비움 = 그날 회사 차량 없음)
+    work_date: date
+    vehicle_id: int | None = None
+    reason: Literal["breakdown", "swap", "other"] = "other"
+    memo: str | None = Field(default=None, max_length=200)
+    
