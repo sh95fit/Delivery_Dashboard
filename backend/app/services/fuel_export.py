@@ -5,7 +5,8 @@ import logging
 
 from app.services import dash_db
 from app.services.fuel_log_calc import log_cost, month_bounds
-from app.services.fuel_log_service import FUEL_LABEL, SQL_ASSIGNS, SQL_LOGS, log_ref, month_summary, price_rows, users_on
+from app.services.assign_service import Assign
+from app.services.fuel_log_service import FUEL_LABEL, SQL_LOGS, log_ref, month_summary, price_rows
 from app.services.fuel_price_service import daily_prices
 from app.services.manager_service import _rds_managers
 
@@ -42,11 +43,11 @@ def month_sheets(month: str) -> tuple[str, list[dict]]:
     def who(mid):
         return "계정 미지정" if mid is None else names.get(mid, f"#{mid}")
 
-    assigns = dash_db.rows(SQL_ASSIGNS)
+    asg = Assign(f, t)   # [S3-P2h-3a] '사용자'도 월 집계와 같은 날짜별 계정 → 인력 → 차량 판정
     logs = []
     for r in dash_db.rows(SQL_LOGS + " ORDER BY l.fuel_date, v.plate_no, l.id", {"f": f, "t": t}):
         ded = bool(r["vat_deductible"])
-        users = users_on(assigns, r["fuel_date"]).get(r["vehicle_id"], [])
+        users = asg.users(r["fuel_date"]).get(r["vehicle_id"], [])
         ref = log_ref(r, prices)
         logs.append({
             "date": r["fuel_date"], "plate": r["plate_no"],

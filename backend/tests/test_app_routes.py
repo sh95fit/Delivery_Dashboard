@@ -14,3 +14,12 @@ def test_app_starts_with_incentive_routes():
     assert {"/incentive/day", "/incentive/month", "/incentive/rates", "/incentive/accounts/{d}",
             "/incentive/exclusions", "/incentive/extras", "/incentive/extra-items",
             "/incentive/holds/{d}", "/incentive/holds/{hid}/release"} <= paths
+
+
+def test_manager_pay_vehicle_routes_removed():
+    """[S3-P2h-3a] 계정에는 급여·차량을 저장하지 않음 (인력 계약 조건 · 인력 차량 이용으로 일원화)"""
+    from app.main import app
+    paths = set(app.openapi()["paths"])
+    assert {"/managers", "/managers/{mid}/profile"} <= paths
+    assert not {"/managers/{mid}", "/managers/{mid}/rates", "/managers/rates/{rid}",
+                "/managers/{mid}/vehicle", "/managers/assignments/{aid}"} & paths

@@ -129,7 +129,7 @@ function VehicleListTab({ vehicles, managers, isAdmin, onChanged }: {
         {vehicles.length === 0 ? (
           <div className="muted small">등록된 차량이 없습니다.</div>
         ) : (
-          <DataTable columns={["차량번호", "차종", "연료", "부가세", { label: "공인연비", num: true }, "구매일", { label: "구매가", num: true }, "현재 배정", "상태", ...(isAdmin ? ["관리"] : [])]}>
+          <DataTable columns={["차량번호", "차종", "연료", "부가세", { label: "공인연비", num: true }, "구매일", { label: "구매가", num: true }, "오늘 사용 계정", "상태", ...(isAdmin ? ["관리"] : [])]}>
             {vehicles.map((v) => (
               <tr key={v.id} className={v.active ? undefined : "off"}>
                 <td>{v.plate_no}</td>

@@ -9,7 +9,8 @@ from sqlalchemy.exc import IntegrityError
 from app.database import get_dash_engine
 from app.services import dash_db
 from app.services.calendar_service import open_checker
-from app.services.cost_calc import days_incl, latest_by
+from app.services.assign_service import Assign
+from app.services.cost_calc import days_incl
 from app.services.fuel_log_calc import month_bounds
 from app.services.fuel_log_service import fuel_by_day
 from app.services.logistics_calc import cost_amount, period_shares
@@ -60,14 +61,8 @@ def _vehicle_out(r: dict, manager_ids: list[int]) -> dict:
 
 def list_vehicles() -> list[dict]:
     rows = dash_db.rows("SELECT * FROM vehicles WHERE deleted_at IS NULL ORDER BY active DESC, plate_no")
-    cur = latest_by(
-        dash_db.rows("SELECT manager_id, vehicle_id, start_date FROM vehicle_assignments WHERE deleted_at IS NULL"),
-        "manager_id", "start_date", today(),
-    )
-    by_v: dict[int, list[int]] = {}
-    for mid, a in cur.items():
-        if a["vehicle_id"]:
-            by_v.setdefault(a["vehicle_id"], []).append(mid)
+    d = today()
+    by_v = Assign(d, d).users(d)   # [S3-P2h-3a] 오늘 이 차량을 쓰는 계정 = 물류비와 같은 날짜별 계정 → 인력 → 차량 판정
     return [_vehicle_out(r, sorted(by_v.get(r["id"], []))) for r in rows]
 
 

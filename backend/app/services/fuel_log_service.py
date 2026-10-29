@@ -17,7 +17,6 @@ from app.database import get_dash_engine
 from app.services import dash_db
 from app.services.assign_service import Assign
 from app.services.calendar_service import open_checker
-from app.services.cost_calc import latest_by
 from app.services.fuel_calc import add_basis, finish_basis, ref_price
 from app.services.fuel_log_calc import allocate_month, amounts, days_between, log_cost, month_bounds
 from app.services.logistics_calc import split_even
@@ -31,7 +30,6 @@ SELECT l.*, v.plate_no, v.vat_deductible
 FROM fuel_logs l JOIN vehicles v ON v.id = l.vehicle_id
 WHERE l.deleted_at IS NULL AND l.fuel_date BETWEEN :f AND :t
 """
-SQL_ASSIGNS = "SELECT manager_id, vehicle_id, start_date FROM vehicle_assignments WHERE deleted_at IS NULL"
 
 
 def _iso(v):
@@ -70,15 +68,6 @@ def _closing_out(c: dict | None) -> dict | None:
 def _check_unclosed(d: date) -> None:
     if _closing(d.replace(day=1)):
         raise ValueError(f"{d.year}년 {d.month}월 유류비는 마감됐습니다 — 마감 해제 후 수정하세요")
-
-
-def users_on(assigns: list[dict], d: date) -> dict[int, list[int]]:
-    """그날 차량별 배정 계정 목록 (차량 배정 이력의 그날 기준)."""
-    out: dict[int, list[int]] = {}
-    for mid, a in latest_by(assigns, "manager_id", "start_date", d).items():
-        if a["vehicle_id"]:
-            out.setdefault(a["vehicle_id"], []).append(mid)
-    return out
 
 
 # ---------- 주유 기록 ----------

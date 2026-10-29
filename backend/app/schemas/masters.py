@@ -1,4 +1,4 @@
-from datetime import date, time
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -7,22 +7,6 @@ from pydantic import BaseModel, Field
 class ProfileIn(BaseModel):
     active: bool = True
     memo: str | None = Field(default=None, max_length=500)
-
-
-class PayRateIn(BaseModel):
-    pay_type: Literal["monthly", "hourly", "none"]
-    amount: int = Field(default=0, ge=0, le=100_000_000)
-    effective_from: date
-    memo: str | None = Field(default=None, max_length=200)
-    work_start: time | None = None
-    work_end: time | None = None
-    break_min: int = Field(default=0, ge=0, le=600)
-    break_paid: bool = False    
-
-
-class AssignIn(BaseModel):
-    vehicle_id: int | None = None
-    start_date: date
 
 
 class VehicleIn(BaseModel):
