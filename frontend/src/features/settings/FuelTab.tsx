@@ -179,7 +179,7 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
         {error && !adding && <div className="stack"><ErrorBox message={error} /></div>}
         <p className="muted small">
           비용 = 부가세 공제 차량은 공급가액, 불공제 차량은 합계. 한 달 비용을 그달 영업일({sum?.open_days ?? "-"}일)로 나눠
-          그날 차량에 배정된 매니저에게 반영합니다. 마감 전에는 지금까지 입력한 기록으로 예상하고, 마감하면 확정됩니다.
+          그날 그 차량을 쓴 계정(계정 → 담당 인력 → 인력의 차량)에 반영합니다. 마감 전에는 지금까지 입력한 기록으로 예상하고, 마감하면 확정됩니다.
           월 마감은 그달이 끝난 다음 날부터 할 수 있습니다.
         </p>
         {closed && (
@@ -212,7 +212,7 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
         <>
           <Panel
             title="차량별"
-            desc={`초과 주행 = 주유량 × 차량 연비(주유한 연료로 달릴 수 있는 거리) − 경로 기록 거리(그날 그 차량을 배정받은 매니저의 완료 순서 실제 경로). 출퇴근·복귀·경로 밖 이동·냉동기 공회전 등이 들어갑니다. 월초·월말 탱크 잔량만큼 오차가 있어 ${closed ? "마감 기준 값" : "마감 전이라 예상값(달이 끝나고 마감하면 확정)"}입니다. 배정 매니저가 없는 차량은 경로 기록이 없어 '-'로 표시합니다.`}
+            desc={`초과 주행 = 주유량 × 차량 연비(주유한 연료로 달릴 수 있는 거리) − 경로 기록 거리(그날 그 차량을 쓴 계정의 완료 순서 실제 경로). 출퇴근·복귀·경로 밖 이동·냉동기 공회전 등이 들어갑니다. 월초·월말 탱크 잔량만큼 오차가 있어 ${closed ? "마감 기준 값" : "마감 전이라 예상값(달이 끝나고 마감하면 확정)"}입니다. 그날 사용 계정이 없는 차량은 경로 기록이 없어 '-'로 표시합니다.`}
           >
             <DataTable columns={["차량", "연료", "부가세", { label: "건수", num: true }, { label: "수량", num: true },
               { label: "합계", num: true }, { label: "비용", num: true },
@@ -240,7 +240,7 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
             </DataTable>
           </Panel>
 
-          <Panel title="매니저별 (영업일 배분 후 그날 차량 배정 기준)">
+          <Panel title="계정별 (영업일 배분 후 그날 사용 차량 기준)">
             <DataTable columns={["매니저", "차량", { label: "비용", num: true }]}>
               {sum.managers.map((m) => (
                 <tr key={m.manager_id ?? "none"}>

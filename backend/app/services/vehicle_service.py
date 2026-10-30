@@ -10,7 +10,8 @@ from app.database import get_dash_engine
 from app.services import dash_db
 from app.services.calendar_service import open_checker
 from app.services.assign_service import Assign
-from app.services.cost_calc import days_incl
+from app.services.assign_calc import DAY_REASON_LABEL
+from app.services.cost_calc import days_incl, latest_by
 from app.services.fuel_log_calc import month_bounds
 from app.services.fuel_log_service import fuel_by_day
 from app.services.logistics_calc import cost_amount, period_shares
@@ -21,6 +22,18 @@ PERIOD_CATS = ("insurance", "tax", "inspection", "lease", "other")
 EXPENSE_CATS = ("repair", "maintenance", "tire", "towing", "accident", "depreciation", "parking", "wash", "other")
 VEHICLE_FIELDS = ("plate_no", "model", "fuel_type", "fuel_efficiency", "purchase_date", "purchase_price", "memo", "active", "vat_deductible")
 MAX_SUMMARY_DAYS = 400
+
+# [S3-P2h-3b-1] 차량 목록 '고정 사용 인력' = 오늘 기준 인력 차량 이용 이력이 이 차량(회사 차량)인 인력 (퇴사일 지난 인력 제외)
+SQL_HOLDERS = """
+SELECT h.worker_id, h.start_date, h.mode, h.vehicle_id, w.name, w.end_date
+FROM worker_vehicles h JOIN workers w ON w.id = h.worker_id AND w.deleted_at IS NULL
+WHERE h.deleted_at IS NULL
+"""
+SQL_DAY_USERS = """
+SELECT d.vehicle_id, d.worker_id, d.reason, w.name
+FROM worker_vehicle_days d JOIN workers w ON w.id = d.worker_id AND w.deleted_at IS NULL
+WHERE d.deleted_at IS NULL AND d.work_date = :d AND d.vehicle_id IS NOT NULL
+"""
 
 
 def _iso(v):
@@ -49,21 +62,46 @@ def _clean_vehicle(d: dict) -> dict:
     return d
 
 
-def _vehicle_out(r: dict, manager_ids: list[int]) -> dict:
+def _vehicle_out(r: dict, manager_ids: list[int], holders: list[dict] | None = None,
+                 day_users: list[dict] | None = None) -> dict:
     return {
         "id": r["id"], "plate_no": r["plate_no"], "model": r["model"], "fuel_type": r["fuel_type"],
         "fuel_efficiency": float(r["fuel_efficiency"]) if r["fuel_efficiency"] is not None else None,
         "purchase_date": _iso(r["purchase_date"]), "purchase_price": r["purchase_price"],
         "memo": r["memo"], "active": bool(r["active"]), "manager_ids": manager_ids,
         "vat_deductible": bool(r.get("vat_deductible")),
+        "holders": holders or [], "day_users": day_users or [],
     }
+
+
+def _holders(d: date) -> dict[int, list[dict]]:
+    out: dict[int, list[dict]] = {}
+    for h in latest_by(dash_db.rows(SQL_HOLDERS), "worker_id", "start_date", d).values():
+        if h["mode"] != "company" or h["vehicle_id"] is None:
+            continue
+        if h["end_date"] is not None and h["end_date"] < d:
+            continue
+        out.setdefault(int(h["vehicle_id"]), []).append(
+            {"worker_id": int(h["worker_id"]), "name": h["name"], "since": _iso(h["start_date"])})
+    return out
+
+
+def _day_users(d: date) -> dict[int, list[dict]]:
+    out: dict[int, list[dict]] = {}
+    for u in dash_db.rows(SQL_DAY_USERS, {"d": d}):
+        out.setdefault(int(u["vehicle_id"]), []).append(
+            {"worker_id": int(u["worker_id"]), "name": u["name"],
+             "reason_label": DAY_REASON_LABEL.get(u["reason"], u["reason"])})
+    return out
 
 
 def list_vehicles() -> list[dict]:
     rows = dash_db.rows("SELECT * FROM vehicles WHERE deleted_at IS NULL ORDER BY active DESC, plate_no")
     d = today()
     by_v = Assign(d, d).users(d)   # [S3-P2h-3a] 오늘 이 차량을 쓰는 계정 = 물류비와 같은 날짜별 계정 → 인력 → 차량 판정
-    return [_vehicle_out(r, sorted(by_v.get(r["id"], []))) for r in rows]
+    holders, day_users = _holders(d), _day_users(d)
+    return [_vehicle_out(r, sorted(by_v.get(r["id"], [])), holders.get(r["id"]), day_users.get(r["id"]))
+            for r in rows]
 
 
 def create_vehicle(data: dict, email: str) -> int:

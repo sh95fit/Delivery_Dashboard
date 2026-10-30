@@ -526,7 +526,7 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
                     : "시급 인상·근무시간 변경 등 실제 조건이 바뀔 때. 이전 기간은 기존 조건 유지 · 현재 조건을 복사해 두었습니다"}
                 </span>
               </div>
-              <div className="form-grid">
+              <div className="form-grid rate-grid">
                 <label className="field">{hourly ? "시급(원)" : "월급(원)"}
                   <input className="input" inputMode="numeric" value={rf.amount} onChange={(e) => setR({ amount: e.target.value })}
                     placeholder={hourly ? "예: 16,000" : "예: 3,000,000"} />
@@ -539,6 +539,9 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
                     <option value="0">미적용</option>
                     <option value="1">10% 가산</option>
                   </select>
+                </label>
+                <label className="field">메모
+                  <input className="input" value={rf.memo} maxLength={200} onChange={(e) => setR({ memo: e.target.value })} />
                 </label>
                 {hourly && (
                   <>
@@ -557,8 +560,8 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
                         <option value="0">무급 (근무시간에서 차감)</option>
                       </select>
                     </label>
-                    <div className="field field-wide">근무 요일
-                      <span className="muted small"> 기본 월~금 · 체크 안 한 요일도 근무 입력 가능 (토·일 근무는 주말 근무로 분류)</span>
+                    <div className="field field-full">
+                      <span>근무 요일 <span className="muted small">· 기본 월~금 · 체크 안 한 요일도 근무 입력 가능 (토·일 근무는 주말 근무로 분류)</span></span>
                       <div className="wd-pick">
                         {DAY_BITS.map(([b, l]) => (
                           <label key={b} className={`wd-chk${rf.days & b ? " on" : ""}`}>
@@ -575,9 +578,6 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
                     </label>
                   </>
                 )}
-                <label className="field field-wide">메모
-                  <input className="input" value={rf.memo} maxLength={200} onChange={(e) => setR({ memo: e.target.value })} />
-                </label>
               </div>
               {ratePast && (
                 <div className="stack">

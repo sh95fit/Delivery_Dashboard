@@ -26,6 +26,7 @@ export interface WorkerRow {
   legacy_manager_id: number | null; updated_at: string | null; updated_by: string | null;
   end_date: string | null; last_pay_full: boolean; last_pay_amount: number | null;   // [S2-P0c] 퇴사일 · 정규직 마지막 달
   rate: WorkerRate | null; account: WorkerAccount | null;
+  vehicle: WorkerVehicleNow | null; vehicle_day: WorkerVehicleToday | null;   // [S3-P2h-3b-1] 고정 차량 · 오늘 대체
 }
 export interface WorkerDetail { rates: WorkerRate[]; accounts: WorkerAccount[] }
 
@@ -83,6 +84,8 @@ export interface WorkerVehicleDay {
   reason: DayReason; reason_label: string; memo: string | null; created_by: string | null;
 }
 export interface WorkerVehicles { history: WorkerVehicle[]; days: WorkerVehicleDay[] }
+export interface WorkerVehicleNow { mode: VehicleMode; mode_label: string; vehicle_id: number | null; plate_no: string | null; start_date: string }
+export interface WorkerVehicleToday { vehicle_id: number | null; plate_no: string | null; reason: DayReason; reason_label: string }
 export type WorkerVehicleInput = { start_date: string; mode: VehicleMode; vehicle_id: number | null; memo: string | null };
 export type WorkerVehicleDayInput = { work_date: string; vehicle_id: number | null; reason: DayReason; memo: string | null };
 

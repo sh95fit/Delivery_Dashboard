@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from app.database import get_dash_engine
 from app.services import dash_db
-from app.services.cost_calc import latest_by
+from app.services.assign_calc import DAY_REASON_LABEL, MODE_LABEL
 from app.services.manager_service import _hm, _iso, _rds_managers, today
 from app.services.worker_calc import check_rate, day_calc
 from app.services.worklog_calc import lock_end
@@ -17,7 +17,17 @@ from app.services.worklog_calc import lock_end
 
 SQL_RATES = "SELECT * FROM worker_pay_rates WHERE deleted_at IS NULL"
 SQL_ACCOUNTS = "SELECT * FROM worker_accounts WHERE deleted_at IS NULL"
-
+# [S3-P2h-3b-1] 인력 목록 '고정 차량' = 오늘 기준 차량 이용 이력 행, '오늘 대체' = 오늘 그날 예외
+SQL_VEH = """
+SELECT h.worker_id, h.start_date, h.mode, h.vehicle_id, v.plate_no
+FROM worker_vehicles h LEFT JOIN vehicles v ON v.id = h.vehicle_id
+WHERE h.deleted_at IS NULL
+"""
+SQL_VEH_DAY = """
+SELECT d.worker_id, d.vehicle_id, d.reason, v.plate_no
+FROM worker_vehicle_days d LEFT JOIN vehicles v ON v.id = d.vehicle_id
+WHERE d.deleted_at IS NULL AND d.work_date = :d
+"""
 
 def _managers() -> dict[int, dict]:
     try:
@@ -63,12 +73,24 @@ def account_out(a: dict, mgrs: dict[int, dict]) -> dict:
             "created_by": a.get("created_by")}
 
 
+def vehicle_now_out(h: dict) -> dict:
+    return {"mode": h["mode"], "mode_label": MODE_LABEL.get(h["mode"], h["mode"]),
+            "vehicle_id": h["vehicle_id"], "plate_no": h["plate_no"], "start_date": _iso(h["start_date"])}
+
+
+def vehicle_day_out(r: dict) -> dict:
+    return {"vehicle_id": r["vehicle_id"], "plate_no": r["plate_no"],
+            "reason": r["reason"], "reason_label": DAY_REASON_LABEL.get(r["reason"], r["reason"])}
+
+
 def list_workers() -> list[dict]:
     d = today()
     mgrs = _managers()
     ws = dash_db.rows("SELECT * FROM workers WHERE deleted_at IS NULL ORDER BY id")
     rates = latest_by(dash_db.rows(SQL_RATES), "worker_id", "effective_from", d)
     accs = latest_by(dash_db.rows(SQL_ACCOUNTS), "worker_id", "start_date", d)
+    vehs = latest_by(dash_db.rows(SQL_VEH), "worker_id", "start_date", d)
+    vdays = {int(r["worker_id"]): r for r in dash_db.rows(SQL_VEH_DAY, {"d": d})}
     out = []
     for w in ws:
         wid = w["id"]
@@ -81,6 +103,8 @@ def list_workers() -> list[dict]:
             "updated_at": _iso(w.get("updated_at")), "updated_by": w.get("updated_by"),
             "rate": rate_out(rates[wid]) if wid in rates else None,
             "account": account_out(a, mgrs) if a and a["manager_id"] is not None else None,
+            "vehicle": vehicle_now_out(vehs[wid]) if wid in vehs else None,
+            "vehicle_day": vehicle_day_out(vdays[wid]) if wid in vdays else None,            
         })
     return out
 

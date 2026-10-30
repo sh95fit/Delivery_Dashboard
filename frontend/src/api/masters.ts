@@ -28,10 +28,12 @@ export interface ManagerRow {
 
 export interface Vehicle {
   id: number; plate_no: string; model: string | null; fuel_type: FuelType;
+  holders: Array<{ worker_id: number; name: string; since: string }>;          // [S3-P2h-3b-1] 고정 사용 인력
+  day_users: Array<{ worker_id: number; name: string; reason_label: string }>; // 오늘 하루 대체 사용  
   fuel_efficiency: number | null; purchase_date: string | null; purchase_price: number | null;
   memo: string | null; active: boolean; manager_ids: number[]; vat_deductible: boolean;
 }
-export type VehicleInput = Omit<Vehicle, "id" | "manager_ids">;
+export type VehicleInput = Omit<Vehicle, "id" | "manager_ids" | "holders" | "day_users">;   // [S3-P2h-3b-1] 표시용 칸은 저장 값에서 제외
 
 export interface PeriodCost {
   id: number; vehicle_id: number; plate_no: string | null; category: string; amount: number;

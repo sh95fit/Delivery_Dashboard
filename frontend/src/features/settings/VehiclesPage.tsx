@@ -129,7 +129,7 @@ function VehicleListTab({ vehicles, managers, isAdmin, onChanged }: {
         {vehicles.length === 0 ? (
           <div className="muted small">등록된 차량이 없습니다.</div>
         ) : (
-          <DataTable columns={["차량번호", "차종", "연료", "부가세", { label: "공인연비", num: true }, "구매일", { label: "구매가", num: true }, "오늘 사용 계정", "상태", ...(isAdmin ? ["관리"] : [])]}>
+          <DataTable columns={["차량번호", "차종", "연료", "부가세", { label: "공인연비", num: true }, "구매일", { label: "구매가", num: true }, "연결된 인력", "상태", ...(isAdmin ? ["관리"] : [])]}>
             {vehicles.map((v) => (
               <tr key={v.id} className={v.active ? undefined : "off"}>
                 <td>{v.plate_no}</td>
@@ -139,7 +139,15 @@ function VehicleListTab({ vehicles, managers, isAdmin, onChanged }: {
                 <td className="num">{v.fuel_efficiency != null ? `${v.fuel_efficiency}${v.fuel_type === "ev" ? "km/kWh" : "km/L"}` : "-"}</td>
                 <td>{v.purchase_date ?? "-"}</td>
                 <td className="num">{v.purchase_price != null ? won(v.purchase_price) : "-"}</td>
-                <td>{v.manager_ids.length ? v.manager_ids.map((id) => mgrName.get(id) ?? `#${id}`).join(", ") : <span className="muted">-</span>}</td>
+                <td>
+                  {v.holders.length ? v.holders.map((h) => h.name).join(", ")
+                    : v.manager_ids.length
+                      ? <span className="muted">미지정 · 기존 계정 배정 {v.manager_ids.map((id) => mgrName.get(id) ?? `#${id}`).join(", ")}</span>
+                      : <span className="muted">미지정</span>}
+                  {v.day_users.length > 0 && (
+                    <div className="muted small">오늘 {v.day_users.map((u) => `${u.name}(${u.reason_label})`).join(", ")}</div>
+                  )}
+                </td>
                 <td>{v.active ? <Chip tone="ok">사용</Chip> : <Chip>중지</Chip>}</td>
                 {isAdmin && (
                   <td>

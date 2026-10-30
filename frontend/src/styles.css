@@ -599,3 +599,14 @@ tr.wl-dirty td { background: #fffbeb; }
 
 /* S3-P2d-2c 경로 진행 방향 화살표 (선택한 노선만) */
 .mk-arrow { width: 12px; height: 12px; line-height: 12px; font-size: 10px; text-align: center; pointer-events: none; text-shadow: 0 0 2px #fff, 0 0 2px #fff; }
+
+/* S3-P2h-3b-1 계약 입력: 4칸 고정 배치 (① 금액·시작일·부가세·메모 ② 출퇴근·휴게 ③ 근무 요일 ④ 초과수당) */
+.form-grid.rate-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: start; }
+.field-full { grid-column: 1 / -1; }
+.rate-grid .wd-pick { display: flex; flex-wrap: nowrap; gap: 6px; }
+.ed-form .form-actions { flex-wrap: wrap; }
+.ed-form .form-actions > .muted { margin-right: auto; }
+@media (max-width: 900px) {
+  .form-grid.rate-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rate-grid .wd-pick { flex-wrap: wrap; }
+}
