@@ -10,6 +10,7 @@ from sqlalchemy import text
 from app.database import get_dash_engine
 from app.services import dash_db
 from app.services.assign_calc import DAY_REASON_LABEL, MODE_LABEL
+from app.services.cost_calc import latest_by
 from app.services.manager_service import _hm, _iso, _rds_managers, today
 from app.services.worker_calc import check_rate, day_calc
 from app.services.worklog_calc import lock_end
