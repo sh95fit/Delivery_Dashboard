@@ -10,7 +10,7 @@ from app.database import get_dash_engine
 from app.services import dash_db
 from app.services.calendar_service import open_checker
 from app.services.assign_service import Assign
-from app.services.assign_calc import DAY_REASON_LABEL
+from app.services.assign_calc import DAY_REASON_LABEL, disposal_problem
 from app.services.cost_calc import days_incl, latest_by
 from app.services.fuel_log_calc import month_bounds
 from app.services.fuel_log_service import fuel_by_day
@@ -20,7 +20,8 @@ from app.services.manager_service import today
 FUEL_TYPES = ("gasoline", "diesel", "lpg", "ev")
 PERIOD_CATS = ("insurance", "tax", "inspection", "lease", "other")
 EXPENSE_CATS = ("repair", "maintenance", "tire", "towing", "accident", "depreciation", "parking", "wash", "other")
-VEHICLE_FIELDS = ("plate_no", "model", "fuel_type", "fuel_efficiency", "purchase_date", "purchase_price", "memo", "active", "vat_deductible")
+VEHICLE_FIELDS = ("plate_no", "model", "fuel_type", "fuel_efficiency", "purchase_date", "purchase_price", "memo", "active",
+                  "vat_deductible", "disposed_on")
 MAX_SUMMARY_DAYS = 400
 
 # [S3-P2h-3b-1] 차량 목록 '고정 사용 인력' = 오늘 기준 인력 차량 이용 이력이 이 차량(회사 차량)인 인력 (퇴사일 지난 인력 제외)
@@ -59,6 +60,11 @@ def _clean_vehicle(d: dict) -> dict:
     d["memo"] = (d["memo"] or "").strip() or None
     d["active"] = True if d["active"] is None else bool(d["active"])
     d["vat_deductible"] = bool(d["vat_deductible"])    
+    if d["disposed_on"] is not None:
+        if d["active"]:
+            raise ValueError("처분일을 넣으면 상태를 '중지'로 바꾸세요")
+        if d["purchase_date"] is not None and d["disposed_on"] < d["purchase_date"]:
+            raise ValueError("처분일이 구매일보다 빠릅니다")    
     return d
 
 
@@ -70,6 +76,7 @@ def _vehicle_out(r: dict, manager_ids: list[int], holders: list[dict] | None = N
         "purchase_date": _iso(r["purchase_date"]), "purchase_price": r["purchase_price"],
         "memo": r["memo"], "active": bool(r["active"]), "manager_ids": manager_ids,
         "vat_deductible": bool(r.get("vat_deductible")),
+        "disposed_on": _iso(r.get("disposed_on")),        
         "holders": holders or [], "day_users": day_users or [],
     }
 
@@ -109,17 +116,36 @@ def create_vehicle(data: dict, email: str) -> int:
     try:
         return dash_db.insert_id("""
             INSERT INTO vehicles (plate_no, model, fuel_type, fuel_efficiency, purchase_date, purchase_price,
-                                  memo, active, vat_deductible, created_by, updated_by)
+                                  memo, active, vat_deductible, disposed_on, created_by, updated_by)
             VALUES (:plate_no, :model, :fuel_type, :fuel_efficiency, :purchase_date, :purchase_price,
-                    :memo, :active, :vat_deductible, :e, :e)
+                    :memo, :active, :vat_deductible, :disposed_on, :e, :e)
             RETURNING id
         """, {**d, "e": email})
     except IntegrityError as exc:
         raise ValueError("이미 등록된 차량번호입니다") from exc
 
 
+def _check_disposal(vid: int, disposed: date) -> None:
+    """[S3-P2h-3b-2] 처분일 뒤에도 이 차량을 쓰는 인력 이력·그날 예외가 있으면 거절."""
+    rows = dash_db.rows("SELECT worker_id, start_date, mode, vehicle_id FROM worker_vehicles WHERE deleted_at IS NULL")
+    ends = {int(r["id"]): r["end_date"] for r in dash_db.rows(
+        "SELECT id, end_date FROM workers WHERE deleted_at IS NULL AND end_date IS NOT NULL")}
+    p = disposal_problem(rows, ends, {vid: disposed})
+    if p:
+        w = dash_db.rows("SELECT name FROM workers WHERE id = :w", {"w": p["worker_id"]})
+        who = w[0]["name"] if w else f"#{p['worker_id']}"
+        raise ValueError(f"'{who}'님의 차량 이용 이력이 처분일({disposed}) 뒤에도 이 차량으로 이어집니다. "
+                         "인력 › 차량 이용에서 처분일 다음 날부터의 이력(다른 차량·자차·차량 없음)을 먼저 추가하세요")
+    days = dash_db.rows("SELECT work_date FROM worker_vehicle_days WHERE deleted_at IS NULL "
+                        "AND vehicle_id = :v AND work_date > :d ORDER BY work_date LIMIT 1", {"v": vid, "d": disposed})
+    if days:
+        raise ValueError(f"처분일({disposed}) 뒤 {days[0]['work_date']}에 이 차량을 쓴 그날 예외가 있습니다. 먼저 삭제하세요")
+    
+
 def update_vehicle(vid: int, data: dict, email: str) -> None:
     d = _clean_vehicle(data)
+    if d["disposed_on"] is not None:
+        _check_disposal(vid, d["disposed_on"])    
     try:
         with get_dash_engine().begin() as conn:
             res = conn.execute(text("""
@@ -127,6 +153,7 @@ def update_vehicle(vid: int, data: dict, email: str) -> None:
                    SET plate_no = :plate_no, model = :model, fuel_type = :fuel_type,
                        fuel_efficiency = :fuel_efficiency, purchase_date = :purchase_date,
                        purchase_price = :purchase_price, memo = :memo, active = :active, vat_deductible = :vat_deductible,
+                       disposed_on = :disposed_on,
                        updated_by = :e, updated_at = NOW()
                  WHERE id = :id AND deleted_at IS NULL
             """), {**d, "e": email, "id": vid})

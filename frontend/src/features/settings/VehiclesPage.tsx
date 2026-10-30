@@ -70,8 +70,8 @@ export default function VehiclesPage() {
   );
 }
 
-type VForm = { plate_no: string; model: string; fuel_type: FuelType; eff: string; pdate: string; price: string; memo: string; active: boolean; vat: boolean };
-const EMPTY: VForm = { plate_no: "", model: "", fuel_type: "diesel", eff: "", pdate: "", price: "", memo: "", active: true, vat: false };
+type VForm = { plate_no: string; model: string; fuel_type: FuelType; eff: string; pdate: string; price: string; memo: string; active: boolean; vat: boolean; disp: string };
+const EMPTY: VForm = { plate_no: "", model: "", fuel_type: "diesel", eff: "", pdate: "", price: "", memo: "", active: true, vat: false, disp: "" };
 
 function VehicleListTab({ vehicles, managers, isAdmin, onChanged }: {
   vehicles: Vehicle[]; managers: ManagerRow[]; isAdmin: boolean; onChanged: () => Promise<void>;
@@ -90,6 +90,7 @@ function VehicleListTab({ vehicles, managers, isAdmin, onChanged }: {
       plate_no: v.plate_no, model: v.model ?? "", fuel_type: v.fuel_type,
       eff: v.fuel_efficiency != null ? String(v.fuel_efficiency) : "", pdate: v.purchase_date ?? "",
       price: v.purchase_price != null ? String(v.purchase_price) : "", memo: v.memo ?? "", active: v.active, vat: v.vat_deductible,
+      disp: v.disposed_on ?? "",
     } : EMPTY);
   }
 
@@ -105,10 +106,11 @@ function VehicleListTab({ vehicles, managers, isAdmin, onChanged }: {
     if (!f.plate_no.trim()) return setError("차량번호를 입력하세요");
     if (eff !== null && !(eff > 0)) return setError("연비는 0보다 큰 숫자로 입력하세요");
     if (price !== null && Number.isNaN(price)) return setError("구매가는 숫자로 입력하세요");
+    if (f.disp && f.active) return setError("처분일을 넣으면 상태를 '중지'로 바꾸세요");    
     const body: VehicleInput = {
       plate_no: f.plate_no.trim(), model: f.model.trim() || null, fuel_type: f.fuel_type,
       fuel_efficiency: eff, purchase_date: f.pdate || null, purchase_price: price,
-      memo: f.memo.trim() || null, active: f.active, vat_deductible: f.vat,
+      memo: f.memo.trim() || null, active: f.active, vat_deductible: f.vat, disposed_on: f.disp || null,
     };
     run(async () => {
       if (editing === "new") await api.createVehicle(body);
@@ -148,7 +150,7 @@ function VehicleListTab({ vehicles, managers, isAdmin, onChanged }: {
                     <div className="muted small">오늘 {v.day_users.map((u) => `${u.name}(${u.reason_label})`).join(", ")}</div>
                   )}
                 </td>
-                <td>{v.active ? <Chip tone="ok">사용</Chip> : <Chip>중지</Chip>}</td>
+                <td>{v.active ? <Chip tone="ok">사용</Chip> : <Chip>{v.disposed_on ? `처분 ${v.disposed_on}` : "중지"}</Chip>}</td>
                 {isAdmin && (
                   <td>
                     <div className="row-actions">
@@ -187,10 +189,16 @@ function VehicleListTab({ vehicles, managers, isAdmin, onChanged }: {
           <label className="field">구매일<input type="date" className="input" value={f.pdate} onChange={(e) => set("pdate", e.target.value)} /></label>
           <label className="field">구매가(원)<input className="input" inputMode="numeric" value={f.price} onChange={(e) => set("price", e.target.value)} /></label>
           <label className="field">상태
-            <select className="input" value={f.active ? "1" : "0"} onChange={(e) => set("active", e.target.value === "1")}>
+          <select className="input" value={f.active ? "1" : "0"}
+              onChange={(e) => setF((p) => ({ ...p, active: e.target.value === "1", disp: e.target.value === "1" ? "" : p.disp }))}>
               <option value="1">사용</option><option value="0">중지</option>
             </select>
           </label>
+          {!f.active && (
+            <label className="field">처분일 (판매·폐차)
+              <input type="date" className="input" value={f.disp} onChange={(e) => set("disp", e.target.value)} />
+            </label>
+          )}          
           <label className="field">부가세 공제
             <select className="input" value={f.vat ? "1" : "0"} onChange={(e) => set("vat", e.target.value === "1")}>
               <option value="0">불공제 (승용차 등) — 합계를 비용으로</option>

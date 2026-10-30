@@ -100,6 +100,17 @@ def find_conflict(rows: list[dict], ends: dict[int, date | None] | None = None) 
     return None
 
 
+def disposal_problem(rows: list[dict], ends: dict[int, date | None] | None,
+                     disposed: dict[int, date]) -> dict | None:
+    """[S3-P2h-3b-2] 처분일(disposed = {차량: 처분일}) 뒤에도 그 차량으로 이어지는 이력 → {worker_id, vehicle_id, disposed_on}. 없으면 None.
+    rows = 저장하려는 상태 그대로의 전체 이력 (find_conflict와 같은 방식)"""
+    for s in spans(rows, ends):
+        cap = disposed.get(s["vehicle_id"]) if s["vehicle_id"] else None
+        if cap is not None and (s["end"] is None or s["end"] > cap):
+            return {"worker_id": s["worker_id"], "vehicle_id": s["vehicle_id"], "disposed_on": cap}
+    return None
+
+
 def check_mode(mode: str, vehicle_id: int | None) -> str | None:
     """[S3-P2h-2a] 차량 이용 이력 저장 전 검사. 문제 없으면 None."""
     if mode not in MODES:

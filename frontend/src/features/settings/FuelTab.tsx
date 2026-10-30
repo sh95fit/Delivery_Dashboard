@@ -241,7 +241,7 @@ export default function FuelTab({ vehicles, managers, isAdmin }: Props) {
           </Panel>
 
           <Panel title="계정별 (영업일 배분 후 그날 사용 차량 기준)">
-            <DataTable columns={["매니저", "차량", { label: "비용", num: true }]}>
+            <DataTable columns={["계정", "차량", { label: "비용", num: true }]}>
               {sum.managers.map((m) => (
                 <tr key={m.manager_id ?? "none"}>
                   <td>{m.manager_id == null ? <span className="muted">계정 미지정</span> : mgrName.get(m.manager_id) ?? `#${m.manager_id}`}</td>

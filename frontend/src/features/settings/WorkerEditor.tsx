@@ -144,7 +144,7 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
   const carOptions = useMemo(() => [...cars].sort((a, b) =>
     Number(b.active) - Number(a.active) || a.plate_no.localeCompare(b.plate_no, "ko", { numeric: true })), [cars]);
   const carText = (c: Vehicle) =>
-    `${c.plate_no} · ${FUEL_LABEL[c.fuel_type]}${c.model ? ` · ${c.model}` : ""}${c.active ? "" : " (사용 안 함)"}`;
+    `${c.plate_no} · ${FUEL_LABEL[c.fuel_type]}${c.model ? ` · ${c.model}` : ""}${c.disposed_on ? ` (처분 ${c.disposed_on})` : c.active ? "" : " (사용 안 함)"}`;
 
   async function run(sec: Tab, okText: string, fn: () => Promise<{ id?: number } | void>, after?: () => void) {
     if (!row) return;

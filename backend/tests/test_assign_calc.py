@@ -1,7 +1,7 @@
 from datetime import date as D
 
-from app.services.assign_calc import (check_mode, find_conflict, group_by_worker, lock_until, resolve, spans,
-                                      users_by_vehicle, vehicle_of)
+from app.services.assign_calc import (check_mode, disposal_problem, find_conflict, group_by_worker, lock_until, resolve,
+                                      spans, users_by_vehicle, vehicle_of)
 
 HIST = [
     {"worker_id": 2, "start_date": D(2026, 10, 1), "mode": "company", "vehicle_id": 1},
@@ -70,3 +70,12 @@ def test_check_mode_and_lock():
     assert lock_until([]) is None
     assert lock_until([D(2026, 8, 1), D(2026, 9, 1)]) == D(2026, 9, 30)
     assert lock_until([D(2026, 12, 1)]) == D(2026, 12, 31)
+
+
+def test_disposal_problem():
+    rows = [{"worker_id": 2, "start_date": D(2026, 9, 1), "mode": "company", "vehicle_id": 1},
+            {"worker_id": 2, "start_date": D(2026, 10, 28), "mode": "company", "vehicle_id": 4}]
+    assert disposal_problem(rows, {}, {1: D(2026, 10, 27)}) is None                       # 10-27까지 쓰고 처분
+    assert disposal_problem(rows, {}, {1: D(2026, 10, 20)}) == {"worker_id": 2, "vehicle_id": 1, "disposed_on": D(2026, 10, 20)}
+    assert disposal_problem(rows[:1], {}, {1: D(2026, 10, 27)})["worker_id"] == 2         # 다음 이력 없음 → 계속 이어짐
+    assert disposal_problem(rows[:1], {2: D(2026, 10, 1)}, {1: D(2026, 10, 27)}) is None  # 퇴사일에서 끝남

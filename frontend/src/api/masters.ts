@@ -32,6 +32,7 @@ export interface Vehicle {
   day_users: Array<{ worker_id: number; name: string; reason_label: string }>; // 오늘 하루 대체 사용  
   fuel_efficiency: number | null; purchase_date: string | null; purchase_price: number | null;
   memo: string | null; active: boolean; manager_ids: number[]; vat_deductible: boolean;
+  disposed_on: string | null;   // [S3-P2h-3b-2] 처분일 (판매·폐차, 없으면 null)  
 }
 export type VehicleInput = Omit<Vehicle, "id" | "manager_ids" | "holders" | "day_users">;   // [S3-P2h-3b-1] 표시용 칸은 저장 값에서 제외
 

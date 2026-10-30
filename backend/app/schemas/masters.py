@@ -19,6 +19,7 @@ class VehicleIn(BaseModel):
     memo: str | None = Field(default=None, max_length=500)
     active: bool = True
     vat_deductible: bool = False    
+    disposed_on: date | None = None     # [S3-P2h-3b-2] 처분일 (상태 '중지'일 때만)    
 
 
 class PeriodCostIn(BaseModel):

@@ -13,7 +13,7 @@ from datetime import date, timedelta
 from sqlalchemy import text
 
 from app.database import get_dash_engine
-from app.services.assign_calc import DAY_REASON_LABEL, MODE_LABEL, check_mode, find_conflict, lock_until
+from app.services.assign_calc import DAY_REASON_LABEL, MODE_LABEL, check_mode, disposal_problem, find_conflict, lock_until
 from app.services.manager_service import _iso
 
 SQL_HIST_ALL = "SELECT id, worker_id, start_date, mode, vehicle_id FROM worker_vehicles WHERE deleted_at IS NULL"
@@ -28,11 +28,15 @@ def _worker(conn, wid: int) -> dict:
     return dict(w)
 
 
-def _check_vehicle(conn, vid: int | None) -> None:
+def _check_vehicle(conn, vid: int | None, d: date | None = None) -> None:
     if vid is None:
         return
-    if not conn.execute(text("SELECT 1 FROM vehicles WHERE id = :v AND deleted_at IS NULL"), {"v": vid}).fetchone():
+    r = conn.execute(text("SELECT plate_no, disposed_on FROM vehicles WHERE id = :v AND deleted_at IS NULL"),
+                     {"v": vid}).fetchone()
+    if not r:
         raise ValueError("차량을 찾을 수 없습니다 (삭제된 차량)")
+    if d is not None and r[1] is not None and d > r[1]:
+        raise ValueError(f"{r[0]} 차량은 {r[1]}에 처분되어 {d}부터는 선택할 수 없습니다")
 
 
 def _check_end(w: dict, d: date, what: str) -> None:
@@ -55,6 +59,13 @@ def _check_conflict(conn, skip_id: int | None, new_row: dict | None) -> None:
         rows.append(new_row)
     ends = {int(r[0]): r[1] for r in conn.execute(text(
         "SELECT id, end_date FROM workers WHERE deleted_at IS NULL AND end_date IS NOT NULL")).fetchall()}
+    disposed = {int(r[0]): r[1] for r in conn.execute(text(
+        "SELECT id, disposed_on FROM vehicles WHERE deleted_at IS NULL AND disposed_on IS NOT NULL")).fetchall()}
+    p = disposal_problem(rows, ends, disposed)
+    if p:
+        plate = conn.execute(text("SELECT plate_no FROM vehicles WHERE id = :v"), {"v": p["vehicle_id"]}).scalar()
+        raise ValueError(f"이대로 저장하면 {plate or p['vehicle_id']} 차량을 처분일({p['disposed_on']}) 뒤에도 쓰는 것으로 계산됩니다. "
+                         "처분일 다음 날부터의 이력(다른 차량·자차·차량 없음)을 먼저 추가하세요")    
     c = find_conflict(rows, ends)
     if not c:
         return
@@ -113,7 +124,7 @@ def add_history(wid: int, data: dict, email: str) -> int:
     d, mode, vid = _prep(data)
     with get_dash_engine().begin() as conn:
         w = _worker(conn, wid)
-        _check_vehicle(conn, vid)
+        _check_vehicle(conn, vid, d)
         _check_end(w, d, "시작일")
         _check_lock(conn, d, "시작 차량 이용 이력은")
         if conn.execute(text("SELECT 1 FROM worker_vehicles WHERE worker_id = :w AND start_date = :s "
@@ -132,7 +143,7 @@ def update_history(hid: int, data: dict, email: str) -> int:
             raise ValueError("차량 이용 이력을 찾을 수 없습니다 (이미 수정·삭제됨 — 새로고침하세요)")
         wid = int(old[0])
         w = _worker(conn, wid)
-        _check_vehicle(conn, vid)
+        _check_vehicle(conn, vid, d)
         _check_end(w, d, "시작일")
         _check_lock(conn, min(old[1], d), "시작 차량 이용 이력은")
         if conn.execute(text("SELECT 1 FROM worker_vehicles WHERE worker_id = :w AND start_date = :s "
@@ -162,7 +173,7 @@ def add_day(wid: int, data: dict, email: str) -> int:
     vid = data.get("vehicle_id")
     with get_dash_engine().begin() as conn:
         w = _worker(conn, wid)
-        _check_vehicle(conn, vid)
+        _check_vehicle(conn, vid, d)
         _check_end(w, d, "날짜")
         _check_lock(conn, d, "그날 예외는")
         if conn.execute(text("SELECT 1 FROM worker_vehicle_days WHERE worker_id = :w AND work_date = :d "
