@@ -30,16 +30,15 @@ def test_vehicle_of_day_exception():
 
 def test_resolve_worker_change_on_account():
     # 계정 1: 10/1~15 인력 2(차량 1), 10/16~ 인력 3(차량 2)
-    assert resolve(D(2026, 10, 15), 1, 2, HB, {}, {}) == {"worker_id": 2, "vehicle_id": 1, "basis": "company"}
-    assert resolve(D(2026, 10, 16), 1, 3, HB, {}, {}) == {"worker_id": 3, "vehicle_id": 2, "basis": "company"}
+    assert resolve(D(2026, 10, 15), 1, 2, HB, {}) == {"worker_id": 2, "vehicle_id": 1, "basis": "company"}
+    assert resolve(D(2026, 10, 16), 1, 3, HB, {}) == {"worker_id": 3, "vehicle_id": 2, "basis": "company"}
 
 
-def test_resolve_legacy_and_unknown():
-    legacy = {7: {"manager_id": 7, "vehicle_id": 5}}
-    assert resolve(D(2026, 10, 10), 7, None, HB, {}, legacy) == {"worker_id": None, "vehicle_id": 5, "basis": "legacy"}
-    assert resolve(D(2026, 10, 10), 7, 3, HB, {}, legacy)["basis"] == "legacy"     # 인력 3은 10/16 전 이력 없음
-    assert resolve(D(2026, 10, 10), 8, None, HB, {}, legacy) == {"worker_id": None, "vehicle_id": None, "basis": "unknown"}
-    assert resolve(D(2026, 10, 10), 7, 5, HB, {}, legacy) == {"worker_id": 5, "vehicle_id": None, "basis": "own"}
+def test_resolve_unknown():
+    # [S3-P2h-3c] 기존 계정 차량 배정 제거 → 인력·이력을 못 찾으면 unknown
+    assert resolve(D(2026, 10, 10), 7, None, HB, {}) == {"worker_id": None, "vehicle_id": None, "basis": "unknown"}
+    assert resolve(D(2026, 10, 10), 7, 3, HB, {}) == {"worker_id": 3, "vehicle_id": None, "basis": "unknown"}   # 인력 3은 10/16 전 이력 없음
+    assert resolve(D(2026, 10, 10), 7, 5, HB, {}) == {"worker_id": 5, "vehicle_id": None, "basis": "own"}
 
 
 def test_users_by_vehicle_shared():

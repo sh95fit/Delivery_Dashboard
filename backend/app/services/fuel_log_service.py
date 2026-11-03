@@ -113,7 +113,7 @@ def add_log(data: dict, email: str, source: str = "manual") -> int:
     d = data["fuel_date"]
     if d > today():
         raise ValueError("미래 날짜는 입력할 수 없습니다")
-    v = dash_db.rows("SELECT id, fuel_type FROM vehicles WHERE id = :v AND deleted_at IS NULL",
+    v = dash_db.rows("SELECT id, fuel_type, plate_no, disposed_on FROM vehicles WHERE id = :v AND deleted_at IS NULL",
                      {"v": data["vehicle_id"]})
     if not v:
         raise ValueError("차량을 찾을 수 없습니다")
@@ -122,6 +122,8 @@ def add_log(data: dict, email: str, source: str = "manual") -> int:
     if ft != vft:
         raise ValueError(f"차량 연료({FUEL_LABEL.get(vft, vft)})와 입력한 연료({FUEL_LABEL.get(ft, ft)})가 다릅니다"
                          " — 차량 정보를 확인하세요")
+    if v[0]["disposed_on"] is not None and d > v[0]["disposed_on"]:   # [S3-P2h-3c] 처분 뒤 주유 기록 차단
+        raise ValueError(f"{v[0]['plate_no']} 차량은 {v[0]['disposed_on']}에 처분되어 {d} 주유 기록을 넣을 수 없습니다")        
     total, supply, vat = amounts(data["total_amount"], data.get("supply_amount"), data.get("vat_amount"))
     _check_unclosed(d)
     return dash_db.insert_id("""

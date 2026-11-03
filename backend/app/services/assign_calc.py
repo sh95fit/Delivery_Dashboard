@@ -3,7 +3,7 @@
 - 계정 → 인력: 인센티브 배정과 같은 결과(incentive_calc.assign_owner: 담당 지정 → 근무 기록 → 고정 계정)를 받아 쓴다
 - 인력 → 차량: 그날 예외(worker_vehicle_days) → 차량 이용 이력(worker_vehicles, 시작일 이력)
   mode = company(회사 차량) / own(자차) / none(차량 없음)
-- 전환 기간: 인력을 못 찾았거나 그 날짜 기준 차량 이력이 없으면 기존 계정 차량 배정(vehicle_assignments) 사용
+- [S3-P2h-3c] 인력을 못 찾았거나 그 날짜 기준 차량 이력이 없으면 차량 못 찾음(unknown) — 기존 계정 차량 배정(vehicle_assignments)은 읽지 않음 (테이블은 보존)
 - 같은 회사 차량을 두 사람이 겹치는 기간에 '이력'으로 쓰는 것은 막는다 (하루만 같이 쓰면 그날 예외로)
 - 퇴사일(workers.end_date)이 있으면 그 사람의 이력은 퇴사일에서 끝난 것으로 본다
 """
@@ -41,18 +41,15 @@ def vehicle_of(hist_by: dict[int, list[dict]], day_map: dict[tuple[date, int], i
 
 
 def resolve(d: date, mid: int, owner: int | None, hist_by: dict[int, list[dict]],
-            day_map: dict[tuple[date, int], int | None], legacy: dict[int, dict]) -> dict:
+            day_map: dict[tuple[date, int], int | None]) -> dict:
     """계정 mid의 그날 → {worker_id, vehicle_id, basis}.
     owner = 그날 이 계정 담당 인력 (assign_owner 결과, 못 찾으면 None)
-    legacy = 그날 기준 계정별 vehicle_assignments 행 (cost_calc.latest_by 결과)
-    basis = day / company / own / none / legacy(기존 계정 차량 배정) / unknown(차량 못 찾음)"""
+    basis = day / company / own / none / unknown(인력을 못 찾았거나 그 날짜 기준 차량 이력 없음)
+    [S3-P2h-3c] 기존 계정 차량 배정(legacy) 경로 제거"""
     if owner is not None:
         vid, basis = vehicle_of(hist_by, day_map, owner, d)
         if basis != "no_history":
             return {"worker_id": owner, "vehicle_id": vid, "basis": basis}
-    a = legacy.get(mid)
-    if a and a.get("vehicle_id"):
-        return {"worker_id": owner, "vehicle_id": int(a["vehicle_id"]), "basis": "legacy"}
     return {"worker_id": owner, "vehicle_id": None, "basis": "unknown"}
 
 

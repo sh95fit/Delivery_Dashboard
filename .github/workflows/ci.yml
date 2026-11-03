@@ -56,6 +56,13 @@ jobs:
       - name: Syntax check (모든 .py 파일 문법 검사)
         run: python -m compileall -q app
 
+      - name: Undefined name check (import 누락 등 — pyflakes)
+        run: |
+          pip install pyflakes==3.2.0
+          python -m pyflakes app > pyflakes.txt || true
+          cat pyflakes.txt
+          if grep -q "undefined name" pyflakes.txt; then echo "undefined name 발견"; exit 1; fi        
+
       - name: Unit tests (집계 정합성 - 카드=지도=표)
         run: |
           pip install pytest==8.3.3
