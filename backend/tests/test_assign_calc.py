@@ -1,7 +1,7 @@
 from datetime import date as D
 
-from app.services.assign_calc import (check_mode, disposal_problem, find_conflict, group_by_worker, lock_until, resolve,
-                                      spans, users_by_vehicle, vehicle_of)
+from app.services.assign_calc import (check_mode, disposal_problem, find_conflict, group_by_worker, handover_cuts,
+                                      hold_spans, lock_until, overlaps, resolve, spans, users_by_vehicle, vehicle_of)
 
 HIST = [
     {"worker_id": 2, "start_date": D(2026, 10, 1), "mode": "company", "vehicle_id": 1},
@@ -78,3 +78,40 @@ def test_disposal_problem():
     assert disposal_problem(rows, {}, {1: D(2026, 10, 20)}) == {"worker_id": 2, "vehicle_id": 1, "disposed_on": D(2026, 10, 20)}
     assert disposal_problem(rows[:1], {}, {1: D(2026, 10, 27)})["worker_id"] == 2         # 다음 이력 없음 → 계속 이어짐
     assert disposal_problem(rows[:1], {2: D(2026, 10, 1)}, {1: D(2026, 10, 27)}) is None  # 퇴사일에서 끝남
+
+
+# ---------- [S3-P2h-3e] 계정·차량 공통 기간 규칙 ----------
+ACC = [{"worker_id": 12, "manager_id": 42, "start_date": D(2026, 8, 1)},
+       {"worker_id": 14, "manager_id": 42, "start_date": D(2026, 9, 18)}]
+ENDS = {12: D(2026, 9, 18)}
+
+
+def test_hold_spans_end_date_cap():
+    sp = hold_spans(ACC, ENDS, "manager_id")
+    a = next(s for s in sp if s["worker_id"] == 12)
+    assert (a["value"], a["start"], a["end"]) == (42, D(2026, 8, 1), D(2026, 9, 18))   # 비활성이어도 퇴사일까지
+    b = next(s for s in sp if s["worker_id"] == 14)
+    assert (b["start"], b["end"]) == (D(2026, 9, 18), None)
+    late = ACC + [{"worker_id": 12, "manager_id": 7, "start_date": D(2026, 9, 20)}]
+    assert len([s for s in hold_spans(late, ENDS, "manager_id") if s["worker_id"] == 12]) == 1   # 퇴사 뒤 시작 이력 무시
+
+
+def test_overlaps_handover_day():
+    bad = overlaps(ACC, ENDS, "manager_id")
+    assert len(bad) == 1 and bad[0]["from"] == D(2026, 9, 18)
+    assert bad[0]["first"]["worker_id"] == 12 and bad[0]["second"]["worker_id"] == 14
+    assert overlaps(ACC, ENDS, "manager_id", wid=99) == []          # 저장하는 사람이 안 낀 겹침은 무시
+    fixed = ACC + [{"worker_id": 12, "manager_id": None, "start_date": D(2026, 9, 18)}]
+    assert overlaps(fixed, ENDS, "manager_id") == []                 # 앞사람 '계정 없음' 9/18 → 9/17까지
+
+
+def test_handover_cuts():
+    new = {"worker_id": 14, "manager_id": 42, "start_date": D(2026, 9, 18)}
+    assert handover_cuts(ACC[:1], ENDS, "manager_id", new) == [
+        {"worker_id": 12, "cut_on": D(2026, 9, 18), "value": 42, "start": D(2026, 8, 1)}]
+    same = {"worker_id": 14, "manager_id": 42, "start_date": D(2026, 8, 1)}
+    assert handover_cuts(ACC[:1], ENDS, "manager_id", same) == []    # 같은 날 시작은 끊지 않음 → overlaps가 거절
+    assert overlaps(ACC[:1] + [same], ENDS, "manager_id") != []
+    after = {"worker_id": 14, "manager_id": 42, "start_date": D(2026, 9, 19)}
+    assert handover_cuts(ACC[:1], ENDS, "manager_id", after) == []   # 퇴사일 다음 날 시작 → 겹침 없음
+    assert handover_cuts(ACC[:1], ENDS, "manager_id", {**new, "manager_id": None}) == []
