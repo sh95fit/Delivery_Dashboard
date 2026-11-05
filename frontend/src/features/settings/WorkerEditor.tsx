@@ -690,7 +690,7 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
         <>
           <p className="muted small">
             물류비의 차량비·유류비는 날짜별로 <b>계정 → 그날 담당 인력 → 그 인력의 차량</b>으로 나눕니다.
-            이력이 없는 날은 기존 계정 차량 배정을 씁니다. 유류비가 마감된 달에 걸리는 이력·예외는 바꿀 수 없습니다.
+            이력이 없는 날은 차량을 못 찾아 차량비·유류비가 배분되지 않습니다. 특정 날짜까지만 썼다면 다음 날 시작으로 '차량 없음' 이력을 추가하세요. 유류비가 마감된 달에 걸리는 이력·예외는 바꿀 수 없습니다.
             {row.end_date ? ` 퇴사일(${row.end_date}) 뒤로는 계산에 쓰이지 않습니다.` : ""}
           </p>
           <section className="ed-hist">
@@ -702,7 +702,7 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
               </div>
             </div>
             {!vdata ? <Spinner /> : vHist.length === 0 ? (
-              <div className="muted small">차량 이용 이력이 없습니다. 지금은 기존 계정 차량 배정으로 계산됩니다.</div>
+              <div className="muted small">차량 이용 이력이 없습니다. 이력을 넣기 전까지 이 인력의 계정에는 차량비·유류비가 배분되지 않습니다.</div>
             ) : (
               <DataTable columns={["상태", "적용 기간", "이용 구분", "차량", "메모 · 입력자", ...(isAdmin ? ["관리"] : [])]}>
                 {vHist.map((h, i) => {

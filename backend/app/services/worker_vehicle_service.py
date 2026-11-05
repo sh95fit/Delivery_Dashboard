@@ -13,7 +13,8 @@ from datetime import date, timedelta
 from sqlalchemy import text
 
 from app.database import get_dash_engine
-from app.services.assign_calc import DAY_REASON_LABEL, MODE_LABEL, check_mode, disposal_problem, find_conflict, lock_until
+from app.services.assign_calc import (DAY_REASON_LABEL, MODE_LABEL, check_mode, disposal_problem, find_conflict,
+                                      lock_until, spans)
 from app.services.manager_service import _iso
 
 SQL_HIST_ALL = "SELECT id, worker_id, start_date, mode, vehicle_id FROM worker_vehicles WHERE deleted_at IS NULL"
@@ -73,9 +74,23 @@ def _check_conflict(conn, skip_id: int | None, new_row: dict | None) -> None:
     names = {int(r[0]): r[1] for r in conn.execute(text("SELECT id, name FROM workers WHERE id IN (:a, :b)"),
                                                      {"a": a, "b": b}).fetchall()}
     plate = conn.execute(text("SELECT plate_no FROM vehicles WHERE id = :v"), {"v": c["vehicle_id"]}).scalar()
-    raise ValueError(f"{c['from']}부터 {plate or c['vehicle_id']} 차량을 '{names.get(a, a)}'님과 '{names.get(b, b)}'님이 "
-                     "같은 기간에 쓰게 됩니다. 앞사람의 이력을 먼저 바꾸세요 (다른 차량·자차·차량 없음). "
-                     "하루만 같이 쓰면 '그날 예외'로 입력하세요")
+    d = c["from"]
+    # [S3-P2h-3d] 겹치는 두 사람의 기간을 보여 주고, 앞사람 이력을 어떻게 끊는지 안내 (그날 예외로는 이력 겹침이 풀리지 않음)
+    sp = {s["worker_id"]: s for s in spans(rows, ends)
+          if s["vehicle_id"] == c["vehicle_id"] and s["worker_id"] in (a, b)
+          and s["start"] <= d and (s["end"] is None or d <= s["end"])}
+    first, second = sorted((a, b), key=lambda w: (sp[w]["start"] if w in sp else d, w))
+
+    def who(w: int) -> str:
+        s = sp.get(w)
+        span = f"({s['start']} ~ {s['end'] or ''})" if s else ""
+        return f"'{names.get(w, w)}'님{span}"
+
+    raise ValueError(
+        f"{plate or c['vehicle_id']} 차량 이용 이력이 {d}부터 {who(first)}과 {who(second)} 사이에 겹칩니다. "
+        f"'{names.get(first, first)}'님이 {d - timedelta(days=1)}까지만 썼다면 '{names.get(first, first)}'님에게 "
+        f"{d} 시작 이력(다른 차량·자차·차량 없음)을 먼저 추가하세요. "
+        "그날 예외는 그날 계산만 바꾸고 이력 겹침은 풀지 않습니다")
 
 
 def _prep(data: dict) -> tuple[date, str, int | None]:
