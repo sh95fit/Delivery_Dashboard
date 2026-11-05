@@ -4,7 +4,9 @@
 - 인력 → 차량: 그날 예외(worker_vehicle_days) → 차량 이용 이력(worker_vehicles, 시작일 이력)
   mode = company(회사 차량) / own(자차) / none(차량 없음)
 - [S3-P2h-3c] 인력을 못 찾았거나 그 날짜 기준 차량 이력이 없으면 차량 못 찾음(unknown) — 기존 계정 차량 배정(vehicle_assignments)은 읽지 않음 (테이블은 보존)
-- 같은 회사 차량을 두 사람이 겹치는 기간에 '이력'으로 쓰는 것은 막는다 (하루만 같이 쓰면 그날 예외로)
+- 같은 회사 차량·같은 계정을 두 사람이 겹치는 기간에 '이력'으로 쓰는 것은 막는다
+  [S3-P2h-3e] 다른 날 시작이면 저장 때 확인 후 앞사람 기간을 끊음(앞사람에게 '없음' 행 추가), 같은 날 시작은 거절
+  그날 예외는 그날 계산만 바꾸고 이력 겹침은 풀지 않는다
 - 퇴사일(workers.end_date)이 있으면 그 사람의 이력은 퇴사일에서 끝난 것으로 본다
 """
 from __future__ import annotations
@@ -125,3 +127,57 @@ def lock_until(close_months: list[date]) -> date | None:
     m = max(close_months)
     nxt = date(m.year + (m.month == 12), m.month % 12 + 1, 1)
     return nxt - timedelta(days=1)
+
+
+# ---------- [S3-P2h-3e] 계정·차량 공통 기간 규칙 ----------
+def hold_spans(rows: list[dict], ends: dict[int, date | None] | None, key: str) -> list[dict]:
+    """시작일 이력 → 인력별 기간 [{worker_id, value, start, end}].
+    value = 행의 key 값 (회사 차량 id · 계정 id, 차량 없음·자차·계정 없음이면 None).
+    end = 다음 이력 전날 (마지막은 None). ends = {인력: 퇴사일} → 퇴사일에서 끝냄, 퇴사 뒤 시작 이력은 무시 (활성 여부 상관없음)"""
+    out = []
+    for wid, rs in group_by_worker(rows).items():
+        rs = sorted(rs, key=lambda r: r["start_date"])
+        cap = (ends or {}).get(wid)
+        for i, r in enumerate(rs):
+            if cap is not None and r["start_date"] > cap:
+                continue
+            end = rs[i + 1]["start_date"] - timedelta(days=1) if i + 1 < len(rs) else None
+            if cap is not None and (end is None or cap < end):
+                end = cap
+            v = r.get(key)
+            out.append({"worker_id": wid, "value": int(v) if v is not None else None,
+                        "start": r["start_date"], "end": end})
+    return out
+
+
+def overlaps(rows: list[dict], ends: dict[int, date | None] | None, key: str, wid: int | None = None) -> list[dict]:
+    """같은 값(차량·계정)을 다른 두 인력이 겹치는 기간에 가진 경우 [{value, first, second, from}].
+    first = 먼저 시작한 쪽 기간, from = 겹침 시작일. wid를 주면 그 인력이 낀 겹침만.
+    rows = 저장하려는 상태 그대로의 전체 이력 (수정 전 행은 빼고 새 행은 넣어서 넘김)"""
+    sp = [s for s in hold_spans(rows, ends, key) if s["value"] is not None]
+    out = []
+    for i, a in enumerate(sp):
+        for b in sp[i + 1:]:
+            if a["value"] != b["value"] or a["worker_id"] == b["worker_id"] or not _overlap(a, b):
+                continue
+            if wid is not None and wid not in (a["worker_id"], b["worker_id"]):
+                continue
+            first, second = sorted((a, b), key=lambda s: (s["start"], s["worker_id"]))
+            out.append({"value": a["value"], "first": first, "second": second, "from": second["start"]})
+    return out
+
+
+def handover_cuts(rows: list[dict], ends: dict[int, date | None] | None, key: str, new: dict) -> list[dict]:
+    """새 행(new: worker_id, start_date, key 값)이 다른 인력의 '앞서 시작한' 기간에 걸리면 → 그 인력을 새 시작일에 끊는 목록
+    [{worker_id, cut_on, value, start}] (cut_on = 앞사람에게 '없음' 행을 넣을 날짜 = 새 시작일).
+    같은 날 시작(start == 새 시작일)은 끊지 않음 → overlaps가 거절. rows = 새 행을 넣기 전 상태"""
+    v = new.get(key)
+    if v is None:
+        return []
+    d = new["start_date"]
+    cuts = []
+    for s in hold_spans(rows, ends, key):
+        if (s["value"] == int(v) and s["worker_id"] != int(new["worker_id"]) and s["start"] < d
+                and (s["end"] is None or d <= s["end"])):
+            cuts.append({"worker_id": s["worker_id"], "cut_on": d, "value": s["value"], "start": s["start"]})
+    return cuts

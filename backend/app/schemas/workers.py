@@ -34,6 +34,7 @@ class WorkerRateIn(BaseModel):
 class WorkerAccountIn(BaseModel):
     manager_id: int | None = None
     start_date: date
+    cut_prev: bool = False                 # [S3-P2h-3e] 화면에서 '앞사람 기간 끊기'를 확인함
 
 
 class ImportExcelIn(BaseModel):
@@ -60,6 +61,7 @@ class WorkerVehicleIn(BaseModel):          # [S3-P2h-2a] 차량 이용 이력 (�
     mode: Literal["company", "own", "none"]
     vehicle_id: int | None = None
     memo: str | None = Field(default=None, max_length=200)
+    cut_prev: bool = False                 # [S3-P2h-3e] 화면에서 '앞사람 기간 끊기'를 확인함
 
 
 class WorkerVehicleDayIn(BaseModel):       # [S3-P2h-2a] 그날 예외 (vehicle_id 비움 = 그날 회사 차량 없음)

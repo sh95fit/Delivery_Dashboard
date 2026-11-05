@@ -75,13 +75,19 @@ def delete_rate(rid: int, email: str = Depends(require_admin)):
 
 @router.post("/{wid}/accounts")
 def assign_account(wid: int, body: WorkerAccountIn, email: str = Depends(require_admin)):
-    new_id = guard(svc.assign_account, wid, body.manager_id, body.start_date, email, fail="계정 배정 실패")
+    new_id = guard(svc.assign_account, wid, body.manager_id, body.start_date, email, body.cut_prev, fail="계정 배정 실패")
     return {"ok": True, "id": new_id}
+
+
+@router.post("/{wid}/accounts/check")
+def check_account(wid: int, body: WorkerAccountIn, skip_id: int | None = None, _: str = Depends(require_admin)):
+    """[S3-P2h-3e] 저장 전 확인 — 끊기는 앞사람 기간 (저장 안 함)"""
+    return guard(svc.account_cut_preview, wid, body.manager_id, body.start_date, skip_id, fail="인계 확인 실패")
 
 
 @router.put("/accounts/{aid}")
 def update_account(aid: int, body: WorkerAccountIn, email: str = Depends(require_admin)):
-    new_id = guard(svc.update_account, aid, body.manager_id, body.start_date, email, fail="계정 이력 수정 실패")
+    new_id = guard(svc.update_account, aid, body.manager_id, body.start_date, email, body.cut_prev, fail="계정 이력 수정 실패")
     return {"ok": True, "id": new_id}
 
 
@@ -102,6 +108,12 @@ def add_worker_vehicle(wid: int, body: WorkerVehicleIn, email: str = Depends(req
     data = body.model_dump()
     data["memo"] = memo(body.memo)
     return {"ok": True, "id": guard(wv.add_history, wid, data, email, fail="차량 이용 이력 저장 실패")}
+
+
+@router.post("/{wid}/vehicles/check")
+def check_worker_vehicle(wid: int, body: WorkerVehicleIn, skip_id: int | None = None, _: str = Depends(require_admin)):
+    """[S3-P2h-3e] 저장 전 확인 — 끊기는 앞사람 기간 (저장 안 함)"""
+    return guard(wv.cut_preview, wid, body.model_dump(), skip_id, fail="인계 확인 실패")
 
 
 @router.put("/vehicles/{hid}")

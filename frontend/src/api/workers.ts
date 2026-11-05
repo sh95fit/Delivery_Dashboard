@@ -47,11 +47,11 @@ export const createWorker = (body: WorkerInput) => post<Ok>("/api/workers", body
 export const updateWorker = (id: number, body: WorkerInput) => put<Ok>(`/api/workers/${id}`, body);
 export const addWorkerRate = (id: number, body: WorkerRateInput) => post<Ok>(`/api/workers/${id}/rates`, body);
 export const deleteWorkerRate = (rid: number) => del<Ok>(`/api/workers/rates/${rid}`);
-export const assignWorkerAccount = (id: number, body: { manager_id: number | null; start_date: string }) =>
+export const assignWorkerAccount = (id: number, body: WorkerAccountInput) =>
   post<Ok>(`/api/workers/${id}/accounts`, body);
 export const deleteWorkerAccount = (aid: number) => del<Ok>(`/api/workers/accounts/${aid}`);
 export const updateWorkerRate = (rid: number, body: WorkerRateInput) => put<Ok>(`/api/workers/rates/${rid}`, body);
-export const updateWorkerAccount = (aid: number, body: { manager_id: number | null; start_date: string }) =>
+export const updateWorkerAccount = (aid: number, body: WorkerAccountInput) =>
   put<Ok>(`/api/workers/accounts/${aid}`, body);
 
 export const rateText = (r: WorkerRate) =>
@@ -86,7 +86,7 @@ export interface WorkerVehicleDay {
 export interface WorkerVehicles { history: WorkerVehicle[]; days: WorkerVehicleDay[] }
 export interface WorkerVehicleNow { mode: VehicleMode; mode_label: string; vehicle_id: number | null; plate_no: string | null; start_date: string }
 export interface WorkerVehicleToday { vehicle_id: number | null; plate_no: string | null; reason: DayReason; reason_label: string }
-export type WorkerVehicleInput = { start_date: string; mode: VehicleMode; vehicle_id: number | null; memo: string | null };
+export type WorkerVehicleInput = { start_date: string; mode: VehicleMode; vehicle_id: number | null; memo: string | null; cut_prev?: boolean };
 export type WorkerVehicleDayInput = { work_date: string; vehicle_id: number | null; reason: DayReason; memo: string | null };
 
 export const getWorkerVehicles = (id: number) => http<WorkerVehicles>(`/api/workers/${id}/vehicles`);
@@ -95,6 +95,15 @@ export const updateWorkerVehicle = (hid: number, body: WorkerVehicleInput) => pu
 export const deleteWorkerVehicle = (hid: number) => del<Ok>(`/api/workers/vehicles/${hid}`);
 export const addWorkerVehicleDay = (id: number, body: WorkerVehicleDayInput) => post<Ok>(`/api/workers/${id}/vehicle-days`, body);
 export const deleteWorkerVehicleDay = (did: number) => del<Ok>(`/api/workers/vehicle-days/${did}`);
+
+// [S3-P2h-3e] 저장 전 확인: 다른 사람이 쓰던 계정·차량이면 끊기는 앞사람 기간
+export type WorkerAccountInput = { manager_id: number | null; start_date: string; cut_prev?: boolean };
+export interface HandoverCut { worker_id: number; name: string; label: string; start: string; cut_on: string; end_on: string }
+const skipQ = (skipId: number | null) => (skipId != null ? `?skip_id=${skipId}` : "");
+export const checkWorkerVehicle = (id: number, body: WorkerVehicleInput, skipId: number | null) =>
+  post<{ cuts: HandoverCut[] }>(`/api/workers/${id}/vehicles/check${skipQ(skipId)}`, body);
+export const checkWorkerAccount = (id: number, body: WorkerAccountInput, skipId: number | null) =>
+  post<{ cuts: HandoverCut[] }>(`/api/workers/${id}/accounts/check${skipQ(skipId)}`, body);
 
 export type ImportStatus = "new" | "exists" | "dup" | "invalid";
 export interface ImportRowPreview {

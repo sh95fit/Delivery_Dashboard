@@ -1,6 +1,6 @@
 """S2-P0b 인력(사람) 마스터: 기본 정보 · 계약 조건 이력 · 고정 계정 이력 (dash_db).
 운영 계정(manager)은 이름·색 표시용으로만 읽는다 (운영 DB 장애여도 화면은 열림).
-insert_rate / account_holder / insert_account 는 일괄 등록(worker_import)과 공용."""
+insert_rate / check_account / insert_account 는 일괄 등록(worker_import)과 공용."""
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -9,10 +9,11 @@ from sqlalchemy import text
 
 from app.database import get_dash_engine
 from app.services import dash_db
-from app.services.assign_calc import DAY_REASON_LABEL, MODE_LABEL
+from app.services.assign_calc import DAY_REASON_LABEL, MODE_LABEL, handover_cuts, overlaps
 from app.services.cost_calc import latest_by
 from app.services.manager_service import _hm, _iso, _rds_managers, today
 from app.services.worker_calc import check_rate, day_calc
+from app.services.worker_vehicle_service import recheck as recheck_vehicles
 from app.services.worklog_calc import lock_end
 
 
@@ -147,6 +148,8 @@ def save_worker(wid: int | None, name: str, income_type: str, active: bool, memo
                                      created_by, updated_by)
                 VALUES (:n, :t, :a, :m, :ed, :lf, :la, :e, :e) RETURNING id
             """), p).scalar_one())
+        old_end = conn.execute(text("SELECT end_date FROM workers WHERE id = :w AND deleted_at IS NULL"),
+                               {"w": wid}).scalar()            
         res = conn.execute(text("""
             UPDATE workers SET name = :n, income_type = :t, active = :a, memo = :m,
                    end_date = :ed, last_pay_full = :lf, last_pay_amount = :la,
@@ -155,6 +158,9 @@ def save_worker(wid: int | None, name: str, income_type: str, active: bool, memo
         """), {**p, "w": wid})
         if res.rowcount == 0:
             raise ValueError("인력을 찾을 수 없습니다")
+        if old_end != end_date:     # [S3-P2h-3e] 퇴사일이 바뀌면 계정·차량 기간이 바뀜 → 겹침 다시 검사 (실패 시 저장 안 됨)
+            check_account(conn, wid, None, None)
+            recheck_vehicles(conn)
         return wid
 
 def insert_rate(conn, wid: int, r: dict, email: str) -> int:
@@ -186,16 +192,78 @@ def add_rate(wid: int, body: dict, email: str) -> int:
         return insert_rate(conn, wid, check_rate(w[0], body), email)
 
 
-def account_holder(conn, wid: int | None, manager_id: int, start_date: date) -> str | None:
-    """start_date 기준 이 계정을 고정 사용 중인 다른 활성 인력 이름 (같은 트랜잭션의 미확정 행 포함)."""
-    others = [dict(r) for r in conn.execute(text("""
-        SELECT a.worker_id, a.manager_id, a.start_date, w.name
-        FROM worker_accounts a
-        JOIN workers w ON w.id = a.worker_id AND w.deleted_at IS NULL AND w.active
-        WHERE a.deleted_at IS NULL AND a.worker_id <> :w
-    """), {"w": wid or 0}).mappings().all()]
-    cur = latest_by(others, "worker_id", "start_date", start_date)
-    return next((r["name"] for r in cur.values() if r["manager_id"] == manager_id), None)
+# ---------- [S3-P2h-3e] 고정 계정 기간 검사 (차량 이용 이력과 같은 규칙) ----------
+SQL_ACC_ALL = "SELECT id, worker_id, manager_id, start_date FROM worker_accounts WHERE deleted_at IS NULL"
+
+
+def worker_ends(conn) -> dict[int, date]:
+    """{인력: 퇴사일} — 퇴사일이 있으면 그 사람의 이력은 퇴사일에서 끝남 (활성·비활성 상관없음)."""
+    return {int(r[0]): r[1] for r in conn.execute(text(
+        "SELECT id, end_date FROM workers WHERE deleted_at IS NULL AND end_date IS NOT NULL")).fetchall()}
+
+
+def _acc_rows(conn, skip_id: int | None, new_row: dict | None) -> list[dict]:
+    """저장 후 상태의 고정 계정 이력: skip_id 행 빼고, 같은 사람·같은 시작일 행은 new_row로 바뀌므로 뺌 (insert_account와 같은 방식)."""
+    out = []
+    for r in conn.execute(text(SQL_ACC_ALL)).mappings().all():
+        if r["id"] == skip_id:
+            continue
+        if new_row is not None and r["worker_id"] == new_row["worker_id"] and r["start_date"] == new_row["start_date"]:
+            continue
+        out.append(dict(r))
+    return out
+
+
+def _acc_label(mid: int) -> str:
+    m = _managers().get(mid)
+    return (m or {}).get("name") or f"계정 #{mid}"
+
+
+def _worker_name(conn, wid: int) -> str:
+    return conn.execute(text("SELECT name FROM workers WHERE id = :w"), {"w": wid}).scalar() or f"#{wid}"
+
+
+def account_cuts(conn, skip_id: int | None, new_row: dict) -> list[dict]:
+    """새 고정 계정 행 때문에 끊기는 다른 사람의 앞선 기간 (assign_calc.handover_cuts)."""
+    if new_row.get("manager_id") is None:
+        return []
+    return handover_cuts(_acc_rows(conn, skip_id, new_row), worker_ends(conn), "manager_id", new_row)
+
+
+def check_account(conn, wid: int, skip_id: int | None, new_row: dict | None, cuts: list[dict] | None = None) -> None:
+    """저장 후 상태에서 같은 계정을 두 사람이 겹치는 기간에 고정 사용하면 거절.
+    wid가 낀 겹침만 봄 → 예전 데이터의 다른 사람끼리 겹침이 관계없는 저장을 막지 않음.
+    cuts = 같이 저장할 앞사람 '계정 없음' 행 (account_cuts 결과)."""
+    rows = _acc_rows(conn, skip_id, new_row)
+    rows += [{"id": None, "worker_id": c["worker_id"], "manager_id": None, "start_date": c["cut_on"]} for c in cuts or []]
+    if new_row is not None:
+        rows.append(new_row)
+    bad = overlaps(rows, worker_ends(conn), "manager_id", wid)
+    if not bad:
+        return
+    c = bad[0]
+    a, b = c["first"], c["second"]
+    na, nb = _worker_name(conn, a["worker_id"]), _worker_name(conn, b["worker_id"])
+    acc = _acc_label(c["value"])
+    d = c["from"]
+    if a["start"] == b["start"]:
+        raise ValueError(f"'{acc}' 계정을 같은 날({d}) '{na}'님과 '{nb}'님이 함께 고정 사용으로 시작합니다. 한 사람의 시작일을 바꾸세요")
+    raise ValueError(
+        f"'{acc}' 계정 고정 사용이 {d}부터 '{na}'님({a['start']} ~ {a['end'] or ''})과 "
+        f"'{nb}'님({b['start']} ~ {b['end'] or ''}) 사이에 겹칩니다. '{na}'님에게 {d} 시작 계정 이력(다른 계정·계정 없음)을 추가하세요 "
+        "(새로 시작하는 사람 쪽에서 저장하면 앞사람 기간을 끊을지 묻습니다 · 하루만 바뀌는 경우는 근무 입력의 일 단위 예외)")
+
+
+def account_cut_preview(wid: int, manager_id: int | None, start_date: date, skip_id: int | None) -> dict:
+    """저장 전 확인: 이 계정 이력을 저장하면 끊기는 앞사람 기간 (저장 안 함). skip_id = 수정 중인 행."""
+    if manager_id is None:
+        return {"cuts": []}
+    with get_dash_engine().connect() as conn:
+        cuts = account_cuts(conn, skip_id, {"id": None, "worker_id": wid, "manager_id": manager_id, "start_date": start_date})
+        label = _acc_label(manager_id)
+        return {"cuts": [{"worker_id": c["worker_id"], "name": _worker_name(conn, c["worker_id"]), "label": label,
+                          "start": _iso(c["start"]), "cut_on": _iso(c["cut_on"]),
+                          "end_on": _iso(c["cut_on"] - timedelta(days=1))} for c in cuts]}
 
 
 def insert_account(conn, wid: int, manager_id: int | None, start_date: date, email: str) -> int:
@@ -210,16 +278,16 @@ def insert_account(conn, wid: int, manager_id: int | None, start_date: date, ema
     """), {"w": wid, "m": manager_id, "s": start_date, "e": email}).scalar_one())
 
 
-def assign_account(wid: int, manager_id: int | None, start_date: date, email: str) -> int:
+def assign_account(wid: int, manager_id: int | None, start_date: date, email: str, cut_prev: bool = False) -> int:
     with get_dash_engine().begin() as conn:
         if not conn.execute(text("SELECT 1 FROM workers WHERE id = :w AND deleted_at IS NULL"),
                             {"w": wid}).fetchone():
             raise ValueError("인력을 찾을 수 없습니다")
-        if manager_id is not None:
-            holder = account_holder(conn, wid, manager_id, start_date)
-            if holder:
-                raise ValueError(f"{start_date} 기준 '{holder}'님이 이 계정을 고정 사용 중입니다. "
-                                 "그 사람의 계정을 먼저 바꾸세요 (하루만 바뀌는 경우는 근무 입력의 일 단위 예외로 처리)")
+        new = {"id": None, "worker_id": wid, "manager_id": manager_id, "start_date": start_date}
+        cuts = account_cuts(conn, None, new) if cut_prev else []     # [S3-P2h-3e] 화면에서 확인했을 때만
+        check_account(conn, wid, None, new, cuts)
+        for c in cuts:
+            insert_account(conn, c["worker_id"], None, c["cut_on"], email)
         return insert_account(conn, wid, manager_id, start_date, email)
 
 
@@ -248,7 +316,7 @@ def update_rate(rid: int, body: dict, email: str) -> int:
         return insert_rate(conn, wid, r, email)
 
 
-def update_account(aid: int, manager_id: int | None, start_date: date, email: str) -> int:
+def update_account(aid: int, manager_id: int | None, start_date: date, email: str, cut_prev: bool = False) -> int:
     """고정 계정 이력 수정 (계정·시작일). 방식은 update_rate와 같음."""
     with get_dash_engine().begin() as conn:
         old = conn.execute(text("""
@@ -266,13 +334,13 @@ def update_account(aid: int, manager_id: int | None, start_date: date, email: st
         """), {"w": wid, "s": start_date, "a": aid}).fetchone()
         if dup:
             raise ValueError(f"{start_date}에 시작하는 다른 계정 이력이 이미 있습니다. 그 행을 수정하세요")
-        if manager_id is not None:
-            holder = account_holder(conn, wid, manager_id, start_date)
-            if holder:
-                raise ValueError(f"{start_date} 기준 '{holder}'님이 이 계정을 고정 사용 중입니다. "
-                                 "그 사람의 계정을 먼저 바꾸세요")
+        new = {"id": None, "worker_id": wid, "manager_id": manager_id, "start_date": start_date}
+        cuts = account_cuts(conn, aid, new) if cut_prev else []      # [S3-P2h-3e]
+        check_account(conn, wid, aid, new, cuts)
         conn.execute(text("UPDATE worker_accounts SET deleted_at = NOW(), deleted_by = :e WHERE id = :a"),
                      {"a": aid, "e": email})
+        for c in cuts:
+            insert_account(conn, c["worker_id"], None, c["cut_on"], email)
         return insert_account(conn, wid, manager_id, start_date, email)
 
 
@@ -289,10 +357,11 @@ def delete_rate(rid: int, email: str) -> None:
 
 def delete_account(aid: int, email: str) -> None:
     with get_dash_engine().begin() as conn:
-        row = conn.execute(text("SELECT start_date FROM worker_accounts WHERE id = :a AND deleted_at IS NULL"),
+        row = conn.execute(text("SELECT start_date, worker_id FROM worker_accounts WHERE id = :a AND deleted_at IS NULL"),
                            {"a": aid}).fetchone()
         if not row:
             raise ValueError("대상을 찾을 수 없거나 이미 삭제되었습니다")
         check_unlocked(conn, row[0], "고정 계정 이력")
+        check_account(conn, int(row[1]), aid, None)     # [S3-P2h-3e] 지우면 앞 이력이 길어져 겹칠 수 있음
         conn.execute(text("UPDATE worker_accounts SET deleted_at = NOW(), deleted_by = :e WHERE id = :a"),
                      {"a": aid, "e": email})

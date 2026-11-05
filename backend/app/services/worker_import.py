@@ -16,7 +16,7 @@ from app.services.cost_calc import latest_by
 from app.services.manager_service import _rds_managers, today
 from app.services.timesheet_excel import parse_timesheet, schedule_ranges
 from app.services.worker_calc import check_rate
-from app.services.worker_service import account_holder, insert_account, insert_rate
+from app.services.worker_service import check_account, insert_account, insert_rate
 
 MAX_BYTES = 2 * 1024 * 1024
 SHARED_RE = re.compile(r"공용|테스트|test|관리자|admin", re.I)
@@ -192,9 +192,10 @@ def commit(rows: list[dict], email: str) -> dict:
             mid = r.get("manager_id")
             if mid is not None:
                 start = r.get("account_from") or (rate["effective_from"] if rate else today())
-                holder = account_holder(conn, wid, mid, start)
-                if holder:
-                    raise ValueError(f"{tag}: {start} 기준 '{holder}'님이 이 계정을 고정 사용 중입니다")
+                try:     # [S3-P2h-3e] 단건 저장과 같은 규칙 (퇴사일까지 앞사람 기간 · 겹치면 거절, 일괄 등록은 자동 끊기 없음)
+                    check_account(conn, wid, None, {"id": None, "worker_id": wid, "manager_id": mid, "start_date": start})
+                except ValueError as exc:
+                    raise ValueError(f"{tag}: {exc}") from exc
                 insert_account(conn, wid, mid, start, email)
             ids.append(wid)
     return {"ok": True, "created": len(ids), "ids": ids}

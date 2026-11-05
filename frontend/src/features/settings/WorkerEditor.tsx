@@ -47,6 +47,12 @@ const dayBefore = (iso: string) => {
   return d.toISOString().slice(0, 10);
 };
 
+/** [S3-P2h-3e] 앞사람 기간 끊기 확인 문구 */
+const cutText = (cuts: api.HandoverCut[], what: string, after: string) =>
+  `다른 사람이 쓰던 ${what}입니다. 앞사람 기간을 끊고 저장할까요?\n\n` +
+  cuts.map((c) => `· ${c.name}님 ${c.label}: ${c.start} ~ ${c.end_on} 로 끝남`).join("\n") +
+  `\n\n${after}`;
+
 /** 최신순 시작일 목록 → 기간(다음 이력 전날까지)·상태 */
 function periods(starts: string[], today: string): Period[] {
   let found = false;
@@ -291,17 +297,33 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
     setAf({ mgr: a.manager_id != null ? String(a.manager_id) : "", from: a.start_date });
     setAMode({ kind: "edit", id: a.id });
   }
-  function saveAcc() {
+  async function saveAcc() {
     if (!row || !aMode) return;
     if (!af.from) return setError("시작일을 입력하세요");
     if (accounts.some((a) => a.start_date === af.from && a.id !== editAccId)) {
       return setError(`${af.from}에 시작하는 계정 이력이 이미 있습니다. 이력에서 그 행의 [수정]을 누르세요`);
     }
-    const body = { manager_id: af.mgr ? Number(af.mgr) : null, start_date: af.from };
+    const body: api.WorkerAccountInput = { manager_id: af.mgr ? Number(af.mgr) : null, start_date: af.from };
     const id = row.id;
     const aid = editAccId;
+    // [S3-P2h-3e] 다른 사람이 고정 사용 중인 계정이면 → 앞사람 기간을 끊을지 확인 (같은 날 시작은 서버가 거절)
+    let cut = false;
+    if (body.manager_id != null) {
+      setError("");
+      try {
+        const chk = await api.checkWorkerAccount(id, body, aid);
+        if (chk.cuts.length > 0) {
+          if (!window.confirm(cutText(chk.cuts, "계정",
+            `${af.from}부터 그 사람에게 '계정 없음' 이력이 자동으로 추가됩니다. 다른 계정으로 옮겼다면 저장 후 그 사람 이력을 고치세요.`))) return;
+          cut = true;
+        }
+      } catch (e) {
+        return setError(errText(e));
+      }
+    }
+    const send = { ...body, cut_prev: cut };
     run("account", aid != null ? `계정 이력 수정됨 (${af.from}부터)` : `고정 계정 저장됨 (${af.from}부터)`,
-      () => (aid != null ? api.updateWorkerAccount(aid, body) : api.assignWorkerAccount(id, body)),
+      () => (aid != null ? api.updateWorkerAccount(aid, send) : api.assignWorkerAccount(id, send)),
       () => setAMode(null));
   }
   const delAcc = (a: WorkerAccount) => {
@@ -323,21 +345,37 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
     setVf({ from: h.start_date, mode: h.mode, vid: h.vehicle_id != null ? String(h.vehicle_id) : "", memo: h.memo ?? "" });
     setVMode({ kind: "edit", id: h.id });
   }
-  function saveVeh() {
+  async function saveVeh() {
     if (!row || !vMode) return;
     if (!vf.from) return setError("시작일을 입력하세요");
     if (vf.mode === "company" && !vf.vid) return setError("회사 차량은 차량을 선택하세요");
     if (vHist.some((h) => h.start_date === vf.from && h.id !== editVehId)) {
       return setError(`${vf.from}에 시작하는 차량 이용 이력이 이미 있습니다. 이력에서 그 행의 [수정]을 누르세요`);
     }
-    const body = {
+    const body: api.WorkerVehicleInput = {
       start_date: vf.from, mode: vf.mode, vehicle_id: vf.mode === "company" ? Number(vf.vid) : null,
       memo: vf.memo.trim() || null,
     };
     const id = row.id;
     const hid = editVehId;
+    // [S3-P2h-3e] 다른 사람이 쓰던 차량이면 → 앞사람 기간을 끊을지 확인 (같은 날 시작은 서버가 거절)
+    let cut = false;
+    if (body.vehicle_id != null) {
+      setError("");
+      try {
+        const chk = await api.checkWorkerVehicle(id, body, hid);
+        if (chk.cuts.length > 0) {
+          if (!window.confirm(cutText(chk.cuts, "차량",
+            `${vf.from}부터 그 사람에게 '차량 없음' 이력이 자동으로 추가됩니다. 다른 차량·자차로 옮겼다면 저장 후 그 사람 이력을 고치세요.`))) return;
+          cut = true;
+        }
+      } catch (e) {
+        return setError(errText(e));
+      }
+    }
+    const send = { ...body, cut_prev: cut };
     run("vehicle", hid != null ? `차량 이용 이력 수정됨 (${vf.from}부터)` : `차량 이용 이력 추가됨 (${vf.from}부터)`,
-      () => (hid != null ? api.updateWorkerVehicle(hid, body) : api.addWorkerVehicle(id, body)),
+      () => (hid != null ? api.updateWorkerVehicle(hid, send) : api.addWorkerVehicle(id, send)),
       () => setVMode(null));
   }
   const delVeh = (h: WorkerVehicle) => {
