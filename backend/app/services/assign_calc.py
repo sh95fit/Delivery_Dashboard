@@ -192,3 +192,34 @@ def board_flags(r: dict, end: date | None, disposed_on: date | None, shared: boo
     if shared:
         out.append("shared")
     return out
+
+
+# ---------- [S3-P2h-3d-5] 점검 제외 계정 (표시만, 계산에는 영향 없음) ----------
+EXCLUDE_REASONS = {"internal": "직원식", "hold": "보류", "other": "기타"}
+
+
+def check_exclude(reason: str, start: date, end: date | None) -> str | None:
+    """점검 제외 저장 전 검사. 문제 없으면 None."""
+    if reason not in EXCLUDE_REASONS:
+        return "제외 사유를 확인하세요 (직원식 / 보류 / 기타)"
+    if end is not None and end < start:
+        return "종료일이 시작일보다 빠릅니다"
+    return None
+
+
+def exclude_on(rows: list[dict], mid: int, d: date) -> dict | None:
+    """계정 mid가 날짜 d에 점검 제외인 행 (시작일 ≤ d ≤ 종료일, 종료일 비면 계속). 없으면 None."""
+    for r in rows:
+        if int(r["manager_id"]) == int(mid) and r["start_date"] <= d and (r["end_date"] is None or d <= r["end_date"]):
+            return r
+    return None
+
+
+def exclude_overlap(rows: list[dict], mid: int, start: date, end: date | None) -> dict | None:
+    """같은 계정의 기존 제외 기간과 겹치면 그 행. 없으면 None."""
+    for r in rows:
+        if int(r["manager_id"]) != int(mid):
+            continue
+        if (r["end_date"] is None or start <= r["end_date"]) and (end is None or r["start_date"] <= end):
+            return r
+    return None

@@ -88,10 +88,11 @@ export type BoardFlag = "no_worker" | "after_end" | "no_vehicle" | "disposed" | 
 export interface BoardCell {
   worker_id: number | null; worker_name: string | null; vehicle_id: number | null; plate_no: string | null;
   src: "chosen" | "log" | "fixed" | null; basis: string | null; flags: BoardFlag[];
+  ex: string | null;   // [S3-P2h-3d-5] 점검 제외 사유 (고칠 칸인데 제외된 경우만)
 }
 export interface BoardRow {
   manager_id: number; name: string; color: string | null; cells: Record<string, BoardCell>;
-  run_days: number; counts: Record<BoardFlag, number>;
+  run_days: number; counts: Record<BoardFlag, number>; ex_days: number;
 }
 export interface BoardSpan { worker_id: number; name: string | null; start: string | null; end: string | null }
 export interface AssignBoard {
@@ -99,5 +100,16 @@ export interface AssignBoard {
   rows: BoardRow[]; totals: Record<BoardFlag, number>;
   overlaps: Array<{ kind: "account" | "vehicle"; value: number; label: string; from: string | null; first: BoardSpan; second: BoardSpan }>;
   unused_vehicles: string[];
+  excluded: number; exclude_reasons: Record<ExcludeReason, string>; excludes: BoardExclude[];   // [S3-P2h-3d-5]
 }
 export const getAssignBoard = (month: string) => http<AssignBoard>(`/api/vehicles/assign-board?month=${month}`);
+
+// [S3-P2h-3d-5] 배정 점검 제외 계정 (표시만 — 인센티브·물류비 계산은 그대로)
+export type ExcludeReason = "internal" | "hold" | "other";
+export interface BoardExclude {
+  id: number; manager_id: number; name: string; reason: ExcludeReason; reason_label: string;
+  start_date: string; end_date: string | null; memo: string | null; created_by: string | null;
+}
+export const addBoardExclude = (body: { manager_id: number; reason: ExcludeReason; start_date: string;
+  end_date: string | null; memo: string | null }) => post<Ok>("/api/vehicles/assign-board/excludes", body);
+export const deleteBoardExclude = (id: number) => del<Ok>(`/api/vehicles/assign-board/excludes/${id}`);

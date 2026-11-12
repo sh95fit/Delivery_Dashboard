@@ -622,3 +622,7 @@ tr.wl-dirty td { background: #fffbeb; }
 .ab-cell.ab-bad { background: var(--danger-soft); color: var(--danger); box-shadow: inset 0 0 0 1px #fecaca; }
 .ab-cell.ab-bad .ab-car { color: var(--danger); }
 .ab-cell.ab-shared { background: var(--caution-soft); box-shadow: inset 0 0 0 1px #fed7aa; }
+
+/* S3-P2h-3d-5 점검 제외 칸 (직원식·보류 등) — 고칠 칸 수에서 뺌 */
+.ab-cell.ab-ex { background: #f1f5f9; color: var(--faint); box-shadow: inset 0 0 0 1px #e2e8f0; }
+.ab-cell.ab-ex .ab-car { color: var(--faint); }

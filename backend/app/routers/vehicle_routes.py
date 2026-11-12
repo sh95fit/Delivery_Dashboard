@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.auth import get_current_email
 from app.deps import guard, memo, require_admin
-from app.schemas.masters import ExpenseIn, PeriodCostIn, VehicleIn
+from app.schemas.masters import BoardExcludeIn, ExpenseIn, PeriodCostIn, VehicleIn
 from app.services import assign_board
 from app.services import dash_db
 from app.services import vehicle_service as svc
@@ -81,3 +81,17 @@ def cost_summary(frm: date = Query(..., alias="from"), to: date = Query(...),
 def assign_board_view(month: str = Query(...), _: str = Depends(get_current_email)):
     """[S3-P2h-3d-2a] 월별 계정 → 인력 → 차량 정합성 표 (읽기 전용)"""
     return guard(assign_board.board, month, fail="정합성 표 조회 실패")
+
+
+@router.post("/assign-board/excludes")
+def add_board_exclude(body: BoardExcludeIn, email: str = Depends(require_admin)):
+    """[S3-P2h-3d-5] 점검 제외 계정 추가 (표시만)"""
+    new_id = guard(assign_board.add_exclude, body.manager_id, body.reason, body.start_date, body.end_date,
+                   memo(body.memo), email, fail="점검 제외 저장 실패")
+    return {"ok": True, "id": new_id}
+
+
+@router.delete("/assign-board/excludes/{xid}")
+def delete_board_exclude(xid: int, email: str = Depends(require_admin)):
+    guard(assign_board.delete_exclude, xid, email, fail="점검 제외 해제 실패")
+    return {"ok": True}

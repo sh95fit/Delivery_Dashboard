@@ -11,15 +11,20 @@ from __future__ import annotations
 import calendar
 from datetime import date, timedelta
 
+from sqlalchemy import text
+
 from app.database import get_dash_engine
 from app.services import dash_db
 from app.services import worker_service as ws
 from app.services import worker_vehicle_service as wv
 from app.services.assign_calc import BOARD_ERRORS, BOARD_FLAGS, board_flags, overlaps
+from app.services.assign_calc import EXCLUDE_REASONS, check_exclude, exclude_on, exclude_overlap
 from app.services.assign_service import Assign
 
 SQL_WORKERS = "SELECT id, name, end_date FROM workers WHERE deleted_at IS NULL"
 SQL_CARS = "SELECT id, plate_no, disposed_on, active FROM vehicles WHERE deleted_at IS NULL"
+SQL_EXCLUDES = """SELECT id, manager_id, reason, start_date, end_date, memo, created_by FROM board_excludes
+WHERE deleted_at IS NULL ORDER BY manager_id, start_date"""
 
 
 def _month(month: str) -> tuple[date, date]:
@@ -71,6 +76,8 @@ def board(month: str) -> dict:
     workers = {int(w["id"]): w for w in dash_db.rows(SQL_WORKERS)}
     cars = {int(v["id"]): v for v in dash_db.rows(SQL_CARS)}
     mgrs = _managers()
+    excl = dash_db.rows(SQL_EXCLUDES)     # [S3-P2h-3d-5] 점검 제외 계정
+    ex_total = 0    
     rows: dict[int, dict] = {}
     totals = {k: 0 for k in BOARD_FLAGS}
     used: set[int] = set()
@@ -97,12 +104,19 @@ def board(month: str) -> dict:
                 m = mgrs.get(mid) or {}
                 row = rows.setdefault(mid, {"manager_id": mid, "name": m.get("name") or f"계정 {mid}",
                                             "color": m.get("color"), "cells": {}, "run_days": 0,
-                                            "counts": {k: 0 for k in BOARD_FLAGS}})
+                                            "counts": {k: 0 for k in BOARD_FLAGS}, "ex_days": 0})
+                x = exclude_on(excl, mid, d) if any(f in BOARD_ERRORS for f in flags) else None
+                ex = EXCLUDE_REASONS.get(x["reason"], x["reason"]) if x else None
                 row["cells"][str(d.day)] = {"worker_id": wid, "worker_name": w.get("name"), "vehicle_id": vid,
                                             "plate_no": car.get("plate_no"), "src": src, "basis": r.get("basis"),
-                                            "flags": flags}
+                                            "flags": flags, "ex": ex}
                 row["run_days"] += 1
+                if ex:
+                    row["ex_days"] += 1
+                    ex_total += 1
                 for f in flags:
+                    if ex and f in BOARD_ERRORS:      # [S3-P2h-3d-5] 점검 제외 칸은 고칠 칸 수에서 뺌
+                        continue
                     row["counts"][f] += 1
                     totals[f] += 1
                 if vid:
@@ -113,4 +127,38 @@ def board(month: str) -> dict:
     items = sorted(rows.values(), key=lambda x: (-sum(x["counts"][k] for k in BOARD_ERRORS), x["name"]))
     return {"month": s.isoformat()[:7], "last_day": e.day, "flags": BOARD_FLAGS, "errors": list(BOARD_ERRORS),
             "rows": items, "totals": totals, "overlaps": _overlap_list(workers, cars, mgrs),
-            "unused_vehicles": unused}
+            "unused_vehicles": unused,
+            "excluded": ex_total, "exclude_reasons": EXCLUDE_REASONS, "excludes": _exclude_list(excl, mgrs)}
+
+
+# ---------- [S3-P2h-3d-5] 점검 제외 계정 (표시만 — 인센티브·물류비 계산은 그대로) ----------
+def _exclude_list(rows: list[dict], mgrs: dict[int, dict]) -> list[dict]:
+    return [{"id": int(r["id"]), "manager_id": int(r["manager_id"]),
+             "name": (mgrs.get(int(r["manager_id"])) or {}).get("name") or f"계정 {r['manager_id']}",
+             "reason": r["reason"], "reason_label": EXCLUDE_REASONS.get(r["reason"], r["reason"]),
+             "start_date": _iso(r["start_date"]), "end_date": _iso(r["end_date"]),
+             "memo": r["memo"], "created_by": r["created_by"]} for r in rows]
+
+
+def add_exclude(mid: int, reason: str, start: date, end: date | None, memo: str | None, email: str) -> int:
+    err = check_exclude(reason, start, end)
+    if err:
+        raise ValueError(err)
+    with get_dash_engine().begin() as conn:
+        rows = [dict(r) for r in conn.execute(text(SQL_EXCLUDES)).mappings().all()]
+        o = exclude_overlap(rows, mid, start, end)
+        if o:
+            raise ValueError(f"이 계정은 이미 점검 제외 기간이 있습니다 ({_iso(o['start_date'])} ~ "
+                             f"{_iso(o['end_date']) or '계속'}) — 기존 것을 해제한 뒤 다시 넣으세요")
+        return int(conn.execute(text("""INSERT INTO board_excludes (manager_id, reason, start_date, end_date, memo, created_by)
+            VALUES (:m, :r, :s, :e, :memo, :by) RETURNING id"""),
+            {"m": mid, "r": reason, "s": start, "e": end, "memo": memo, "by": email}).scalar_one())
+
+
+def delete_exclude(xid: int, email: str) -> None:
+    with get_dash_engine().begin() as conn:
+        n = conn.execute(text("""UPDATE board_excludes SET deleted_at = NOW(), deleted_by = :e
+            WHERE id = :i AND deleted_at IS NULL"""), {"i": int(xid), "e": email}).rowcount
+    if n == 0:
+        raise ValueError("대상을 찾을 수 없거나 이미 해제되었습니다")
+

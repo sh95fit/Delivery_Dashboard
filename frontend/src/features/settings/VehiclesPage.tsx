@@ -65,7 +65,7 @@ export default function VehiclesPage() {
           {tab === "expense" && <ExpenseTab vehicles={vehicles} isAdmin={isAdmin} />}
           {tab === "fuel" && <FuelTab vehicles={vehicles} managers={managers} isAdmin={isAdmin} />}
           {tab === "summary" && <CostSummaryTab />}
-          {tab === "assign" && <AssignBoardTab />}          
+          {tab === "assign" && <AssignBoardTab isAdmin={isAdmin} />}   
         </>
       )}
     </PageLayout>

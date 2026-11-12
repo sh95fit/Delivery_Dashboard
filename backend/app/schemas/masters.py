@@ -108,3 +108,11 @@ class EvRateBatchCommitIn(BaseModel):    # S3-P2g-1d 여러 파일 저장 (최�
 class EvSettingsIn(BaseModel):
     ev_speed: Literal["slow", "mid", "fast50", "fast100", "ultra"]
     ev_km_per_kwh: float = Field(gt=0, le=20)
+
+
+class BoardExcludeIn(BaseModel):     # [S3-P2h-3d-5] 배정 점검 제외 계정
+    manager_id: int = Field(gt=0)
+    reason: Literal["internal", "hold", "other"]
+    start_date: date
+    end_date: date | None = None
+    memo: str | None = Field(default=None, max_length=200)

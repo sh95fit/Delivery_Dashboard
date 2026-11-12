@@ -3,6 +3,7 @@ from datetime import date as D
 from app.services.assign_calc import (BOARD_ERRORS, BOARD_FLAGS, board_flags, check_mode, disposal_problem,
                                       group_by_worker, handover_cuts, hold_spans, lock_until, overlaps,
                                       resolve, spans, users_by_vehicle, vehicle_of)
+from app.services.assign_calc import EXCLUDE_REASONS, check_exclude, exclude_on, exclude_overlap
 
 HIST = [
     {"worker_id": 2, "start_date": D(2026, 10, 1), "mode": "company", "vehicle_id": 1},
@@ -132,3 +133,27 @@ def test_board_flags():
     assert board_flags(ok, None, D(2026, 9, 18), False, d) == []                   # 처분일 당일까지는 사용 가능
     assert board_flags({"worker_id": 5, "vehicle_id": None, "basis": "own"}, None, None, False, d) == []
     assert set(BOARD_ERRORS) <= set(BOARD_FLAGS)
+
+
+# ---------- [S3-P2h-3d-5] 점검 제외 계정 ----------
+EXC = [{"id": 1, "manager_id": 1, "reason": "internal", "start_date": D(2026, 9, 1), "end_date": None},
+       {"id": 2, "manager_id": 22, "reason": "hold", "start_date": D(2026, 9, 1), "end_date": D(2026, 10, 31)}]
+
+
+def test_exclude_on():
+    assert exclude_on(EXC, 1, D(2026, 11, 12))["id"] == 1        # 종료일 비면 계속
+    assert exclude_on(EXC, 1, D(2026, 8, 31)) is None            # 시작일 전
+    assert exclude_on(EXC, 22, D(2026, 10, 31))["id"] == 2       # 종료일 당일까지
+    assert exclude_on(EXC, 22, D(2026, 11, 1)) is None           # 종료일 다음 날부터 다시 점검
+    assert exclude_on(EXC, 38, D(2026, 9, 10)) is None
+
+
+def test_check_exclude_and_overlap():
+    assert check_exclude("internal", D(2026, 9, 1), None) is None
+    assert check_exclude("x", D(2026, 9, 1), None).startswith("제외 사유")
+    assert check_exclude("hold", D(2026, 9, 2), D(2026, 9, 1)) == "종료일이 시작일보다 빠릅니다"
+    assert exclude_overlap(EXC, 22, D(2026, 11, 1), None) is None
+    assert exclude_overlap(EXC, 22, D(2026, 10, 31), None)["id"] == 2
+    assert exclude_overlap(EXC, 1, D(2025, 1, 1), D(2025, 12, 31)) is None
+    assert exclude_overlap(EXC, 1, D(2025, 1, 1), None)["id"] == 1
+    assert set(EXCLUDE_REASONS) == {"internal", "hold", "other"}
