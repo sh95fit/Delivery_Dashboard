@@ -610,3 +610,15 @@ tr.wl-dirty td { background: #fffbeb; }
   .form-grid.rate-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .rate-grid .wd-pick { flex-wrap: wrap; }
 }
+
+/* S3-P2h-3d-2b 배정 점검 (월별 계정 → 인력 → 차량) */
+.ab-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.ab-tbl td.ab-day { padding: 2px 3px; text-align: center; vertical-align: middle; }
+.ab-tbl td.ab-off { color: #d1d5db; }
+.ab-cell { display: flex; flex-direction: column; align-items: center; min-width: 44px; padding: 2px 3px; border-radius: 4px; font-size: 11px; line-height: 1.25; cursor: default; }
+.ab-cell b { font-weight: 600; white-space: nowrap; }
+.ab-cell sup { margin-left: 1px; font-size: 9px; color: var(--brand); }
+.ab-cell .ab-car { color: var(--muted); font-variant-numeric: tabular-nums; }
+.ab-cell.ab-bad { background: var(--danger-soft); color: var(--danger); box-shadow: inset 0 0 0 1px #fecaca; }
+.ab-cell.ab-bad .ab-car { color: var(--danger); }
+.ab-cell.ab-shared { background: var(--caution-soft); box-shadow: inset 0 0 0 1px #fed7aa; }

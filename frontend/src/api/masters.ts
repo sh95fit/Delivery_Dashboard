@@ -82,3 +82,22 @@ export const deleteExpense = (id: number) => del<Ok>(`/api/vehicles/expenses/${i
 
 export const getCostSummary = (from: string, to: string) =>
   http<CostSummary>(`/api/vehicles/cost-summary?from=${from}&to=${to}`);
+
+// [S3-P2h-3d-2b] 월별 계정 → 인력 → 차량 정합성 표 (읽기 전용)
+export type BoardFlag = "no_worker" | "after_end" | "no_vehicle" | "disposed" | "shared";
+export interface BoardCell {
+  worker_id: number | null; worker_name: string | null; vehicle_id: number | null; plate_no: string | null;
+  src: "chosen" | "log" | "fixed" | null; basis: string | null; flags: BoardFlag[];
+}
+export interface BoardRow {
+  manager_id: number; name: string; color: string | null; cells: Record<string, BoardCell>;
+  run_days: number; counts: Record<BoardFlag, number>;
+}
+export interface BoardSpan { worker_id: number; name: string | null; start: string | null; end: string | null }
+export interface AssignBoard {
+  month: string; last_day: number; flags: Record<BoardFlag, string>; errors: BoardFlag[];
+  rows: BoardRow[]; totals: Record<BoardFlag, number>;
+  overlaps: Array<{ kind: "account" | "vehicle"; value: number; label: string; from: string | null; first: BoardSpan; second: BoardSpan }>;
+  unused_vehicles: string[];
+}
+export const getAssignBoard = (month: string) => http<AssignBoard>(`/api/vehicles/assign-board?month=${month}`);

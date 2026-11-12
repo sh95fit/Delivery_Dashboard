@@ -14,10 +14,11 @@ import { errText, parseAmount } from "@/lib/form";
 import { won } from "@/lib/format";
 import { CostSummaryTab, ExpenseTab, PeriodCostTab } from "./VehicleCostTabs";
 import FuelTab from "./FuelTab";
+import AssignBoardTab from "./AssignBoardTab";
 import Modal from "@/components/ui/Modal";
 
-type Tab = "list" | "period" | "expense" | "fuel" | "summary";
-const TABS: Array<[Tab, string]> = [["list", "차량"], ["period", "기간 비용"], ["expense", "지출 내역"], ["fuel", "유류비"], ["summary", "비용 요약"]];
+type Tab = "list" | "period" | "expense" | "fuel" | "summary" | "assign";
+const TABS: Array<[Tab, string]> = [["list", "차량"], ["period", "기간 비용"], ["expense", "지출 내역"], ["fuel", "유류비"], ["summary", "비용 요약"], ["assign", "배정 점검"]];
 const TAB_KEY = "ll.vehicles.tab";
 
 export default function VehiclesPage() {
@@ -64,6 +65,7 @@ export default function VehiclesPage() {
           {tab === "expense" && <ExpenseTab vehicles={vehicles} isAdmin={isAdmin} />}
           {tab === "fuel" && <FuelTab vehicles={vehicles} managers={managers} isAdmin={isAdmin} />}
           {tab === "summary" && <CostSummaryTab />}
+          {tab === "assign" && <AssignBoardTab />}          
         </>
       )}
     </PageLayout>
