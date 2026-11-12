@@ -87,22 +87,10 @@ def _overlap(a: dict, b: dict) -> bool:
     return (a["end"] is None or b["start"] <= a["end"]) and (b["end"] is None or a["start"] <= b["end"])
 
 
-def find_conflict(rows: list[dict], ends: dict[int, date | None] | None = None) -> dict | None:
-    """같은 회사 차량을 다른 두 인력이 겹치는 기간에 쓰면 → {vehicle_id, workers, from}. 없으면 None.
-    rows = 저장하려는 상태 그대로의 전체 이력 (수정 전 행은 빼고 새 행은 넣어서 넘김)"""
-    sp = [s for s in spans(rows, ends) if s["vehicle_id"]]
-    for i, a in enumerate(sp):
-        for b in sp[i + 1:]:
-            if a["vehicle_id"] == b["vehicle_id"] and a["worker_id"] != b["worker_id"] and _overlap(a, b):
-                return {"vehicle_id": a["vehicle_id"], "workers": (a["worker_id"], b["worker_id"]),
-                        "from": max(a["start"], b["start"])}
-    return None
-
-
 def disposal_problem(rows: list[dict], ends: dict[int, date | None] | None,
                      disposed: dict[int, date]) -> dict | None:
     """[S3-P2h-3b-2] 처분일(disposed = {차량: 처분일}) 뒤에도 그 차량으로 이어지는 이력 → {worker_id, vehicle_id, disposed_on}. 없으면 None.
-    rows = 저장하려는 상태 그대로의 전체 이력 (find_conflict와 같은 방식)"""
+    rows = 저장하려는 상태 그대로의 전체 이력 (overlaps와 같은 방식)"""
     for s in spans(rows, ends):
         cap = disposed.get(s["vehicle_id"]) if s["vehicle_id"] else None
         if cap is not None and (s["end"] is None or s["end"] > cap):

@@ -146,7 +146,7 @@ function VehicleListTab({ vehicles, managers, isAdmin, onChanged }: {
                 <td>
                   {v.holders.length ? v.holders.map((h) => h.name).join(", ")
                     : v.manager_ids.length
-                      ? <span className="muted">미지정 · 기존 계정 배정 {v.manager_ids.map((id) => mgrName.get(id) ?? `#${id}`).join(", ")}</span>
+                      ? <span className="muted">고정 인력 없음 · 오늘 사용 계정 {v.manager_ids.map((id) => mgrName.get(id) ?? `#${id}`).join(", ")}</span>
                       : <span className="muted">미지정</span>}
                   {v.day_users.length > 0 && (
                     <div className="muted small">오늘 {v.day_users.map((u) => `${u.name}(${u.reason_label})`).join(", ")}</div>

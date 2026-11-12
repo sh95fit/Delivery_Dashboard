@@ -1,7 +1,7 @@
 from datetime import date as D
 
 from app.services.assign_calc import (BOARD_ERRORS, BOARD_FLAGS, board_flags, check_mode, disposal_problem,
-                                      find_conflict, group_by_worker, handover_cuts, hold_spans, lock_until, overlaps,
+                                      group_by_worker, handover_cuts, hold_spans, lock_until, overlaps,
                                       resolve, spans, users_by_vehicle, vehicle_of)
 
 HIST = [
@@ -47,19 +47,20 @@ def test_users_by_vehicle_shared():
     assert users_by_vehicle(r) == {3: [1, 2]}
 
 
-def test_spans_and_conflict():
+def test_spans_and_overlaps():
     assert spans(HIST[2:4])[0]["end"] == D(2026, 10, 15)
-    assert find_conflict(HIST) is None
+    assert overlaps(HIST, None, "vehicle_id") == []
     bad = HIST + [{"worker_id": 6, "start_date": D(2026, 10, 10), "mode": "company", "vehicle_id": 1}]
-    c = find_conflict(bad)
-    assert c["vehicle_id"] == 1 and set(c["workers"]) == {2, 6} and c["from"] == D(2026, 10, 10)
+    c = overlaps(bad, None, "vehicle_id")
+    assert len(c) == 1 and c[0]["value"] == 1 and c[0]["from"] == D(2026, 10, 10)
+    assert (c[0]["first"]["worker_id"], c[0]["second"]["worker_id"]) == (2, 6)
 
 
-def test_conflict_respects_end_date():
+def test_overlaps_respects_end_date():
     rows = [{"worker_id": 2, "start_date": D(2026, 1, 1), "mode": "company", "vehicle_id": 1},
             {"worker_id": 6, "start_date": D(2026, 10, 16), "mode": "company", "vehicle_id": 1}]
-    assert find_conflict(rows) is not None
-    assert find_conflict(rows, ends={2: D(2026, 10, 15)}) is None
+    assert overlaps(rows, None, "vehicle_id") != []
+    assert overlaps(rows, {2: D(2026, 10, 15)}, "vehicle_id") == []
 
 
 def test_check_mode_and_lock():
