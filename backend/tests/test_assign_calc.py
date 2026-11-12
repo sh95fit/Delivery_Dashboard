@@ -1,7 +1,8 @@
 from datetime import date as D
 
-from app.services.assign_calc import (check_mode, disposal_problem, find_conflict, group_by_worker, handover_cuts,
-                                      hold_spans, lock_until, overlaps, resolve, spans, users_by_vehicle, vehicle_of)
+from app.services.assign_calc import (BOARD_ERRORS, BOARD_FLAGS, board_flags, check_mode, disposal_problem,
+                                      find_conflict, group_by_worker, handover_cuts, hold_spans, lock_until, overlaps,
+                                      resolve, spans, users_by_vehicle, vehicle_of)
 
 HIST = [
     {"worker_id": 2, "start_date": D(2026, 10, 1), "mode": "company", "vehicle_id": 1},
@@ -115,3 +116,18 @@ def test_handover_cuts():
     after = {"worker_id": 14, "manager_id": 42, "start_date": D(2026, 9, 19)}
     assert handover_cuts(ACC[:1], ENDS, "manager_id", after) == []   # 퇴사일 다음 날 시작 → 겹침 없음
     assert handover_cuts(ACC[:1], ENDS, "manager_id", {**new, "manager_id": None}) == []
+
+
+# ---------- [S3-P2h-3d-2a] 월별 정합성 표 칸 표시 ----------
+def test_board_flags():
+    d = D(2026, 9, 18)
+    ok = {"worker_id": 14, "vehicle_id": 8, "basis": "company"}
+    assert board_flags(ok, None, None, False, d) == []
+    assert board_flags({"worker_id": None, "vehicle_id": None, "basis": "unknown"}, None, None, True, d) == ["no_worker"]
+    gone = {"worker_id": 12, "vehicle_id": None, "basis": "unknown"}
+    assert board_flags(gone, D(2026, 9, 17), None, False, d) == ["after_end"]      # 퇴사 다음 날 운행
+    assert board_flags(gone, D(2026, 9, 18), None, False, d) == ["no_vehicle"]     # 퇴사일 당일 · 이력 없음
+    assert board_flags(ok, None, D(2026, 9, 17), True, d) == ["disposed", "shared"]
+    assert board_flags(ok, None, D(2026, 9, 18), False, d) == []                   # 처분일 당일까지는 사용 가능
+    assert board_flags({"worker_id": 5, "vehicle_id": None, "basis": "own"}, None, None, False, d) == []
+    assert set(BOARD_ERRORS) <= set(BOARD_FLAGS)

@@ -181,3 +181,26 @@ def handover_cuts(rows: list[dict], ends: dict[int, date | None] | None, key: st
                 and (s["end"] is None or d <= s["end"])):
             cuts.append({"worker_id": s["worker_id"], "cut_on": d, "value": s["value"], "start": s["start"]})
     return cuts
+
+
+# ---------- [S3-P2h-3d-2a] 월별 정합성 표 칸 표시 ----------
+BOARD_FLAGS = {"no_worker": "담당 인력 없음", "after_end": "퇴사 뒤 운행", "no_vehicle": "차량 이력 없음",
+               "disposed": "처분 뒤 사용", "shared": "공유 차량"}
+BOARD_ERRORS = ("no_worker", "after_end", "no_vehicle", "disposed")   # 고쳐야 하는 것 (공유 차량은 확인용)
+
+
+def board_flags(r: dict, end: date | None, disposed_on: date | None, shared: bool, d: date) -> list[str]:
+    """배송이 있던 날 d, 계정 하나의 판정 결과 r = {worker_id, vehicle_id, basis} → 칸 표시 목록.
+    end = 담당 인력 퇴사일, disposed_on = 그날 차량 처분일 (처분일 당일까지는 사용 가능), shared = 그날 차량을 다른 계정도 씀"""
+    if r.get("worker_id") is None:
+        return ["no_worker"]
+    out = []
+    if end is not None and d > end:
+        out.append("after_end")
+    elif r.get("basis") == "unknown":
+        out.append("no_vehicle")
+    if r.get("vehicle_id") and disposed_on is not None and d > disposed_on:
+        out.append("disposed")
+    if shared:
+        out.append("shared")
+    return out

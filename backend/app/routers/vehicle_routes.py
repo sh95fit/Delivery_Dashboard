@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from app.auth import get_current_email
 from app.deps import guard, memo, require_admin
 from app.schemas.masters import ExpenseIn, PeriodCostIn, VehicleIn
+from app.services import assign_board
 from app.services import dash_db
 from app.services import vehicle_service as svc
 
@@ -74,3 +75,9 @@ def delete_expense(eid: int, email: str = Depends(require_admin)):
 def cost_summary(frm: date = Query(..., alias="from"), to: date = Query(...),
                  _: str = Depends(get_current_email)):
     return guard(svc.cost_summary, frm, to, fail="비용 요약 실패")
+
+
+@router.get("/assign-board")
+def assign_board_view(month: str = Query(...), _: str = Depends(get_current_email)):
+    """[S3-P2h-3d-2a] 월별 계정 → 인력 → 차량 정합성 표 (읽기 전용)"""
+    return guard(assign_board.board, month, fail="정합성 표 조회 실패")
