@@ -660,6 +660,10 @@ def _owner_ctx(s: date, e: date) -> dict:
         ctx["off"].setdefault(o["work_date"], set()).add(int(o["worker_id"]))
     for a in dash_db.rows("SELECT worker_id, manager_id, start_date FROM worker_accounts WHERE deleted_at IS NULL"):
         ctx["accs"].setdefault(int(a["worker_id"]), []).append(a)
+        # [S3-P2h-3d-4] 퇴사일 — 고정 계정은 퇴사일까지만 (저장 검사 hold_spans와 같은 규칙)
+        ctx["ends"] = {int(r["id"]): r["end_date"] for r in dash_db.rows(
+            "SELECT id, end_date FROM workers WHERE deleted_at IS NULL AND end_date IS NOT NULL")}
+        
     for c in dash_db.rows(SQL_OWNERS, p):
         d, mid, wid = c["work_date"], int(c["manager_id"]), int(c["worker_id"])
         ctx["chosen"][(d, mid)] = c
@@ -668,6 +672,9 @@ def _owner_ctx(s: date, e: date) -> dict:
 
 
 def _fixed_mid(ctx: dict, wid: int, d: date) -> int | None:
+    end = ctx.get("ends", {}).get(wid)
+    if end is not None and d > end:      # [S3-P2h-3d-4] 퇴사일 다음 날부터는 고정 계정 없음
+        return None
     a = effective_on(ctx["accs"].get(wid, []), d, "start_date")
     return int(a["manager_id"]) if a and a["manager_id"] is not None else None
 
