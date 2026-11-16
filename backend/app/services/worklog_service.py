@@ -82,6 +82,35 @@ def _spans(rs: list[dict], key: str, first: date, last: date) -> list[dict]:
     return ([head] if head else []) + [r for r in rs if first < r[key] <= last]
 
 
+def _allowances(first: date) -> tuple[dict[int, dict], str | None]:
+    """[S2-P4d-4] 근무표 월 수당 (export_plan과 같은 출처) → ({인력: 금액}, 오류 문구).
+    daily = 데일리 인센티브, special = 특수 수당, manual = 월 수당 수기 인센티브, weekend = 주말특별수당"""
+    ex_by: dict[int, dict[str, int]] = {}
+    for e in dash_db.rows(SQL_EXTRAS, {"m": first}):
+        ex_by.setdefault(e["worker_id"], {})[e["kind"]] = int(e["amount"] or 0)
+    inc_people: dict = {}
+    err = None
+    try:
+        from app.services.incentive_service import person_month   # 함수 안 import = 서비스 간 순환 import 방지
+        inc_people = person_month(first)["people"]
+    except Exception as e:  # noqa: BLE001
+        err = f"인센티브를 불러오지 못해 근무표 지급에 인센티브가 빠져 있습니다 ({type(e).__name__}) — 새로고침하세요"
+    out: dict[int, dict] = {}
+    for wid in set(ex_by) | set(inc_people):
+        ex, pi = ex_by.get(wid, {}), inc_people.get(wid, {})
+        out[wid] = {"daily": int(pi.get("incentive", 0)), "special": int(pi.get("extras", 0)),
+                    "manual": int(ex.get("incentive", 0)), "weekend": int(ex.get("weekend", 0)),
+                    "pending_days": int(pi.get("pending_days", 0))}
+    return out, err
+
+
+ZERO_ALLOW = {"daily": 0, "special": 0, "manual": 0, "weekend": 0, "pending_days": 0}
+
+
+def _allow_sum(a: dict) -> int:
+    return a["daily"] + a["special"] + a["manual"] + a["weekend"]
+
+
 def month_view(month: date) -> dict:
     first, last = month_bounds(month)
     rates = _group(dash_db.rows("SELECT * FROM worker_pay_rates WHERE deleted_at IS NULL"), "worker_id")
@@ -92,6 +121,7 @@ def month_view(month: date) -> dict:
     end = min(last, today() - timedelta(days=1))          # 미입력 판정은 어제까지 (오늘은 입력 전일 수 있음)
     with get_dash_engine().connect() as conn:
         closed = _closed(conn, first)
+    allow, allow_err = _allowances(first)
     people = []
     for w in dash_db.rows(SQL_WORKERS):
         rs, mine, off = rates.get(w["id"], []), logs.get(w["id"], []), offs.get(w["id"], [])
@@ -99,7 +129,8 @@ def month_view(month: date) -> dict:
         term = work_term(w)
         if not mine and not off and not (in_term(first, last, term) and any(_hourly(c) for c in cands)):
             continue
-        s = month_summary(mine, rs)
+        al = allow.get(w["id"], ZERO_ALLOW)
+        s = month_summary(mine, rs, _allow_sum(al))
         done = {lg["work_date"] for lg in mine} | {o["work_date"] for o in off}
         missing = [
             d.day for d in (first + timedelta(days=i) for i in range((end - first).days + 1))
@@ -118,11 +149,13 @@ def month_view(month: date) -> dict:
                      for lg in mine},
             "offs": {o["work_date"].day: off_out(o) for o in off},
             "missing_days": missing,
+            "allow": al,                        # [S2-P4d-4] 근무표 지급에 들어간 월 수당
             "summary": {k: s[k] for k in ("days", "nocontract", "paid_min", "ot_min", "base", "ot_allow",
                                           "weekend_days", "weekend_min")},
             "pay": s["pay"],
         })
-    return {"month": first.isoformat(), "last_day": last.day, "closed": closed, "people": people}
+    return {"month": first.isoformat(), "last_day": last.day, "closed": closed, "people": people,
+            "allow_error": allow_err}
 
 
 def day_view(d: date) -> dict:
@@ -418,6 +451,9 @@ def close_check(month: date) -> dict:
     if not ended:
         nxt = last + timedelta(days=1)
         add("error", None, None, f"아직 끝나지 않은 달입니다 ({nxt.month}월 {nxt.day}일부터 마감 가능) — 아래는 어제까지 현황")
+    allow, allow_err = _allowances(first)
+    if allow_err:
+        add("warn", None, None, allow_err)        
     for w in dash_db.rows(SQL_WORKERS):
         rs, mine, off = rates.get(w["id"], []), logs.get(w["id"], []), offs.get(w["id"], [])
         cands = _spans(rs, "effective_from", first, last)
@@ -445,7 +481,10 @@ def close_check(month: date) -> dict:
         early = [lg["work_date"].day for lg in mine if lg.get("early_ok")]
         if early:
             add("info", w, early[0], f"조기 출근 인정 {len(early)}일 ({_short_days(early)}) — 사전 지시한 날이 맞는지 확인")            
-        s = month_summary(mine, rs)
+        al = allow.get(w["id"], ZERO_ALLOW)
+        if al["pending_days"]:
+            add("warn", w, None, f"고객사 수 미입력 {al['pending_days']}일 — 그날 데일리 인센티브 0원으로 들어갑니다 (인센티브 > 일자별 입력)")
+        s = month_summary(mine, rs, _allow_sum(al))
         if s["days"]:
             totals["people"] += 1
             totals["days"] += s["days"]

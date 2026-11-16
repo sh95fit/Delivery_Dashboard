@@ -58,7 +58,8 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
     sheet: a.sheet + p.pay.sheet.total, ot: a.ot + p.summary.ot_min, otPay: a.otPay + (p.pay.ot_allow ?? 0),
     exp: a.exp + (p.pay.expected?.total ?? p.pay.sheet.total),
     wkd: a.wkd + p.summary.weekend_days, wkm: a.wkm + p.summary.weekend_min, off: a.off + Object.keys(p.offs).length,
-  }), { days: 0, paid: 0, base: 0, sheet: 0, ot: 0, otPay: 0, exp: 0, wkd: 0, wkm: 0, off: 0 }), [people]);
+    allow: a.allow + p.allow.daily + p.allow.special + p.allow.manual + p.allow.weekend,
+  }), { days: 0, paid: 0, base: 0, sheet: 0, ot: 0, otPay: 0, exp: 0, wkd: 0, wkm: 0, off: 0, allow: 0 }), [people]);
   const count = (f: Filter) => all.filter((p) => f === "all" || p.sheet === f).length;
   const editing = edit ? all.find((p) => p.worker_id === edit.wid) ?? null : null;
 
@@ -90,7 +91,7 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
       }
       desc={<>
         <b>이름</b>을 누르면 그 사람의 한 달 입력, <b>날짜 칸</b>을 누르면 같은 창이 그날로 열립니다.
-        <b> 근무표 지급</b> = 엑셀 총지급액 (기본급 + 월 수당, 사업자는 부가세 포함, 초과수당 제외).
+        <b> 근무표 지급</b> = 엑셀 총지급액 = 기본급 + 인센티브(데일리·특수 수당·수기) + 주말특별수당, 부가세 대상은 이 합계에 10% (초과수당 제외).
         회색 <b>예상</b> 칸은 초과 기준이 있는 사람만 참고로 표시하며 엑셀에는 들어가지 않습니다.
         {" "}<b>휴</b> = 휴무(사유는 관리용, 엑셀 제외), <b>!</b> = 어제까지 근무 요일인데 근무·휴무가 없는 날, 파란 테두리 = 주말 근무,
         {" "}<b className="wl-cin-early">주황 출근 시각</b> = 조기 출근 인정.
@@ -98,6 +99,7 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
       </>}
     >
       {error && <ErrorBox message={error} />}
+      {view?.allow_error && <ErrorBox message={view.allow_error} />}
       {note && <div className="notice mt">✓ {note}</div>}
       {loading && !view ? (
         <Spinner />
@@ -126,6 +128,7 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
                 <th className="num">휴무</th>                
                 <th className="num">유급시간</th>
                 <th className="num">기본급</th>
+                <th className="num">인센티브·수당</th>
                 <th className="num">근무표 지급</th>
                 <th className="num wl-exp">계약 외</th>
                 <th className="num wl-exp">예상 초과수당</th>
@@ -182,6 +185,10 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
                   <td className="num">{Object.keys(p.offs).length || "-"}</td>
                   <td className="num">{hmm(p.summary.paid_min)}</td>
                   <td className="num">{won(p.summary.base)}</td>
+                  <td className="num" title={`데일리 ${won(p.allow.daily)} + 특수 ${won(p.allow.special)}${p.allow.manual ? ` + 수기 ${won(p.allow.manual)}` : ""} + 주말특별 ${won(p.allow.weekend)}`}>
+                    {won(p.allow.daily + p.allow.special + p.allow.manual + p.allow.weekend)}
+                    {p.allow.pending_days > 0 && <div className="muted small">고객사 수 미입력 {p.allow.pending_days}일</div>}
+                  </td>
                   <td className="num" title={`공급가 ${won(p.pay.sheet.supply)} + 부가세 ${won(p.pay.sheet.vat)}`}><b>{won(p.pay.sheet.total)}</b></td>
                   <td className="num wl-exp">{hmm(p.summary.ot_min)}</td>
                   <td className="num wl-exp">{p.pay.ot_allow == null ? "기준 없음" : won(p.pay.ot_allow)}</td>
@@ -196,6 +203,7 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
                 <td className="num">{tot.off || "-"}</td>
                 <td className="num">{hmm(tot.paid)}</td>
                 <td className="num">{won(tot.base)}</td>
+                <td className="num">{won(tot.allow)}</td>
                 <td className="num">{won(tot.sheet)}</td>
                 <td className="num wl-exp">{hmm(tot.ot)}</td>
                 <td className="num wl-exp">{won(tot.otPay)}</td>

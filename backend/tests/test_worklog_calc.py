@@ -102,3 +102,13 @@ def test_check_log_early_ok():
     assert (v["clock_in"], v["early_ok"]) == (time(7), False)
     v = check_log(time(5, 50), time(12, 30), None, R, day=D, today=T, early_ok=True)
     assert any("이른 출근" in w for w in v["warns"])
+
+
+def test_month_summary_vat_on_total_with_allowances():
+    """[S2-P4d-4] 부가세 = (기본급 + 인센티브 + 주말특별수당) 합계 기준"""
+    r = {**R, "amount": 27500, "ot_unit_min": 0, "ot_unit_amount": 0, "vat_applied": True}
+    s = month_summary([L(1, time(12))], [r], 50000)
+    assert s["base"] == 137500
+    assert s["pay"]["sheet"] == {"supply": 187500, "vat": 18750, "total": 206250}
+    s = month_summary([L(1, time(12))], [{**r, "vat_applied": False}], 50000)
+    assert s["pay"]["sheet"] == {"supply": 187500, "vat": 0, "total": 187500}

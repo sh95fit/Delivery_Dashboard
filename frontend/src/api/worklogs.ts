@@ -33,8 +33,13 @@ export interface WorkMonthPerson {
   days: Record<string, WorkLog>; offs: Record<string, WorkOff>; missing_days: number[];
   summary: { days: number; nocontract: number; paid_min: number; ot_min: number; base: number; ot_allow: number; weekend_days: number; weekend_min: number };
   pay: { sheet: PaySet; ot_allow: number | null; expected: PaySet | null };
+  // [S2-P4d-4] 근무표 지급에 들어간 월 수당 (데일리·특수·수기 인센티브, 주말특별수당)
+  allow: { daily: number; special: number; manual: number; weekend: number; pending_days: number };
 }
-export interface WorkMonthView { month: string; last_day: number; closed: boolean; people: WorkMonthPerson[] }
+export interface WorkMonthView {
+  month: string; last_day: number; closed: boolean; people: WorkMonthPerson[];
+  allow_error: string | null;   // [S2-P4d-4] 인센티브 조회 실패 안내
+}
 export type WorkLogInput = {
   worker_id: number; punch_in: string | null; clock_out: string; break_min: number | null;
   manager_id: number | null; memo: string | null; early_ok: boolean;
