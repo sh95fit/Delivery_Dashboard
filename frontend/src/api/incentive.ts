@@ -57,6 +57,7 @@ export interface IncMonthCell {
   payable: number | null; extras: number; total: number; status: IncStatus;
   product_total: number; accounts: number | null; stops: number; warn: boolean;
   order_accounts: number; warns: string[];   // [S2-P4c-3]
+  product_incentive: number | null; held: boolean; rate_id: number | null;   // [S2-P4c-3c] 입력 미리보기
 }
 export interface IncMonthPerson {
   manager_id: number; manager_name: string; color: string | null; days: Record<string, IncMonthCell>;
@@ -65,6 +66,7 @@ export interface IncMonthPerson {
 }
 export interface IncMonthView {
   month: string; last_day: number; closed: boolean; people: IncMonthPerson[];
+  rates: Record<string, Band[]>;   // [S2-P4c-3c] 단가표 id → 고객사 구간 (입력 미리보기)
   totals: { incentive: number; extras: number; total: number; pending_days: number };
 }
 type Ok = { ok: boolean };

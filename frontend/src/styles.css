@@ -649,3 +649,6 @@ tr.wl-dirty td { background: #fffbeb; }
 
 /* [S2-P4c-3b] 계정별 한 달 입력: 월 보드에서 누른 날짜 행 */
 .ia-focus td { background: #eff6ff; }
+
+/* [S2-P4c-3c] 고객사 수 입력 즉시 금액 미리보기 (저장 전) */
+.inc-pv { color: #2563eb; font-style: italic; }

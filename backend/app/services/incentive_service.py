@@ -316,6 +316,7 @@ def _build(s: date, e: date, *, detail: bool) -> dict[tuple[date, int], dict]:
         row = day_row(lst, ex, adjs, int(acc["value"]) if acc else None, rs["bands"] if rs else None,
                       bool(hs), sum(int(x["amount"]) for x in xs), sh)
         row["order_accounts"] = sum(int(st.get("order_accounts") or 0) for st in lst)
+        row["rate_id"] = rs["id"] if rs else None   # [S2-P4c-3c] 화면 입력 미리보기용 (그날 단가표)        
         if detail:
             row["stop_list"] = [{
                 "address_id": int(st["address_id"]), "address_name": st.get("address_name"),
@@ -390,7 +391,8 @@ def month_board(month: date) -> dict:
         p = people.setdefault(mid, {**_named(mid, {}, mgrs), "days": {}, "sum": {
             "incentive": 0, "extras": 0, "total": 0, "work_days": 0, "held_days": 0, "pending_days": 0, "warn_days": 0}})
         p["days"][str(d.day)] = {k: r[k] for k in ("payable", "extras", "total", "status", "product_total",
-                                                   "accounts", "stops", "order_accounts")} | {
+                                                   "accounts", "stops", "order_accounts",
+                                                   "product_incentive", "held", "rate_id")} | {
             "warn": bool(r["warns"]), "warns": r["warns"]}   # [S2-P4c-3] 계정별 한 달 입력 창 참고값
         sm = p["sum"]
         sm["incentive"] += r["payable"] or 0
@@ -401,7 +403,10 @@ def month_board(month: date) -> dict:
         sm["pending_days"] += 1 if r["status"] == "need_accounts" and d <= t else 0
         sm["warn_days"] += 1 if r["warns"] else 0
     ps = sorted(people.values(), key=lambda x: x["manager_name"])
-    return {"month": s.isoformat(), "last_day": last, "closed": _closed(s), "people": ps,
+    # [S2-P4c-3c] 이 달에 쓰인 단가표의 고객사 구간 → 화면에서 고객사 수 입력 즉시 금액 미리보기
+    used = {c["rate_id"] for p in ps for c in p["days"].values() if c["rate_id"] is not None}
+    rates = {str(x["id"]): x["bands"]["account"] for x in _rate_sets() if x["id"] in used}
+    return {"month": s.isoformat(), "last_day": last, "closed": _closed(s), "people": ps, "rates": rates,
             "totals": {k: sum(p["sum"][k] for p in ps) for k in ("incentive", "extras", "total", "pending_days")}}
 
 

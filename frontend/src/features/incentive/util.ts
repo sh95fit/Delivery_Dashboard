@@ -40,3 +40,28 @@ export function adjText(r: Pick<IncDayRow, "excluded_qty" | "delta">) {
 
 /** +3 / −2 / 0 */
 export const signed = (n: number) => (n > 0 ? `+${num(n)}` : n < 0 ? `−${num(-n)}` : "0");
+
+/** [S2-P4c-3c] 서버 incentive_calc.band_pay 와 같은 규칙(금액만). 미리보기 전용 — 저장 후에는 서버 값 */
+export function bandPay(q: number, bands: Band[]): number {
+  const first = bands.find((b) => b.amount > 0);
+  if (!first || q <= first.start) return 0;
+  const b = bands.find((x) => x.start < q && (x.end == null || q <= x.end)) ?? bands[bands.length - 1];
+  return (q - first.start) * b.amount;
+}
+
+export type IncPreview = { account: number | null; payable: number | null; total: number; status: IncStatus };
+
+/** [S2-P4c-3c] 고객사 수를 바꿨을 때 그날 금액 미리보기 (서버 day_row 순서: 미지급 → 단가표 없음 → 입력 필요 → 확정).
+ *  accounts=null(지움) → 입력 필요 */
+export function previewDay(
+  c: { product_incentive: number | null; held: boolean; extras: number },
+  accounts: number | null, bands: Band[] | null | undefined,
+): IncPreview {
+  const account = bands && bands.length > 0 && accounts != null ? bandPay(accounts, bands) : null;
+  if (c.held) return { account, payable: 0, total: c.extras, status: "held" };
+  if (!bands || bands.length === 0 || c.product_incentive == null)
+    return { account: null, payable: null, total: c.extras, status: "no_rate" };
+  if (account == null) return { account: null, payable: null, total: c.extras, status: "need_accounts" };
+  const payable = c.product_incentive + account;
+  return { account, payable, total: payable + c.extras, status: "ok" };
+}

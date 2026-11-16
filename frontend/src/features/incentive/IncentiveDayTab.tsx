@@ -10,7 +10,7 @@ import type { IncDayView } from "@/api/incentive";
 import { errText } from "@/lib/form";
 import { num, todayKst } from "@/lib/format";
 import IncentiveDetailModal from "./IncentiveDetailModal";
-import { STATUS, adjText, amt, shift, wd } from "./util";
+import { STATUS, adjText, amt, previewDay, shift, wd } from "./util";
 import IncentiveOwnerModal from "./IncentiveOwnerModal";
 import type { ChipTone } from "@/components/ui/Chip";
 const OWNER_SRC: Record<string, [string, ChipTone]> = { chosen: ["지정", "internal"], log: ["근무 기록", "neutral"], fixed: ["고정", "neutral"] };
@@ -56,7 +56,11 @@ export default function IncentiveDayTab({ date, onDate, isAdmin, onDirty }: Prop
 
   const rows = useMemo(() => (view?.items ?? []).map((it) => {
     const f = forms[it.manager_id] ?? str(it.accounts);
-    return { it, f, dirty: f !== str(it.accounts), bad: f !== "" && !/^\d{1,3}$/.test(f) };
+    const chg = f !== str(it.accounts);
+    const bad = f !== "" && !/^\d{1,3}$/.test(f);
+    // [S2-P4c-3c] 입력 즉시 금액 미리보기 (저장 후에는 서버 값)
+    const pv = chg && !bad && it.stops > 0 ? previewDay(it, f === "" ? null : Number(f), view?.rate?.bands.account) : null;
+    return { it, f, dirty: chg, bad, pv };
   }), [view, forms]);
   const dirty = rows.filter((r) => r.dirty);
   const bad = dirty.filter((r) => r.bad);
@@ -153,7 +157,7 @@ export default function IncentiveDayTab({ date, onDate, isAdmin, onDirty }: Prop
           { label: "제품 수", num: true }, "고객사 수", { label: "제품 인센", num: true },
           { label: "고객사 인센", num: true }, { label: "데일리", num: true }, { label: "특수 수당", num: true },
           { label: "합계", num: true }, "상태", ""]}>
-          {rows.map(({ it, f, dirty: d, bad: b }, i) => (
+          {rows.map(({ it, f, dirty: d, bad: b, pv }, i) => (
             <tr key={it.manager_id} className={it.stops === 0 ? "off" : undefined}>
               <td><span className="inc-swatch" style={{ background: it.color ?? "#94a3b8" }} />{it.manager_name}</td>
               <td>
@@ -184,14 +188,16 @@ export default function IncentiveDayTab({ date, onDate, isAdmin, onDirty }: Prop
                 ) : <span className="muted small">배송 없음</span>}
               </td>
               <td className="num">{amt(it.product_incentive)}</td>
-              <td className="num">{amt(it.account_incentive)}</td>
+              <td className="num">{pv ? <span className="inc-pv" title="저장 전 미리보기">{amt(pv.account)}</span> : amt(it.account_incentive)}</td>
               <td className="num">
-                {it.held ? <span className="inc-held"><s>{amt(it.incentive)}</s> 0</span> : amt(it.payable)}
+                {it.held ? <span className="inc-held"><s>{amt(it.incentive)}</s> 0</span>
+                  : pv ? <span className="inc-pv" title="저장 전 미리보기">{amt(pv.payable)}</span> : amt(it.payable)}
               </td>
               <td className="num">{it.extras ? num(it.extras) : "-"}</td>
-              <td className="num"><b>{num(it.total)}</b></td>
+              <td className="num"><b className={pv ? "inc-pv" : undefined}>{num(pv ? pv.total : it.total)}</b></td>
               <td>
-                <Chip tone={STATUS[it.status][1]}>{STATUS[it.status][0]}</Chip>
+                {pv ? <Chip tone={STATUS[pv.status][1]}>{STATUS[pv.status][0]}</Chip>
+                  : <Chip tone={STATUS[it.status][1]}>{STATUS[it.status][0]}</Chip>}
                 {d && <Chip tone="neutral">저장 전</Chip>}
                 {it.warns.length > 0 && <span className="inc-warn" title={it.warns.join("\n")}>⚠{it.warns.length}</span>}
               </td>

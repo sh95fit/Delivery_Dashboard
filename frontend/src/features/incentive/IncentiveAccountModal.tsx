@@ -4,24 +4,26 @@ import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import ErrorBox from "@/components/ui/ErrorBox";
 import { getIncDay, saveIncAccountsMonth } from "@/api/incentive";
-import type { IncDayView, IncMonthPerson } from "@/api/incentive";
+import type { Band, IncDayView, IncMonthPerson } from "@/api/incentive";
 import { errText } from "@/lib/form";
 import { num, todayKst } from "@/lib/format";
 import IncentiveDetailModal from "./IncentiveDetailModal";
 import IncentiveOwnerModal from "./IncentiveOwnerModal";
-import { STATUS, wd } from "./util";
+import { STATUS, amt, previewDay, wd } from "./util";
 
 type Props = {
   month: string; lastDay: number; person: IncMonthPerson; closed: boolean; isAdmin: boolean;
   focusDay: number | null;          // 월 보드에서 누른 날짜 (이름으로 열면 null)
+  rates: Record<string, Band[]>;    // [S2-P4c-3c] 단가표 id → 고객사 구간 (입력 미리보기)
   onClose: () => void; onChanged: () => void;   // onChanged: 월 보드 다시 불러오기 (창은 유지)
 };
 const str = (v: number | null) => (v == null ? "" : String(v));
 const MAX = 500;   // 서버 AccountDayItem le=500
 
 /** [S2-P4c-3] 한 계정의 한 달 고객사 수 입력 (근무표 월 표 한 달 입력과 같은 방식)
- *  [S2-P4c-3b] [상세]로 제외·조정·미지급·특수 수당·담당 변경까지 이 창에서 처리 */
-export default function IncentiveAccountModal({ month, lastDay, person, closed, isAdmin, focusDay, onClose, onChanged }: Props) {
+ *  [S2-P4c-3b] [상세]로 제외·조정·미지급·특수 수당·담당 변경까지 이 창에서 처리
+ *  [S2-P4c-3c] 입력 즉시 데일리·합계·상태 미리보기, [저장하고 닫기] */
+export default function IncentiveAccountModal({ month, lastDay, person, closed, isAdmin, focusDay, rates, onClose, onChanged }: Props) {
   const today = todayKst();
   const iso = (d: number) => `${month}-${String(d).padStart(2, "0")}`;
   const days = useMemo(() => Array.from({ length: lastDay }, (_, i) => i + 1)
@@ -43,11 +45,17 @@ export default function IncentiveAccountModal({ month, lastDay, person, closed, 
     const lock = !isAdmin || closed || future || c.stops === 0;
     const f = forms[d] ?? str(c.accounts);
     const bad = f !== "" && (!/^\d{1,3}$/.test(f) || Number(f) > MAX);
-    return { d, c, f, future, lock, bad, dirty: !lock && f !== str(c.accounts) };
+    const chg = !lock && f !== str(c.accounts);
+    const pv = chg && !bad
+      ? previewDay(c, f === "" ? null : Number(f), c.rate_id == null ? null : rates[String(c.rate_id)])
+      : null;
+    return { d, c, f, future, lock, bad, dirty: chg, pv };
   });
   const dirty = rows.filter((r) => r.dirty);
   const bad = dirty.filter((r) => r.bad);
   const empty = rows.filter((r) => !r.lock && r.f === "");
+  const sumNow = rows.reduce((a, r) => a + r.c.total, 0);
+  const sumNew = rows.reduce((a, r) => a + (r.pv ? r.pv.total : r.c.total), 0);
 
   /* 월 보드에서 날짜 칸으로 열었으면 그 날짜 행으로 이동 */
   useEffect(() => {
@@ -78,7 +86,8 @@ export default function IncentiveAccountModal({ month, lastDay, person, closed, 
     fn();
   }
 
-  async function save() {
+  /** close=true: 저장 성공 후 창 닫기 */
+  async function save(close: boolean) {
     if (dirty.length === 0 || bad.length > 0) return;
     const cleared = dirty.filter((r) => r.f === "");
     if (cleared.length && !confirm(
@@ -90,9 +99,10 @@ export default function IncentiveAccountModal({ month, lastDay, person, closed, 
     try {
       const r = await saveIncAccountsMonth(person.manager_id,
         dirty.map((x) => ({ work_date: iso(x.d), value: x.f === "" ? null : Number(x.f) })));
+      onChanged();
+      if (close) { onClose(); return; }
       setNote(`고객사 수 저장 ${num(r.saved)}일` +
         `${r.cleared ? ` · 지움 ${num(r.cleared)}일` : ""}${r.unchanged ? ` · 기존과 같아 건너뜀 ${num(r.unchanged)}일` : ""}`);
-      onChanged();
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -135,18 +145,28 @@ export default function IncentiveAccountModal({ month, lastDay, person, closed, 
   const dRow = detail?.items.find((x) => x.manager_id === person.manager_id) ?? null;
   const dLocked = !isAdmin || !detail || detail.closed || detail.future;
   const ownerLocked = !isAdmin || !detail || detail.closed;
+  const saveOff = closed || busy || dirty.length === 0 || bad.length > 0;
 
   const pending = rows.filter((r) => !r.future && r.c.stops > 0 && r.c.accounts == null).length;
   return (
     <Modal open size="lg" onClose={() => leave(onClose)}
       title={<>{person.manager_name} · {Number(month.slice(5))}월 인센티브</>}
       footer={<>
-        <span className="muted small grow">배송일 {num(rows.filter((r) => r.c.stops > 0).length)}일 · 입력 필요 {num(pending)}일 · 변경 {num(dirty.length)}일</span>
+        <span className="muted small grow">
+          배송일 {num(rows.filter((r) => r.c.stops > 0).length)}일 · 입력 필요 {num(pending)}일 · 변경 {num(dirty.length)}일
+          {" · "}월 합계 {num(sumNow)}원
+          {dirty.length > 0 && sumNew !== sumNow && <b className="inc-pv"> → {num(sumNew)}원 (저장 전)</b>}
+        </span>
         <Button onClick={() => leave(onClose)}>닫기</Button>
         {isAdmin && (
-          <Button variant="primary" onClick={save} disabled={closed || busy || dirty.length === 0 || bad.length > 0}>
-            {busy ? "저장 중…" : `${num(dirty.length)}일 저장`}
-          </Button>
+          <>
+            <Button onClick={() => save(false)} disabled={saveOff}>
+              {busy ? "저장 중…" : `${num(dirty.length)}일 저장 (계속 입력)`}
+            </Button>
+            <Button variant="primary" onClick={() => save(true)} disabled={saveOff}>
+              {busy ? "저장 중…" : "저장하고 닫기"}
+            </Button>
+          </>
         )}
       </>}
     >
@@ -161,7 +181,8 @@ export default function IncentiveAccountModal({ month, lastDay, person, closed, 
           </Button>
         )}
         <span className="muted small">
-          고객사 수(수거 포함)를 입력하고 Enter로 다음 날로 넘어갑니다. 금액은 저장 후 다시 계산됩니다.
+          고객사 수(수거 포함)를 입력하고 Enter로 다음 날로 넘어갑니다. 입력하면 데일리·합계·상태가 바로 계산됩니다
+          (<span className="inc-pv">파란 기울임</span> = 저장 전 미리보기 · 최대 구간 초과 같은 경고는 저장 후 표시).
           배송지 제외·제품 수 조정·미지급·특수 수당·담당 변경은 그 날짜의 [상세]에서 이 창을 벗어나지 않고 처리합니다
           (상세 변경은 바로 저장되고, 입력 중인 고객사 수는 그대로 남습니다).
         </span>
@@ -179,6 +200,7 @@ export default function IncentiveAccountModal({ month, lastDay, person, closed, 
           <tbody>
             {rows.map((r, i) => {
               const cls = [r.c.stops === 0 || r.future ? "off" : "", r.d === focusDay ? "ia-focus" : ""].filter(Boolean).join(" ");
+              const st = r.pv ? r.pv.status : r.c.status;
               return (
                 <tr key={r.d} className={cls || undefined} ref={(el) => { rowRefs.current[r.d] = el; }}>
                   <td>{r.d}일 ({wd(iso(r.d))})</td>
@@ -194,13 +216,18 @@ export default function IncentiveAccountModal({ month, lastDay, person, closed, 
                         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); next(i); } }} />
                     ) : <span className="muted small">배송 없음</span>}
                   </td>
-                  <td className="num">{r.c.payable == null ? "-" : num(r.c.payable)}</td>
+                  <td className="num">
+                    {r.pv ? <span className="inc-pv" title="저장 전 미리보기">{amt(r.pv.payable)}</span>
+                      : r.c.payable == null ? "-" : num(r.c.payable)}
+                  </td>
                   <td className="num">{r.c.extras ? num(r.c.extras) : "-"}</td>
-                  <td className="num"><b>{num(r.c.total)}</b></td>
+                  <td className="num">
+                    <b className={r.pv ? "inc-pv" : undefined}>{num(r.pv ? r.pv.total : r.c.total)}</b>
+                  </td>
                   <td>
-                    {r.future ? <Chip tone="neutral">예정</Chip> : <Chip tone={STATUS[r.c.status][1]}>{STATUS[r.c.status][0]}</Chip>}
+                    {r.future ? <Chip tone="neutral">예정</Chip> : <Chip tone={STATUS[st][1]}>{STATUS[st][0]}</Chip>}
                     {r.dirty && <Chip tone="neutral">저장 전</Chip>}
-                    {r.c.warns.length > 0 && <span className="inc-warn" title={r.c.warns.join("\n")}>⚠{r.c.warns.length}</span>}
+                    {!r.pv && r.c.warns.length > 0 && <span className="inc-warn" title={r.c.warns.join("\n")}>⚠{r.c.warns.length}</span>}
                   </td>
                   <td>
                     <Button size="sm" disabled={opening != null} onClick={() => openDetail(r.d)}>

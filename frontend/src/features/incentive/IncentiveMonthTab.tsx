@@ -121,7 +121,7 @@ export default function IncentiveMonthTab({ month, onMonth, onPick, isAdmin }: P
         <IncentiveAccountModal
           key={`${month}-${opened.manager_id}-${open.day ?? 0}`}
           month={month} lastDay={view.last_day} person={opened} closed={view.closed} isAdmin={isAdmin}
-          focusDay={open.day}
+          focusDay={open.day} rates={view.rates}
           onClose={() => setOpen(null)}
           onChanged={() => setVer((v) => v + 1)}
         />
