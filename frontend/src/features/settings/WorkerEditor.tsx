@@ -94,6 +94,7 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
   const [income, setIncome] = useState<IncomeType>(row?.income_type ?? "employee");
   const [active, setActive] = useState(row?.active ?? true);
   const [memo, setMemo] = useState(row?.memo ?? "");
+  const [startDate, setStartDate] = useState(row?.start_date ?? "");    // [S2-P4d-2] 입사일
   const [endDate, setEndDate] = useState(row?.end_date ?? "");          // [S2-P0c] 퇴사일
   const [lastFull, setLastFull] = useState(row?.last_pay_full ?? true); // 정규직 마지막 달 월급 그대로
   const [lastAmt, setLastAmt] = useState(row?.last_pay_amount != null ? String(row.last_pay_amount) : "");
@@ -183,7 +184,7 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
   const basicDirty = isNew
     ? name.trim() !== ""
     : name.trim() !== row.name || income !== row.income_type || active !== row.active ||
-      memo.trim() !== (row.memo ?? "").trim() ||
+      memo.trim() !== (row.memo ?? "").trim() || startDate !== (row.start_date ?? "") ||
       (!active && (endDate !== (row.end_date ?? "") || lastFull !== row.last_pay_full ||
         lastAmt !== (row.last_pay_amount != null ? String(row.last_pay_amount) : "")));
 
@@ -191,11 +192,13 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
     if (!name.trim()) return setError("이름을 입력하세요");
     const lastNum = lastAmt.trim() ? parseAmount(lastAmt) : NaN;
     if (!active && !endDate) return setError("비활성(퇴사·중단)으로 바꾸려면 퇴사일을 입력하세요 — 퇴사일까지의 물류비 이력은 그대로 남습니다");
+    if (!active && endDate && startDate && endDate < startDate) return setError("퇴사일이 입사일보다 빠릅니다");
     if (!active && income === "regular" && !lastFull && (Number.isNaN(lastNum) || lastNum < 0)) {
       return setError("마지막 달 지급액을 숫자로 입력하세요 (월급 그대로면 '월급 그대로 지급'을 체크)");
     }
     const body = {
       name: name.trim(), income_type: income, active, memo: memo.trim() || null,
+      start_date: startDate || null,      
       end_date: active ? null : endDate,
       last_pay_full: active || income !== "regular" ? true : lastFull,
       last_pay_amount: !active && income === "regular" && !lastFull ? lastNum : null,
@@ -460,6 +463,9 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
                   {INCOMES.map((k) => <option key={k} value={k}>{INCOME_LABEL[k]}{k === "regular" ? " (월급)" : " (시급)"}</option>)}
                 </select>
               </label>
+              <label className="field" title="입사일 전 날짜는 근무 기록 미입력 검사에서 빠집니다 (비우면 제한 없음)">입사일
+                <input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+              </label>              
               <label className="field">상태
                 <select className="input" value={active ? "1" : "0"} onChange={(e) => setActive(e.target.value === "1")}>
                   <option value="1">활성</option>
@@ -640,7 +646,7 @@ export default function WorkerEditor({ row, workers, managers, isAdmin, justCrea
           )}
           <p className="muted small">
             기본급 = 시급 × 월 전체 유급 시간(초과 포함, 엑셀 월급여와 동일). 초과수당 = 날짜별 지정 시간 밖 근무를 단위(분)마다 지정 금액, 단위 미만 버림.
-            출근은 지문이 지정 시각보다 빨라도 지정 시각으로 인정합니다.
+            출근은 지문이 지정 시각보다 빨라도 지정 시각으로 인정합니다 (그날만 출근을 앞당긴 경우 근무 기록에서 '조기 출근 인정' 체크).
           </p>
         </>
       )}

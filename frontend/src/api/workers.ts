@@ -24,6 +24,7 @@ export interface WorkerAccount {
 export interface WorkerRow {
   id: number; name: string; income_type: IncomeType; active: boolean; memo: string | null;
   legacy_manager_id: number | null; updated_at: string | null; updated_by: string | null;
+  start_date: string | null;   // [S2-P4d-2] 입사일 (비우면 제한 없음)  
   end_date: string | null; last_pay_full: boolean; last_pay_amount: number | null;   // [S2-P0c] 퇴사일 · 정규직 마지막 달
   rate: WorkerRate | null; account: WorkerAccount | null;
   vehicle: WorkerVehicleNow | null; vehicle_day: WorkerVehicleToday | null;   // [S3-P2h-3b-1] 고정 차량 · 오늘 대체
@@ -32,6 +33,7 @@ export interface WorkerDetail { rates: WorkerRate[]; accounts: WorkerAccount[] }
 
 export type WorkerInput = {
   name: string; income_type: IncomeType; active: boolean; memo: string | null;
+  start_date?: string | null;   // [S2-P4d-2] 서버가 항상 덮어쓰므로 저장 때마다 보내야 함  
   end_date?: string | null; last_pay_full?: boolean; last_pay_amount?: number | null;
 };
 export type WorkerRateInput = {
