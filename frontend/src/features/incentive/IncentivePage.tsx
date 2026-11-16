@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import PageLayout from "@/layouts/PageLayout";
 import { useMe } from "@/layouts/shell";
 import { todayKst } from "@/lib/format";
@@ -11,9 +12,15 @@ type Tab = "day" | "month" | "people" | "rates";
 
 export default function IncentivePage() {
   const isAdmin = Boolean(useMe()?.is_admin);
-  const [tab, setTab] = useState<Tab>("day");
-  const [date, setDate] = useState(todayKst());
-  const [month, setMonth] = useState(todayKst().slice(0, 7));
+  const [sp] = useSearchParams();      // [S3-P2j] 물류비 확인 사항 바로가기 (?tab=month&month=)
+  const qt = sp.get("tab");
+  const qd = sp.get("date") ?? "";
+  const qm = sp.get("month") ?? "";
+  const qDate = /^\d{4}-\d{2}-\d{2}$/.test(qd) ? qd : null;
+  const qMonth = /^\d{4}-\d{2}$/.test(qm) ? qm : null;
+  const [tab, setTab] = useState<Tab>(qt === "month" || qt === "people" || qt === "rates" ? qt : "day");
+  const [date, setDate] = useState(qDate ?? todayKst());
+  const [month, setMonth] = useState(qMonth ?? (qDate ?? todayKst()).slice(0, 7));
   const dirty = useRef(0);
 
   function pick(d: string) {

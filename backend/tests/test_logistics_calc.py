@@ -82,3 +82,13 @@ def test_vat_split():
     assert sum(vat_split({"d1": 1_358_333, "d2": 1_358_334}).values()) == 271_667  # 9월 이원일 근무표 부가세
     assert sum(vat_split({"d1": 1_732_042, "d2": 18_410}).values()) == 175_045    # 최정길 (월급여+인센티브)
     assert vat_split({}) == {} and vat_split({"a": 0}) == {}
+
+
+def test_labor_start_date():
+    st = date(2026, 9, 18)                                                                   # 금요일 입사
+    assert labor_day(HOURLY, None, False, date(2026, 9, 17), TODAY, SEP, start=st) is None    # 입사 전 예상 없음
+    assert labor_day(HOURLY, None, False, date(2026, 9, 18), TODAY, SEP, start=st)["kind"] == "missing"
+    assert labor_day(HOURLY, LOG, False, date(2026, 9, 17), TODAY, SEP, start=st)["kind"] == "actual"
+    rate = {"pay_type": "monthly", "amount": 2_300_000}
+    assert labor_day(rate, None, False, date(2026, 9, 17), TODAY, SEP, start=st) is None
+    assert labor_day(rate, None, False, date(2026, 9, 18), TODAY, SEP, start=st)["cost"] == 100_000   # 일할 (÷23)

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import PageLayout from "@/layouts/PageLayout";
 import { useMe } from "@/layouts/shell";
 import { listManagers } from "@/api/masters";
@@ -11,9 +12,14 @@ type Tab = "day" | "month";
 
 export default function WorkLogPage() {
   const isAdmin = Boolean(useMe()?.is_admin);
-  const [tab, setTab] = useState<Tab>("day");
-  const [date, setDate] = useState(todayKst());
-  const [month, setMonth] = useState(todayKst().slice(0, 7));
+  const [sp] = useSearchParams();      // [S3-P2j] 물류비 확인 사항 바로가기 (?tab=month&month= / ?tab=day&date=)
+  const qd = sp.get("date") ?? "";
+  const qm = sp.get("month") ?? "";
+  const qDate = /^\d{4}-\d{2}-\d{2}$/.test(qd) ? qd : null;
+  const qMonth = /^\d{4}-\d{2}$/.test(qm) ? qm : null;
+  const [tab, setTab] = useState<Tab>(sp.get("tab") === "month" ? "month" : "day");
+  const [date, setDate] = useState(qDate ?? todayKst());
+  const [month, setMonth] = useState(qMonth ?? (qDate ?? todayKst()).slice(0, 7));
   const [managers, setManagers] = useState<ManagerRow[]>([]);
   const [ver, setVer] = useState(0);          // 월 표 팝업 저장 → 일일 입력 다시 불러오기
 

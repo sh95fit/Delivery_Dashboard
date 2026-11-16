@@ -15,7 +15,7 @@ export interface CostView {
   from: string; to: string; days: number; today: string; open_days: number;
   timing: Record<string, number>;
   accounts: CostAccount[]; by_day: CostDay[]; totals: CostRow;
-  issues: Array<{ level: "warn" | "info"; msg: string }>;
+  issues: Array<{ level: "warn" | "info"; msg: string; link?: { to: string; label: string } | null }>;   // [S3-P2j] 바로가기
 }
 
 /** 표 칸 순서 = 엑셀 순서 */

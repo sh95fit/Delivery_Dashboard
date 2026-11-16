@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import PageLayout from "@/layouts/PageLayout";
 import Panel from "@/components/ui/Panel";
 import Button from "@/components/ui/Button";
@@ -83,6 +84,7 @@ function Body({ view, showDays, onShowDays }: { view: CostView; showDays: boolea
           {view.issues.map((i, n) => (
             <p key={n} className="small">
               <Chip tone={i.level === "warn" ? "caution" : "neutral"}>{i.level === "warn" ? "확인" : "안내"}</Chip> {i.msg}
+              {i.link && <Link to={i.link.to} className="issue-link">{i.link.label} →</Link>}              
             </p>
           ))}
         </Panel>

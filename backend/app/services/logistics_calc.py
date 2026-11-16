@@ -46,7 +46,7 @@ def monthly_day(amount: int, d: date, month_open: list[date] | None = None) -> i
 
 def labor_day(rate: dict | None, log: dict | None, off: bool, d: date, today: date,
               month_open: list[date] | None = None, end: date | None = None,
-              last_pay: int | None = None) -> dict | None:
+              last_pay: int | None = None, start: date | None = None) -> dict | None:
     """한 사람·하루 인건비 → {cost, ot_pay, paid_min, kind} 또는 None(비용 없음).
     kind = actual(근무 기록) / monthly(정규직 월급, 영업일 기준) / estimate(오늘 이후 계약 시간) / missing(지난 근무일 미입력 → 계약 시간)
     month_open = 그 달 영업일 목록. 휴무일에는 기록이 없으면 비용 없음, 기록이 있으면 실제 비용.
@@ -57,6 +57,9 @@ def labor_day(rate: dict | None, log: dict | None, off: bool, d: date, today: da
     pt = rate.get("pay_type")
     if end is not None and d > end and (log is None or pt == "monthly"):
         return None
+    # [S3-P2j] 입사일 전 = 비용 없음 (시급제는 근무 기록이 있으면 실제 비용). 정규직 입사 달은 영업일 일할
+    if start is not None and d < start and (log is None or pt == "monthly"):
+        return None    
     if pt == "monthly":
         amount, days = int(rate["amount"]), month_open
         if end is not None and (d.year, d.month) == (end.year, end.month):

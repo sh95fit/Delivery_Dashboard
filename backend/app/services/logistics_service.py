@@ -80,8 +80,13 @@ def cost_view(frm: date, to: date) -> dict:
     def cell(d: date, mid: int | None) -> dict:
         return cells.setdefault((d, mid), _blank())
 
-    def add(level: str, msg: str) -> None:
-        issues.append({"level": level, "msg": msg})
+    def add(level: str, msg: str, link: dict | None = None) -> None:
+        issues.append({"level": level, "msg": msg, "link": link})   # [S3-P2j] link = {to, label} 바로가기
+
+    ym = frm.strftime("%Y-%m")
+    link_month = {"to": f"/ops/work?tab=month&month={ym}", "label": "근무 기록 › 월 표"}
+    link_workers = {"to": "/settings/workers", "label": "인력 관리"}
+    link_vehicles = {"to": "/settings/vehicles", "label": "차량 관리"}
 
     # [S3-P2i] 부가세 기준 금액 {(인력, 연, 월): {(일자, 계정): 금액}} — 계약 '부가세 적용' 인력만
     vbase: dict[tuple[int, int, int], dict[tuple[date, int | None], int]] = {}
@@ -113,7 +118,7 @@ def cost_view(frm: date, to: date) -> dict:
             return month_open[k]
 
         # ---------- 인건비 ----------
-        workers = dash_db.rows("""SELECT id, name, active, end_date, last_pay_full, last_pay_amount
+        workers = dash_db.rows("""SELECT id, name, active, start_date, end_date, last_pay_full, last_pay_amount
             FROM workers WHERE deleted_at IS NULL""")
         rates = _group(dash_db.rows("SELECT * FROM worker_pay_rates WHERE deleted_at IS NULL"), "worker_id")
         accs = _group(dash_db.rows(
@@ -128,6 +133,7 @@ def cost_view(frm: date, to: date) -> dict:
             owned.setdefault((o["worker_id"], o["work_date"]), int(o["manager_id"]))
         missing: dict[str, list[str]] = {}
         no_acc: dict[str, int] = {}
+        no_acc_days: dict[str, list[date]] = {}        
         nocontract: set[str] = set()
         no_end: set[str] = set()
         for w in workers:
@@ -141,7 +147,7 @@ def cost_view(frm: date, to: date) -> dict:
                 if lg is None and not w["active"] and end is None:
                     continue                            # 퇴사일 없는 예전 비활성 인력: 근무 기록 있는 날만
                 res = labor_day(effective_on(rs, d, "effective_from"), lg, (wid, d) in offs, d, t, open_in_month(d),
-                                end=end, last_pay=last_pay)
+                                end=end, last_pay=last_pay, start=w.get("start_date"))
                 if res is None:
                     if lg is not None and effective_on(rs, d, "effective_from") is None:
                         nocontract.add(w["name"])
@@ -158,17 +164,26 @@ def cost_view(frm: date, to: date) -> dict:
                     missing.setdefault(w["name"], []).append(f"{d.month}/{d.day}")
                 if mid is None:
                     no_acc[w["name"]] = no_acc.get(w["name"], 0) + res["cost"]
+                    no_acc_days.setdefault(w["name"], []).append(d)                    
         for name, ds in missing.items():
             more = f" 외 {len(ds) - 5}일" if len(ds) > 5 else ""
-            add("warn", f"{name}: 근무 기록 미입력 {len(ds)}일({', '.join(ds[:5])}{more}) — 계약 시간으로 예상 계산")
+            add("warn", f"{name}: 근무 기록 미입력 {len(ds)}일({', '.join(ds[:5])}{more}) — 계약 시간으로 예상 계산 "
+                        "(입사 전 날짜면 인력 › 기본 정보의 입사일 확인)", link_month)
         for name, amt in no_acc.items():
-            add("warn", f"{name}: 그날 계정·고정 계정이 없어 인건비 {amt:,}원이 '{NO_ACCOUNT}'로 들어감")
+            ds = no_acc_days.get(name) or [frm]
+            more = f" 외 {len(ds) - 5}일" if len(ds) > 5 else ""
+            days_txt = ", ".join(f"{x.month}/{x.day}" for x in ds[:5]) + more
+            add("warn", f"{name}: {days_txt} 그날 계정·고정 계정이 없어 인건비 {amt:,}원이 '{NO_ACCOUNT}'로 들어감 — "
+                        "근무 기록 일일 입력에서 그날 계정 지정 (동승이면 동승한 계정 + 인센티브 담당 지정)",
+                {"to": f"/ops/work?tab=day&date={ds[0].isoformat()}", "label": f"{ds[0].month}/{ds[0].day} 일일 입력"})
         for name in sorted(nocontract):
-            add("warn", f"{name}: 계약 없는 날 근무 기록이 있어 그날 인건비 0원 — 계약 시작일 확인")
+            add("warn", f"{name}: 계약 없는 날 근무 기록이 있어 그날 인건비 0원 — 계약 시작일 확인", link_workers)
         for name in sorted(no_end):
-            add("warn", f"{name}: 비활성인데 퇴사일이 없어 근무 기록 있는 날만 계산 — 인력 화면에서 퇴사일을 넣으면 그 전 기간 인건비가 다시 잡힘")            
+            add("warn", f"{name}: 비활성인데 퇴사일이 없어 근무 기록 있는 날만 계산 — 인력 화면에서 퇴사일을 넣으면 그 전 기간 인건비가 다시 잡힘",
+                link_workers)
         if not any(r.get("pay_type") == "monthly" for rs in rates.values() for r in rs):
-            add("info", "월급(정규직)으로 등록된 인력이 없어 정규직 인건비가 0원 — 인력 화면에서 정규직 등록 후 계약을 '월급'으로 입력")
+            add("info", "월급(정규직)으로 등록된 인력이 없어 정규직 인건비가 0원 — 인력 화면에서 정규직 등록 후 계약을 '월급'으로 입력",
+                link_workers)
         timing["labor"] = round(time.perf_counter() - s, 2)
 
         # ---------- 차량비 (그날 그 차량을 배정받은 계정이 나눠 가짐) ----------
@@ -210,9 +225,10 @@ def cost_view(frm: date, to: date) -> dict:
                     cell(d, mid)[key] += share
         if fuel_open:
             months = ", ".join(f"{y}-{m:02d}" for y, m in sorted(fuel_open))
-            add("info", f"유류비 미마감 {months} — 지금까지 입력한 주유 기록으로 예상 계산 (월 마감 후 확정)")
+            add("info", f"유류비 미마감 {months} — 지금까지 입력한 주유 기록으로 예상 계산 (월 마감 후 확정)", link_vehicles)
         if loose:
-            add("info", f"배정 계정이 없는 차량 비용 {loose:,}원은 '{NO_ACCOUNT}'로 들어감")
+            add("info", f"배정 계정이 없는 차량 비용 {loose:,}원은 '{NO_ACCOUNT}'로 들어감",
+                {"to": "/settings/workers", "label": "인력 › 차량 이용"})
 
         timing["vehicle"] = round(time.perf_counter() - s, 2)
 
@@ -226,9 +242,9 @@ def cost_view(frm: date, to: date) -> dict:
             c["calc_fuel"] += x["calc"]
             c["route_ms"] += x["route_ms"]            
         for n in rf_notes:
-            add("info", n)
+            add("info", n, link_vehicles if ("연비" in n or "충전" in n) else None)
         for n in asg.notes():
-            add("info", n)
+            add("info", n, {"to": "/settings/workers", "label": "인력 › 차량 이용"})
         timing["route"] = round(time.perf_counter() - s, 2)        
         rev_views = f_rev.result()
         inc_rows = f_inc.result()
@@ -258,7 +274,8 @@ def cost_view(frm: date, to: date) -> dict:
         if r["status"] == "need_accounts" and int(r.get("stops") or 0) > 0 and d <= t:
             pending += 1
     if pending:
-        add("warn", f"고객사 수 미입력 {pending}건(계정×일)은 데일리 인센티브 0원으로 계산됨 — 인센티브 > 일자별 입력")
+        add("warn", f"고객사 수 미입력 {pending}건(계정×일)은 데일리 인센티브 0원으로 계산됨 — 인센티브 > 일자별 입력",
+            {"to": f"/finance/incentive?tab=month&month={ym}", "label": "인센티브 › 월 보드"})
 
     # ---------- [S3-P2i] 인력 부가세 (근무표 총지급액과 같은 기준, 사람·월마다 반올림 1회) ----------
     vat_total = 0
@@ -288,7 +305,7 @@ def cost_view(frm: date, to: date) -> dict:
     if totals["cancel_loss"]:
         add("info", f"배송 취소로 받지 못한 매출 {totals['cancel_loss']:,}원 — 순매출에서 이미 빠져 이익에 반영됨 (물류비 합계에는 넣지 않음)")    
     if totals["labor_est"]:
-        add("info", f"인건비 중 {totals['labor_est']:,}원은 근무 기록이 없는 날의 예상 금액")
+        add("info", f"인건비 중 {totals['labor_est']:,}원은 근무 기록이 없는 날의 예상 금액", link_month)
     timing["total"] = round(time.perf_counter() - started, 2)
     logger.info("cost_view %s~%s %d일 %s", frm, to, len(days), timing)
     return {"from": frm.isoformat(), "to": to.isoformat(), "days": len(days), "today": t.isoformat(),

@@ -652,3 +652,6 @@ tr.wl-dirty td { background: #fffbeb; }
 
 /* [S2-P4c-3c] 고객사 수 입력 즉시 금액 미리보기 (저장 전) */
 .inc-pv { color: #2563eb; font-style: italic; }
+
+/* [S3-P2j] 물류비 확인 사항 바로가기 */
+.issue-link { margin-left: 8px; color: #2563eb; white-space: nowrap; }
