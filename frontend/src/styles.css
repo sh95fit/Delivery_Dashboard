@@ -643,3 +643,6 @@ tr.wl-dirty td { background: #fffbeb; }
 .bo-day.sat { color: var(--brand, #2563eb); }
 .bo-day.on { background: var(--brand, #2563eb); border-color: var(--brand, #2563eb); color: #fff; }
 .bo-day:disabled { opacity: .5; cursor: default; }
+
+/* [S2-P4c-3] 인센티브 계정별 한 달 입력 */
+.ia-wrap { max-height: 60vh; overflow: auto; }

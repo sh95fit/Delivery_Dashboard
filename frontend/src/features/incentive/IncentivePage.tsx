@@ -38,7 +38,7 @@ export default function IncentivePage() {
         <IncentiveDayTab date={date} isAdmin={isAdmin} onDirty={(n) => { dirty.current = n; }}
           onDate={(d) => { setDate(d); setMonth(d.slice(0, 7)); }} />
       </div>
-      {tab === "month" && <IncentiveMonthTab month={month} onMonth={setMonth} onPick={pick} />}
+      {tab === "month" && <IncentiveMonthTab month={month} onMonth={setMonth} onPick={pick} isAdmin={isAdmin} />}
       {tab === "people" && isAdmin && <IncentivePeopleTab month={month} onMonth={setMonth} />}
       {tab === "rates" && <IncentiveRatesTab isAdmin={isAdmin} />}
     </PageLayout>

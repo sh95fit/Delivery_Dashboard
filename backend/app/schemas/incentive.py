@@ -34,6 +34,16 @@ class AccountItem(BaseModel):
 
 class AccountsIn(BaseModel):
     items: list[AccountItem] = Field(min_length=1, max_length=200)
+ 
+
+class AccountDayItem(BaseModel):
+    work_date: date
+    value: int | None = Field(default=None, ge=0, le=500)    # None = 입력 지우기
+
+
+class AccountMonthIn(BaseModel):
+    """[S2-P4c-3] 한 계정 × 여러 날 고객사 수"""
+    items: list[AccountDayItem] = Field(min_length=1, max_length=31)
 
 
 class QtyAdjIn(BaseModel):

@@ -390,7 +390,8 @@ def month_board(month: date) -> dict:
         p = people.setdefault(mid, {**_named(mid, {}, mgrs), "days": {}, "sum": {
             "incentive": 0, "extras": 0, "total": 0, "work_days": 0, "held_days": 0, "pending_days": 0, "warn_days": 0}})
         p["days"][str(d.day)] = {k: r[k] for k in ("payable", "extras", "total", "status", "product_total",
-                                                   "accounts", "stops")} | {"warn": bool(r["warns"])}
+                                                   "accounts", "stops", "order_accounts")} | {
+            "warn": bool(r["warns"]), "warns": r["warns"]}   # [S2-P4c-3] 계정별 한 달 입력 창 참고값
         sm = p["sum"]
         sm["incentive"] += r["payable"] or 0
         sm["extras"] += r["extras"]
@@ -439,6 +440,41 @@ def save_accounts(d: date, items: list[dict], email: str) -> dict:
         for it in items:
             mid, v = int(it["manager_id"]), it.get("value")
             old = cur.get(mid)
+            if v is None:
+                if old is None:
+                    unchanged += 1
+                else:
+                    _clear_adj(conn, mid, d, "accounts", email)
+                    cleared += 1
+            elif old == int(v):
+                unchanged += 1
+            else:
+                _clear_adj(conn, mid, d, "accounts", email)
+                _insert_adj(conn, mid, d, "accounts", int(v), None, email)
+                saved += 1
+    return {"ok": True, "saved": saved, "cleared": cleared, "unchanged": unchanged}
+
+
+def save_accounts_manager(mid: int, items: list[dict], email: str) -> dict:
+    """[S2-P4c-3] 한 계정 × 여러 날 고객사 수 (한 트랜잭션, 하루라도 오류면 전체 취소).
+    value=None → 입력 지우기 (이력은 삭제 표시로 보존)."""
+    days = [i["work_date"] for i in items]
+    if len(days) != len(set(days)):
+        raise ValueError("같은 날짜가 두 번 들어 있습니다")
+    saved = cleared = unchanged = 0
+    with get_dash_engine().begin() as conn:
+        for d in sorted(days):
+            try:
+                _check_open(conn, d)
+            except ValueError as e:
+                raise ValueError(f"{d.month}/{d.day}: {e}") from None
+        cur = {r[0]: int(r[1]) for r in conn.execute(text("""
+            SELECT DISTINCT ON (adj_date) adj_date, value FROM incentive_adjustments
+            WHERE deleted_at IS NULL AND manager_id = :m AND field = 'accounts' AND adj_date BETWEEN :s AND :e
+            ORDER BY adj_date, created_at DESC, id DESC"""), {"m": mid, "s": min(days), "e": max(days)}).fetchall()}
+        for it in sorted(items, key=lambda x: x["work_date"]):
+            d, v = it["work_date"], it.get("value")
+            old = cur.get(d)
             if v is None:
                 if old is None:
                     unchanged += 1

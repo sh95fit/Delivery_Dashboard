@@ -56,6 +56,7 @@ export interface IncDayView {
 export interface IncMonthCell {
   payable: number | null; extras: number; total: number; status: IncStatus;
   product_total: number; accounts: number | null; stops: number; warn: boolean;
+  order_accounts: number; warns: string[];   // [S2-P4c-3]
 }
 export interface IncMonthPerson {
   manager_id: number; manager_name: string; color: string | null; days: Record<string, IncMonthCell>;
@@ -73,6 +74,9 @@ export const getIncDay = (d: string) => http<IncDayView>(`/api/incentive/day?d=$
 export const getIncMonth = (ym: string) => http<IncMonthView>(`/api/incentive/month?month=${ym}-01`);
 export const saveIncAccounts = (d: string, items: Array<{ manager_id: number; value: number | null }>) =>
   put<{ ok: boolean; saved: number; cleared: number; unchanged: number }>(`/api/incentive/accounts/${d}`, { items });
+/** [S2-P4c-3] 한 계정 × 여러 날 고객사 수 (value=null → 지우기) */
+export const saveIncAccountsMonth = (mid: number, items: Array<{ work_date: string; value: number | null }>) =>
+  put<{ ok: boolean; saved: number; cleared: number; unchanged: number }>(`/api/incentive/accounts/manager/${mid}`, { items });
 export const addQtyAdj = (b: { work_date: string; manager_id: number; product_id: number | null; qty: number; reason: string }) =>
   post<Ok & { id: number }>("/api/incentive/qty-adjustments", b);
 export const deleteQtyAdj = (id: number, reason: string) =>

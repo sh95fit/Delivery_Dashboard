@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.auth import get_current_email
 from app.deps import guard, memo, require_admin
-from app.schemas.incentive import (AccountsIn, ExclusionIn, ExtraIn, ExtraItemIn, ExtraUpdateIn,
+from app.schemas.incentive import (AccountMonthIn, AccountsIn, ExclusionIn, ExtraIn, ExtraItemIn, ExtraUpdateIn,
                                    HoldIn, QtyAdjIn, RateSetIn, ReasonIn, OwnerIn)
 from app.services import incentive_service as svc
 
@@ -59,6 +59,13 @@ def delete_rates(sid: int, email: str = Depends(require_admin)):
 @router.put("/accounts/{d}")
 def save_accounts(d: date, body: AccountsIn, email: str = Depends(require_admin)):
     return guard(svc.save_accounts, d, [i.model_dump() for i in body.items], email, fail="고객사 수 저장 실패")
+
+
+@router.put("/accounts/manager/{mid}")
+def save_accounts_manager(mid: int, body: AccountMonthIn, email: str = Depends(require_admin)):
+    """[S2-P4c-3] 한 계정 × 여러 날 고객사 수"""
+    return guard(svc.save_accounts_manager, mid, [i.model_dump() for i in body.items], email,
+                 fail="고객사 수 저장 실패")
 
 
 @router.post("/qty-adjustments")

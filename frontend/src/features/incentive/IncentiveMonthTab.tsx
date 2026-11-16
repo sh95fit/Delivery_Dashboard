@@ -7,9 +7,10 @@ import { getIncMonth } from "@/api/incentive";
 import type { IncMonthCell, IncMonthView } from "@/api/incentive";
 import { errText } from "@/lib/form";
 import { num, todayKst } from "@/lib/format";
+import IncentiveAccountModal from "./IncentiveAccountModal";
 import { wd } from "./util";
 
-type Props = { month: string; onMonth: (m: string) => void; onPick: (d: string) => void };
+type Props = { month: string; onMonth: (m: string) => void; onPick: (d: string) => void; isAdmin: boolean };
 
 function cellView(c: IncMonthCell, future: boolean): [string, string] {
   if (future) return ["inc-c-future", "예정"];
@@ -19,21 +20,28 @@ function cellView(c: IncMonthCell, future: boolean): [string, string] {
   return ["", num(c.total)];
 }
 
-export default function IncentiveMonthTab({ month, onMonth, onPick }: Props) {
+export default function IncentiveMonthTab({ month, onMonth, onPick, isAdmin }: Props) {
   const [view, setView] = useState<IncMonthView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [ver, setVer] = useState(0);
+  const [openMid, setOpenMid] = useState<number | null>(null);   // [S2-P4c-3] 계정별 한 달 입력
+  const [note, setNote] = useState("");
   const today = todayKst();
 
   useEffect(() => {
+    let alive = true;
     setLoading(true);
-    getIncMonth(month).then((v) => { setView(v); setError(""); })
-      .catch((e) => { setView(null); setError(errText(e)); })
-      .finally(() => setLoading(false));
-  }, [month]);
+    getIncMonth(month).then((v) => { if (alive) { setView(v); setError(""); } })
+      .catch((e) => { if (alive) { setView(null); setError(errText(e)); } })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [month, ver]);
+  useEffect(() => { setOpenMid(null); setNote(""); }, [month]);
 
   const days = Array.from({ length: view?.last_day ?? 0 }, (_, i) => i + 1);
   const iso = (d: number) => `${month}-${String(d).padStart(2, "0")}`;
+  const opened = view?.people.find((p) => p.manager_id === openMid) ?? null;
 
   return (
     <Panel
@@ -42,9 +50,13 @@ export default function IncentiveMonthTab({ month, onMonth, onPick }: Props) {
         {view?.closed && <Chip tone="warn">마감된 달</Chip>}
         <input type="month" className="input input-sm" value={month} onChange={(e) => e.target.value && onMonth(e.target.value)} />
       </>}
-      desc="칸 = 그날 지급 합계(데일리 인센티브 + 특수 수당). 칸을 누르면 그 날짜의 일자별 입력으로 이동합니다."
+      desc={<>
+        칸 = 그날 지급 합계(데일리 인센티브 + 특수 수당). <b>계정 이름</b>을 누르면 그 계정의 한 달 고객사 수를 한 번에 입력하고,
+        <b> 칸</b>을 누르면 그 날짜의 일자별 입력으로 이동합니다.
+      </>}
     >
       {error && <ErrorBox message={error} />}
+      {note && <div className="notice mt">✓ {note}</div>}
       <div className="inc-legend">
         <span className="lg-need">고객사 수 입력 필요</span>
         <span className="lg-held">미지급 (숫자 = 특수 수당만)</span>
@@ -56,7 +68,7 @@ export default function IncentiveMonthTab({ month, onMonth, onPick }: Props) {
           {view.totals.pending_days > 0 && ` · 입력 필요 ${num(view.totals.pending_days)}건 (이 건은 합계에서 빠짐)`}
         </div>
       )}
-      {loading ? <Spinner /> : view && view.people.length === 0 ? (
+      {loading && !view ? <Spinner /> : view && view.people.length === 0 ? (
         <div className="muted small">이 달에 배송 기록이 없습니다.</div>
       ) : view && (
         <div className="tbl-wrap">
@@ -74,7 +86,11 @@ export default function IncentiveMonthTab({ month, onMonth, onPick }: Props) {
             <tbody>
               {view.people.map((p) => (
                 <tr key={p.manager_id}>
-                  <td className="name"><span className="inc-swatch" style={{ background: p.color ?? "#94a3b8" }} />{p.manager_name}</td>
+                  <td className="name">
+                    <span className="inc-swatch" style={{ background: p.color ?? "#94a3b8" }} />
+                    <button type="button" className="wl-namebtn" onClick={() => setOpenMid(p.manager_id)}
+                      title="이 계정 한 달 고객사 수 입력">{p.manager_name}</button>
+                  </td>
                   {days.map((d) => {
                     const c = p.days[String(d)];
                     if (!c) return <td key={d} className="cell" onClick={() => onPick(iso(d))} />;
@@ -95,6 +111,15 @@ export default function IncentiveMonthTab({ month, onMonth, onPick }: Props) {
             </tbody>
           </table>
         </div>
+      )}
+      {opened && view && (
+        <IncentiveAccountModal
+          key={`${month}-${opened.manager_id}-${ver}`}
+          month={month} lastDay={view.last_day} person={opened} closed={view.closed} isAdmin={isAdmin}
+          onClose={() => setOpenMid(null)}
+          onSaved={(msg) => { setOpenMid(null); setNote(msg); setVer((v) => v + 1); }}
+          onPick={(d) => { setOpenMid(null); onPick(d); }}
+        />
       )}
     </Panel>
   );
