@@ -7,6 +7,7 @@ import ErrorBox from "@/components/ui/ErrorBox";
 import type { RouteSummary, StatusState, StopPoint } from "@/api/types";
 import { num, won } from "@/lib/format";
 import { arrowPoints, metersPerPixel, offsetPath } from "./routeGeom";
+import { buildStopOrder, byId, phaseOf, stopNo } from "./stopOrder";
 
 const DEFAULT_CENTER = { lat: 37.5665, lng: 126.978 };
 const FIT_MARGIN = { top: 56, right: 56, bottom: 56, left: 56 };
@@ -66,7 +67,6 @@ const esc = (v: unknown) =>
 
 const safeColor = (c?: string | null) => (c && /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : FALLBACK_COLOR);
 const okPt = (p: any): p is Pt => Boolean(p) && Number.isFinite(p.lat) && Number.isFinite(p.lng);
-const phaseOf = (s?: StatusState): Phase => (s === "LIVE" ? "live" : s === "RESULT" ? "result" : "preview");
 const isPreviewStop = (s: StopPoint) => String(s.delivery_id).startsWith("preview-");
 const hasLine = (r?: RouteSummary) =>
   Boolean(r) && ((r!.completed_path?.length ?? 0) >= 2 || (r!.remaining_path?.length ?? 0) >= 2);
@@ -103,80 +103,6 @@ function loadNaverMaps(): Promise<void> {
     script.onerror = () => reject(new Error("NAVER Maps 스크립트 로드 실패"));
     document.head.appendChild(script);
   });
-}
-
-/* ---------- 번호: 배송지 데이터로 직접 계산 (경로 캐시와 무관) ---------- */
-const hasXY = (s: StopPoint) => Number.isFinite(s.latitude) && Number.isFinite(s.longitude);
-const xy = (s: StopPoint): Pt => ({ lat: s.latitude as number, lng: s.longitude as number });
-const dist2 = (a: Pt, s: StopPoint) =>
-  (a.lat - (s.latitude as number)) ** 2 + ((a.lng - (s.longitude as number)) * 0.8) ** 2;
-const doneAt = (s: StopPoint) => new Date(s.delivered_at as string).getTime();
-const byId = (a: StopPoint, b: StopPoint) => String(a.delivery_id).localeCompare(String(b.delivery_id));
-
-/** start에서 가장 가까운 곳을 차례로 고른다 */
-function nearestChain(list: StopPoint[], start: Pt | null): { out: StopPoint[]; end: Pt | null } {
-  const rest = list.slice().sort(byId);
-  const out: StopPoint[] = [];
-  let cur = start;
-  while (rest.length) {
-    let bi = 0;
-    if (cur) {
-      let bd = Infinity;
-      rest.forEach((s, i) => {
-        const d = hasXY(s) ? dist2(cur!, s) : Infinity;
-        if (d < bd) { bd = d; bi = i; }
-      });
-    }
-    const [s] = rest.splice(bi, 1);
-    out.push(s);
-    if (hasXY(s)) cur = xy(s);
-  }
-  return { out, end: cur };
-}
-
-/** 같은 키(순서 값 또는 희망시간)끼리 묶어 키 순서대로, 묶음 안은 직전 위치에서 가까운 곳부터 */
-function chainBy<K extends string | number>(list: StopPoint[], key: (s: StopPoint) => K, start: Pt | null) {
-  const groups = new Map<K, StopPoint[]>();
-  for (const s of list) {
-    const k = key(s);
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k)!.push(s);
-  }
-  const out: StopPoint[] = [];
-  let cur = start;
-  for (const k of [...groups.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
-    const r = nearestChain(groups.get(k)!, cur);
-    out.push(...r.out);
-    cur = r.end;
-  }
-  return { out, end: cur };
-}
-
-/** 완료분 = 완료 시각순 확정 / 미완료 = delivery.ordering 순 → 순서 없는 곳은 뒤에 */
-function buildStopOrder(stops: StopPoint[], phase: Phase, origin: Pt | null) {
-  const order = new Map<string, number>();
-  const byMgr = new Map<number, StopPoint[]>();
-  for (const s of stops) {
-    if (s.manager_id == null) continue;
-    if (!byMgr.has(s.manager_id)) byMgr.set(s.manager_id, []);
-    byMgr.get(s.manager_id)!.push(s);
-  }
-  for (const [mid, list] of byMgr) {
-    const done = phase === "preview" ? [] : list
-      .filter((s) => s.delivered_at)
-      .sort((a, b) => doneAt(a) - doneAt(b) || byId(a, b));
-    const todo = phase === "result" ? [] : list.filter((s) => !s.cancelled && (phase === "preview" || !s.delivered_at));
-    const last = [...done].reverse().find(hasXY);
-    const a = chainBy(todo.filter((s) => s.seq != null), (s) => s.seq as number, last ? xy(last) : origin);
-    const b = chainBy(todo.filter((s) => s.seq == null), (s) => s.delivery_time || "99:99", a.end);
-    const ordered = [...done, ...a.out, ...b.out];
-    ordered.forEach((s, i) => order.set(`${mid}:${s.delivery_id}`, i + 1));
-  }
-  return order;
-}
-
-function stopNo(s: StopPoint, order: Map<string, number>) {
-  return s.manager_id == null ? undefined : order.get(`${s.manager_id}:${s.delivery_id}`);
 }
 
 const visibleItems = (g: StopGroup, sel: number | null) =>

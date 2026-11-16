@@ -16,6 +16,7 @@ import LineupTable from "./components/LineupTable";
 import InternalBlock from "./components/InternalBlock";
 import ControlTable from "./components/ControlTable";
 import MapSection from "@/features/map/MapSection";
+import { buildStopOrder, phaseOf } from "@/features/map/stopOrder";
 import { getStatus } from "@/api/status";
 import { getDeliveries } from "@/api/deliveries";
 import { getPreviewAll, getRouteLegs, previewRoute, startPreviewAll } from "@/api/routes";
@@ -157,6 +158,11 @@ export default function DashboardPage() {
 
   // [S3-P2d-2b-2] 남은 경로 미리보기 (버튼으로만 NAVER 호출, 저장·물류비 반영 안 함)
   const routes = useMemo(() => toRoutes(routesData, stops), [routesData, stops]);
+  // [S3-P2k] 지도 마커와 같은 계산 → 노선 상세·지연 목록의 '번호'
+  const stopOrder = useMemo(
+    () => buildStopOrder(stops, phaseOf(st?.state), routesData?.origin ?? null),
+    [stops, st?.state, routesData?.origin],
+  );  
   const pvRows = routesData?.managers.filter((m) => m.remaining_stops > 0) ?? [];
   const pvTarget = selectedManagerId == null ? pvRows : pvRows.filter((m) => m.manager_id === selectedManagerId);
   const pvStale = pvTarget.filter((m) => m.preview_stale).length;
@@ -267,6 +273,7 @@ export default function DashboardPage() {
           live={liveNow}
           dwellOpt={dwellOpt}
           onDwell={setDwellOpt}
+          noOf={(mid, id) => stopOrder.get(`${mid}:${id}`)}          
           isAdmin={isAdmin}
           onFocusStop={(id) => {
             setFocusStop((p) => ({ id, n: (p?.n ?? 0) + 1 }));

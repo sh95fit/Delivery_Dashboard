@@ -56,11 +56,12 @@ type Props = {
   onChanged: () => void;                // 관제 제외 추가·해제 후 다시 불러오기
   dwellOpt: number | null;              // [S3-P2d-5c] 곳당 정차 임의 설정(분), null = 자동(중앙값)
   onDwell: (v: number | null) => void;
+  noOf: (mid: number, id: string) => number | undefined;   // [S3-P2k] 지도 마커 번호
 };
 
 const rowStyle = (on: boolean) => ({ cursor: "pointer", background: on ? "rgba(37, 99, 235, 0.08)" : undefined });
 
-export default function ControlTable({ data, names, selected, onSelect, live, isAdmin, onFocusStop, onChanged, dwellOpt, onDwell }: Props) {
+export default function ControlTable({ data, names, selected, onSelect, live, isAdmin, onFocusStop, onChanged, dwellOpt, onDwell, noOf }: Props) {
   const detailRef = useRef<HTMLDivElement>(null);
   const [jump, setJump] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -116,11 +117,11 @@ export default function ControlTable({ data, names, selected, onSelect, live, is
           right={<span className="muted small">아직 완료 안 된 곳 중 희망 시각보다 1분 이상 늦게 도착할 것으로 예상되는 곳 · 늦은 순 · 행 = 노선 상세 · 지도 = 마커로 이동</span>}
         >
           {lateAll.length > 0 && (
-            <DataTable columns={["노선", { label: "순서", num: true }, "고객사", "희망", "예상 도착", { label: "지연", num: true }, ""]}>
+            <DataTable columns={["노선", { label: "번호", num: true }, "고객사", "희망", "예상 도착", { label: "지연", num: true }, ""]}>
               {lateAll.map(({ mid, s }) => (
                 <tr key={`${mid}:${s.id}`} onClick={() => open(mid)} style={rowStyle(selected === mid)}>
                   <td>{nameOf(mid)}</td>
-                  <td className="num">{s.seq ?? "-"}</td>
+                  <td className="num">{noOf(mid, s.id) ?? "-"}</td>
                   <td>{s.name}</td>
                   <td>{hm(s.target_at)}</td>
                   <td>{hm(s.eta)}</td>
@@ -211,6 +212,7 @@ export default function ControlTable({ data, names, selected, onSelect, live, is
         <div ref={detailRef} style={{ scrollMarginTop: 72 }}>
           <RouteDetail
             m={sel} name={nameOf(sel.manager_id)} live={live} isAdmin={isAdmin} busy={busy} excludes={excludes}
+            noOf={(id) => noOf(sel.manager_id, id)}
             onClose={() => onSelect(null)} onFocus={onFocusStop} onExclude={exclude} onRelease={release}
           />
         </div>
@@ -239,8 +241,9 @@ export default function ControlTable({ data, names, selected, onSelect, live, is
   );
 }
 
-function RouteDetail({ m, name, live, isAdmin, busy, excludes, onClose, onFocus, onExclude, onRelease }: {
+function RouteDetail({ m, name, live, isAdmin, busy, excludes, noOf, onClose, onFocus, onExclude, onRelease }: {
   m: Row; name: string; live: boolean; isAdmin: boolean; busy: boolean; excludes: ControlExclude[];
+  noOf: (id: string) => number | undefined;
   onClose: () => void; onFocus: (id: string) => void; onExclude: (s: ControlStop) => void; onRelease: (x: ControlExclude) => void;
 }) {
   const c = m.control;
@@ -249,7 +252,7 @@ function RouteDetail({ m, name, live, isAdmin, busy, excludes, onClose, onFocus,
     ...c.stops.map((s) => ({ s, kind: "left" as const })),
     ...(c.excluded ?? []).map((s) => ({ s, kind: "excluded" as const })),
     ...(c.cancelled ?? []).map((s) => ({ s, kind: "cancelled" as const })),    
-  ];
+  ].sort((a, b) => (noOf(a.s.id) ?? Number.MAX_SAFE_INTEGER) - (noOf(b.s.id) ?? Number.MAX_SAFE_INTEGER));   // [S3-P2k] 지도 번호 순
   const exOf = (s: ControlStop) => excludes.find((x) => x.address_id === s.address_id);
   return (
     <Panel
@@ -261,13 +264,17 @@ function RouteDetail({ m, name, live, isAdmin, busy, excludes, onClose, onFocus,
           : `완료 ${c.done}곳 · 마지막 완료 ${hm(c.last_at)} · 늦게 완료 ${c.late_done}곳 · 행을 누르면 지도에서 그 배송지로 이동`
       }
     >
-      <DataTable columns={[{ label: "순서", num: true }, "고객사", "희망", "완료 / 예상 도착", "구분", { label: "정차", num: true }, { label: "희망 대비", num: true }, ...(isAdmin ? ["관제"] : [])]}>
+      <div className="muted small" style={{ marginBottom: 6 }}>
+        번호 = 지도 마커 번호 (완료한 곳은 완료 순서, 남은 곳은 앱 배송 순서대로 이어서) · 앱 순서 = 앱에 저장된 배송 순서 — 두 값이 다르면 계획과 다른 순서로 배송한 곳
+      </div>
+      <DataTable columns={[{ label: "번호", num: true }, { label: "앱 순서", num: true }, "고객사", "희망", "완료 / 예상 도착", "구분", { label: "정차", num: true }, { label: "희망 대비", num: true }, ...(isAdmin ? ["관제"] : [])]}>
         {list.map(({ s, kind }) => {
           const ex = kind === "excluded" ? exOf(s) : undefined;
           return (
             <tr key={`${kind}:${s.id}`} className={kind === "left" ? undefined : "muted"} style={{ cursor: "pointer" }}
               onClick={() => onFocus(s.id)} title="누르면 지도에서 이 배송지로 이동">
-              <td className="num">{s.seq ?? "-"}</td>
+              <td className="num">{noOf(s.id) ?? "-"}</td>
+              <td className="num muted">{s.seq ?? "-"}</td>
               <td>{s.name}</td>
               <td>{hm(s.target_at)}</td>
               <td>{kind === "left" ? (s.skipped ? "연결 불가" : live ? hm(s.eta) : "-") : hm(s.done_at)}</td>
