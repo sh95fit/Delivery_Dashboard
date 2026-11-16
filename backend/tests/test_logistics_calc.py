@@ -2,7 +2,7 @@ from datetime import date, time
 
 from app.services.business_days import business_days
 from app.services.logistics_calc import (cost_amount, labor_day, monthly_day, period_shares, split_even,
-                                         supply_of, vehicle_costs, vehicle_day)
+                                         supply_of, vat_split, vehicle_costs, vehicle_day)
 
 HOURLY = {"pay_type": "hourly", "amount": 16000, "work_start": time(7), "work_end": time(12, 30),
           "break_min": 0, "break_paid": True, "ot_unit_min": 0, "ot_unit_amount": 0, "work_days": 31}
@@ -75,3 +75,10 @@ def test_split_and_vehicle_day():
     periods = [{"vehicle_id": 1, "amount": 3100, "start_date": date(2026, 10, 1), "end_date": date(2026, 10, 31)}]
     expenses = [{"vehicle_id": 1, "expense_date": date(2026, 10, 5), "amount": 5000}]
     assert vehicle_day(periods, expenses, date(2026, 10, 5)) == {1: 5100}
+
+
+def test_vat_split():
+    assert vat_split({"a": 100_000, "b": 50_001}) == {"a": 10_000, "b": 5_000}   # (150,001+5)//10 = 15,000
+    assert sum(vat_split({"d1": 1_358_333, "d2": 1_358_334}).values()) == 271_667  # 9월 이원일 근무표 부가세
+    assert sum(vat_split({"d1": 1_732_042, "d2": 18_410}).values()) == 175_045    # 최정길 (월급여+인센티브)
+    assert vat_split({}) == {} and vat_split({"a": 0}) == {}

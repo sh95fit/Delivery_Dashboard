@@ -12,6 +12,7 @@ MONEY = [
     ("연장 예상", "ot_expected"),
     ("데일리 인센티브", "incentive"),
     ("특수 수당", "extras"),
+    ("부가세(인력)", "vat"),    
     ("차량비", "vehicle"),
     ("유류비(마감)", "fuel"),
     ("유류비 예상(미마감)", "fuel_est"),

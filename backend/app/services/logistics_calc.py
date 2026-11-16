@@ -128,3 +128,18 @@ def vehicle_day(periods: list[dict], expenses: list[dict], d: date) -> dict[int,
         if e["expense_date"] == d:
             out[e["vehicle_id"]] = out.get(e["vehicle_id"], 0) + int(e["amount"])
     return out
+
+
+def vat_split(bases: dict) -> dict:
+    """[S3-P2i] 한 사람·한 달 부가세 = 기준 합계 × 10% (원 단위 반올림 1회 → 근무표 pay_total과 같음).
+    칸(계정×일자)별 기준 금액 비율로 나누고, 나머지 원은 버림이 큰 칸부터 1원씩 → 합계 = 월 부가세."""
+    bases = {k: int(v) for k, v in bases.items() if int(v) > 0}
+    total = sum(bases.values())
+    if total <= 0:
+        return {}
+    vat = (total + 5) // 10
+    out = {k: vat * v // total for k, v in bases.items()}
+    rem = vat - sum(out.values())
+    for k in sorted(bases, key=lambda k: (-(vat * bases[k] % total), str(k)))[:rem]:
+        out[k] += 1
+    return out

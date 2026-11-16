@@ -16,14 +16,14 @@ from app.services import calendar_service, dash_db
 from app.services.assign_service import Assign
 from app.services.cost_calc import days_incl, effective_on
 from app.services.day_aggregate import KST
-from app.services.logistics_calc import labor_day, month_days, split_even, vehicle_costs
+from app.services.logistics_calc import labor_day, month_days, split_even, vat_split, vehicle_costs
 from app.services.manager_service import today
 from app.services.route_fuel_service import route_fuel
 
 MAX_DAYS = 366   # 1년(윤년 포함). 느리면 줄인다
 logger = logging.getLogger("logistics")
 
-COST_KEYS = ("labor", "labor_est", "ot_expected", "incentive", "extras", "vehicle", "fuel", "fuel_est")
+COST_KEYS = ("labor", "labor_est", "ot_expected", "incentive", "extras", "vat", "vehicle", "fuel", "fuel_est")
 REF_KEYS = ("ncp_fuel", "calc_fuel", "route_m", "route_ms", "cancel_loss")   # 참고 칸 — cost_total에 넣지 않음 (route_ms = 주행 시간, cancel_loss = S3-P2f 배송 취소로 받지 못한 매출, 순매출에서 이미 뺌)
 NO_ACCOUNT = "계정 미지정"
 
@@ -65,7 +65,7 @@ def cost_view(frm: date, to: date) -> dict:
         raise ValueError("조회 종료일이 시작일보다 빠릅니다")
     if days_incl(frm, to) > MAX_DAYS:
         raise ValueError(f"조회 기간은 {MAX_DAYS}일 이내로 지정하세요")
-    from app.services.incentive_service import _build, _managers   # 함수 안 import = 순환 import 방지
+    from app.services.incentive_service import _build, _managers, _owner   # 함수 안 import = 순환 import 방지
     from app.services.revenue_service import _views
 
     t = today()
@@ -82,6 +82,14 @@ def cost_view(frm: date, to: date) -> dict:
 
     def add(level: str, msg: str) -> None:
         issues.append({"level": level, "msg": msg})
+
+    # [S3-P2i] 부가세 기준 금액 {(인력, 연, 월): {(일자, 계정): 금액}} — 계약 '부가세 적용' 인력만
+    vbase: dict[tuple[int, int, int], dict[tuple[date, int | None], int]] = {}
+
+    def add_vat_base(wid: int, d: date, mid: int | None, amt: int) -> None:
+        if amt:
+            b = vbase.setdefault((wid, d.year, d.month), {})
+            b[(d, mid)] = b.get((d, mid), 0) + int(amt)        
 
     # 운영 DB 조회(매출·인센티브)는 오래 걸리므로 동시에 띄워 두고, 기다리는 동안 대시보드 DB 계산을 한다
     with ThreadPoolExecutor(max_workers=2) as ex:
@@ -144,6 +152,8 @@ def cost_view(frm: date, to: date) -> dict:
                 c = cell(d, mid)
                 c["labor" if res["kind"] in ("actual", "monthly") else "labor_est"] += res["cost"]
                 c["ot_expected"] += res["ot_pay"]
+                if (effective_on(rs, d, "effective_from") or {}).get("vat_applied"):
+                    add_vat_base(wid, d, mid, res["cost"])     # [S3-P2i] 연장 예상은 근무표처럼 제외                
                 if res["kind"] == "missing":
                     missing.setdefault(w["name"], []).append(f"{d.month}/{d.day}")
                 if mid is None:
@@ -239,10 +249,26 @@ def cost_view(frm: date, to: date) -> dict:
         c = cell(d, mid)
         c["incentive"] += int(r["payable"] or 0)
         c["extras"] += int(r["extras"])
+        amt = int(r["payable"] or 0) + int(r["extras"])
+        if amt:
+            wid = _owner(asg.ctx, d, mid)[0]               # [S3-P2i] 차량비와 같은 담당 판정
+            rt = effective_on(rates.get(wid, []), d, "effective_from") if wid is not None else None
+            if rt and rt.get("vat_applied"):
+                add_vat_base(wid, d, mid, amt)        
         if r["status"] == "need_accounts" and int(r.get("stops") or 0) > 0 and d <= t:
             pending += 1
     if pending:
         add("warn", f"고객사 수 미입력 {pending}건(계정×일)은 데일리 인센티브 0원으로 계산됨 — 인센티브 > 일자별 입력")
+
+    # ---------- [S3-P2i] 인력 부가세 (근무표 총지급액과 같은 기준, 사람·월마다 반올림 1회) ----------
+    vat_total = 0
+    for parts in vbase.values():
+        for (d, mid), v in vat_split(parts).items():
+            cell(d, mid)["vat"] += v
+            vat_total += v
+    if vat_total:
+        add("info", f"부가세 {vat_total:,}원 — 계약에 '부가세 적용'인 인력의 인건비(예상 포함)+데일리 인센티브+특수 수당 × 10% "
+                    "(근무표 총지급액과 같은 기준 · 연장 예상 제외 · 사람·월마다 반올림)")
 
     # ---------- 조립 ----------
     mgrs = _managers()
