@@ -139,7 +139,7 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
       desc={<>
         출근·휴게는 계약 기본값이 <span className="wl-def-sample">회색</span>으로 채워져 있습니다.
         퇴근(지문)만 입력하고, 지문 출근이 지정보다 늦은 날이나 휴게가 다른 날만 고치세요 (고친 값은 검정).
-        지문이 지정보다 빠르면 지정 시각으로 인정. 휴게 = 실제 휴게 시간 (인력 계약이 무급 휴게면 유급시간에서 빼고, 유급 휴게면 빼지 않음). 기록이 없는 날은 비근무입니다.
+        지문이 지정보다 빠르면 지정 시각으로 인정 (그날만 출근을 앞당겼으면 출근 칸 아래 '조기 출근 인정' 체크 → 지문 시각 그대로). 휴게 = 실제 휴게 시간 (인력 계약이 무급 휴게면 유급시간에서 빼고, 유급 휴게면 빼지 않음). 기록이 없는 날은 비근무입니다.
         휴무 지정·해제는 월 표 → 한 달 입력의 근무/휴무 칸에서 합니다.
       </>}
     >
@@ -183,7 +183,7 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
                     onBlur={() => { if (!f.punch) set(it.worker_id, { punch: defaultIn(c) }); }} />
                   {pv.cin != null && toMinSafe(f.punch) !== pv.cin && <div className="muted small">인정 {hmm(pv.cin)}</div>}
                   {(earlyAble(c, f.punch) || f.early) && (
-                    <label className="muted small" title="그날 한시적으로 출근 시각을 앞당긴 경우만 체크 — 지문 시각 그대로 인정">
+                    <label className={`wl-early${f.early ? " on" : ""}`} title="그날 한시적으로 출근 시각을 앞당긴 경우만 체크 — 지문 시각 그대로 인정">
                       <input type="checkbox" checked={f.early} disabled={dis}
                         onChange={(e) => set(it.worker_id, { early: e.target.checked })} /> 조기 출근 인정
                     </label>

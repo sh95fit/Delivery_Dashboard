@@ -92,7 +92,8 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
         <b>이름</b>을 누르면 그 사람의 한 달 입력, <b>날짜 칸</b>을 누르면 같은 창이 그날로 열립니다.
         <b> 근무표 지급</b> = 엑셀 총지급액 (기본급 + 월 수당, 사업자는 부가세 포함, 초과수당 제외).
         회색 <b>예상</b> 칸은 초과 기준이 있는 사람만 참고로 표시하며 엑셀에는 들어가지 않습니다.
-        {" "}<b>휴</b> = 휴무(사유는 관리용, 엑셀 제외), <b>!</b> = 어제까지 근무 요일인데 근무·휴무가 없는 날, 파란 테두리 = 주말 근무.
+        {" "}<b>휴</b> = 휴무(사유는 관리용, 엑셀 제외), <b>!</b> = 어제까지 근무 요일인데 근무·휴무가 없는 날, 파란 테두리 = 주말 근무,
+        {" "}<b className="wl-cin-early">주황 출근 시각</b> = 조기 출근 인정.
         {" "}<b>날짜 머리글</b>을 누르면 그날 여러 명의 휴무를 한 번에 지정·해제합니다 (공휴일·공장 휴무).
       </>}
     >
@@ -160,7 +161,7 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
                         {lg ? (
                           <button type="button" className={`wl-cell${lg.no_contract ? " wl-bad" : ""}${wk ? " wl-wkend" : ""}`} onClick={open}
                             title={`${wk ? "주말 근무 · " : ""}출근 ${lg.clock_in}${lg.punch_in ? ` (지문 ${lg.punch_in})` : ""}${lg.early_ok ? " · 조기 출근 인정" : ""} · 퇴근 ${lg.clock_out} · 휴게 ${lg.sheet_break ?? 0}분${lg.memo ? ` · ${lg.memo}` : ""}`}>
-                            <span>{lg.clock_in}</span><span>{lg.clock_out}</span><b>{hmm(lg.paid_min)}</b>
+                            <span className={lg.early_ok ? "wl-cin-early" : undefined}>{lg.clock_in}</span><span>{lg.clock_out}</span><b>{hmm(lg.paid_min)}</b>
                           </button>
                         ) : off ? (
                           <button type="button" className="wl-cell wl-offcell" onClick={open}

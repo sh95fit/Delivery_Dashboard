@@ -64,6 +64,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
 
   const locked = !isAdmin || closed;
   const multi = person.contracts.filter((s) => s.contract).length > 1;   // 월 중 계약 변경자만 날짜별 지정 칸
+  const anyEarly = rows.some((r) => !r.isOff && (earlyAble(r.c, r.f.punch) || r.f.early));   // 조기 출근 체크칸이 있는 달만 출근 칸을 넓힘  
   const saves = rows.filter((r) => r.dirty && !r.isOff && r.f.out !== "");
   const dels = rows.filter((r) => r.del);
   const offSaves = rows.filter((r) => r.dirty && r.isOff);
@@ -214,7 +215,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
           <colgroup>
             <col className="wp-c-day" /><col className="wp-c-off" />
             {multi && <col className="wp-c-con" />}
-            <col className="wp-c-in" /><col className="wp-c-out" /><col className="wp-c-brk" />
+            <col className={`wp-c-in${anyEarly ? " wp-c-in-wide" : ""}`} /><col className="wp-c-out" /><col className="wp-c-brk" />            
             <col className="wp-c-acc" /><col /><col className="wp-c-paid" /><col className="wp-c-st" />
           </colgroup>
           <thead>
@@ -250,7 +251,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
                       {!r.c && !multi && !r.isOff && <Chip tone="danger">계약 없음</Chip>}
                       {!r.isOff && r.pv.cin != null && toMin(r.f.punch) !== r.pv.cin && <span className="wp-note">인정 {hmm(r.pv.cin)}</span>}
                       {!r.isOff && (earlyAble(r.c, r.f.punch) || r.f.early) && (
-                        <label className="wp-note" title="그날 한시적으로 출근 시각을 앞당긴 경우만 체크 — 지문 시각 그대로 인정">
+                        <label className={`wp-note wl-early-in${r.f.early ? " on" : ""}`} title="그날 한시적으로 출근 시각을 앞당긴 경우만 체크 — 지문 시각 그대로 인정">
                           <input type="checkbox" checked={r.f.early} disabled={dis}
                             onChange={(e) => set(r.d, { early: e.target.checked })} /> 조기 인정
                         </label>

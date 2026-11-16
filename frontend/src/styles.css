@@ -626,3 +626,11 @@ tr.wl-dirty td { background: #fffbeb; }
 /* S3-P2h-3d-5 점검 제외 칸 (직원식·보류 등) — 고칠 칸 수에서 뺌 */
 .ab-cell.ab-ex { background: #f1f5f9; color: var(--faint); box-shadow: inset 0 0 0 1px #e2e8f0; }
 .ab-cell.ab-ex .ab-car { color: var(--faint); }
+
+/* S2-P4d-1c 조기 출근 인정 표시 */
+.wl-early { display: flex; align-items: center; gap: 4px; margin-top: 2px; font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; cursor: pointer; }
+.wl-early-in { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
+.wl-early input, .wl-early-in input { margin: 0; }
+.wl-early.on, .wl-early-in.on { color: var(--caution); font-weight: 600; }
+.wp-tbl col.wp-c-in.wp-c-in-wide { width: 250px; }
+.wl-cin-early { color: var(--caution); font-weight: 700; }
