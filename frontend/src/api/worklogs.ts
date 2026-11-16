@@ -9,7 +9,7 @@ export interface WorkLog {
   id: number; work_date: string; punch_in: string | null; clock_in: string; clock_out: string;
   break_min: number | null; manager_id: number | null; memo: string | null; source: string | null;
   paid_min: number | null; ot_min: number | null; ot_pay: number | null; sheet_break: number | null;
-  no_contract: boolean;
+  no_contract: boolean; early_ok: boolean;
 }
 export type OffReason = "annual" | "sick" | "personal" | "factory" | "holiday" | "other";
 export const OFF_REASONS: Array<[OffReason, string]> = [
@@ -36,7 +36,7 @@ export interface WorkMonthPerson {
 export interface WorkMonthView { month: string; last_day: number; closed: boolean; people: WorkMonthPerson[] }
 export type WorkLogInput = {
   worker_id: number; punch_in: string | null; clock_out: string; break_min: number | null;
-  manager_id: number | null; memo: string | null;
+  manager_id: number | null; memo: string | null; early_ok: boolean;
 };
 export interface SaveDayResult { ok: boolean; saved: number; unchanged: number; warns: Record<string, string[]> }
 

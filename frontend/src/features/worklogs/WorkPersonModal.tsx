@@ -9,7 +9,7 @@ import { OFF_LABEL, OFF_REASONS, hmm, isWorkday, saveWorkPerson, spanOn, toMin }
 import type { OffReason, WorkLogDateInput, WorkMonthPerson, WorkOffInput } from "@/api/worklogs";
 import { errText } from "@/lib/form";
 import { num, todayKst } from "@/lib/format";
-import { EMPTY_FORM, contractText, defaultBreak, defaultIn, isDefaultBreak, isDefaultIn, logToForm, preview, sameForm, toInput } from "./calc";
+import { EMPTY_FORM, contractText, defaultBreak, defaultIn, earlyAble, isDefaultBreak, isDefaultIn, logToForm, preview, sameForm, toInput } from "./calc";
 import type { LogForm } from "./calc";
 
 const WD = "일월화수목금토";
@@ -106,7 +106,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
     const base = init[d] ?? EMPTY_FORM;
     const c = contractOn(d);
     if (v === "") set(d, base.off === "" ? { ...base } : { off: "" });
-    else set(d, { off: v, out: "", punch: defaultIn(c), brk: c ? String(defaultBreak(c)) : "" });
+    else set(d, { off: v, out: "", punch: defaultIn(c), brk: c ? String(defaultBreak(c)) : "", early: false });
   }
 
   function next(d: number) {
@@ -249,6 +249,12 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
                         onBlur={() => { if (!r.f.punch) set(r.d, { punch: defaultIn(r.c) }); }} />
                       {!r.c && !multi && !r.isOff && <Chip tone="danger">계약 없음</Chip>}
                       {!r.isOff && r.pv.cin != null && toMin(r.f.punch) !== r.pv.cin && <span className="wp-note">인정 {hmm(r.pv.cin)}</span>}
+                      {!r.isOff && (earlyAble(r.c, r.f.punch) || r.f.early) && (
+                        <label className="wp-note" title="그날 한시적으로 출근 시각을 앞당긴 경우만 체크 — 지문 시각 그대로 인정">
+                          <input type="checkbox" checked={r.f.early} disabled={dis}
+                            onChange={(e) => set(r.d, { early: e.target.checked })} /> 조기 인정
+                        </label>
+                      )}                 
                     </div>
                   </td>
                   <td>

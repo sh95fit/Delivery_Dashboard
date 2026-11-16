@@ -159,7 +159,7 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
                       <td key={d}>
                         {lg ? (
                           <button type="button" className={`wl-cell${lg.no_contract ? " wl-bad" : ""}${wk ? " wl-wkend" : ""}`} onClick={open}
-                            title={`${wk ? "주말 근무 · " : ""}출근 ${lg.clock_in}${lg.punch_in ? ` (지문 ${lg.punch_in})` : ""} · 퇴근 ${lg.clock_out} · 휴게 ${lg.sheet_break ?? 0}분${lg.memo ? ` · ${lg.memo}` : ""}`}>
+                            title={`${wk ? "주말 근무 · " : ""}출근 ${lg.clock_in}${lg.punch_in ? ` (지문 ${lg.punch_in})` : ""}${lg.early_ok ? " · 조기 출근 인정" : ""} · 퇴근 ${lg.clock_out} · 휴게 ${lg.sheet_break ?? 0}분${lg.memo ? ` · ${lg.memo}` : ""}`}>
                             <span>{lg.clock_in}</span><span>{lg.clock_out}</span><b>{hmm(lg.paid_min)}</b>
                           </button>
                         ) : off ? (

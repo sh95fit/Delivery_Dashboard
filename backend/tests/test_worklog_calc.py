@@ -89,3 +89,16 @@ def test_workdays_default_mon_fri():
 def test_month_summary_weekend():
     s = month_summary([L(2, time(12)), L(3, time(12))], [R])      # 10/2 금, 10/3 토
     assert (s["days"], s["weekend_days"], s["weekend_min"]) == (2, 1, 300)
+
+
+def test_check_log_early_ok():
+    v = check_log(time(6, 30), time(12, 30), None, R, day=D, today=T, early_ok=True)
+    assert (v["clock_in"], v["early_ok"]) == (time(6, 30), True)
+    v = check_log(time(6, 30), time(12, 30), None, R, day=D, today=T)               # 기본 = 지정 시각
+    assert (v["clock_in"], v["early_ok"]) == (time(7), False)
+    v = check_log(time(7, 10), time(12, 30), None, R, day=D, today=T, early_ok=True)   # 늦은 출근 = 체크 무시
+    assert (v["clock_in"], v["early_ok"]) == (time(7, 10), False)
+    v = check_log(None, time(12, 30), None, R, day=D, today=T, early_ok=True)         # 지문 없음 = 체크 무시
+    assert (v["clock_in"], v["early_ok"]) == (time(7), False)
+    v = check_log(time(5, 50), time(12, 30), None, R, day=D, today=T, early_ok=True)
+    assert any("이른 출근" in w for w in v["warns"])

@@ -69,7 +69,7 @@ def log_out(lg: dict, rate: dict | None) -> dict:
     return {"id": lg["id"], "work_date": _iso(lg["work_date"]), "punch_in": _hm(lg.get("punch_in")),
             "clock_in": _hm(lg["clock_in"]), "clock_out": _hm(lg["clock_out"]),
             "break_min": lg.get("break_min"), "manager_id": lg.get("manager_id"),
-            "memo": lg.get("memo"), "source": lg.get("source"),
+            "memo": lg.get("memo"), "source": lg.get("source"), "early_ok": bool(lg.get("early_ok")),
             "paid_min": d["paid"] if d else None, "ot_min": d["ot"] if d else None,
             "ot_pay": d["ot_pay"] if d else None, "sheet_break": d["break"] if d else None,
             "no_contract": d is None}
@@ -174,24 +174,26 @@ def _write(conn, wid: int, d: date, it: dict, rs: list[dict], email: str, t: dat
                     {"w": wid, "d": d}).fetchone():
         raise ValueError("휴무로 지정된 날입니다 (월 표 한 달 입력에서 휴무를 해제한 뒤 입력하세요)")    
     v = check_log(it.get("punch_in"), it.get("clock_out"), it.get("break_min"),
-                  effective_on(rs, d, "effective_from"), day=d, today=t)
+                  effective_on(rs, d, "effective_from"), day=d, today=t, early_ok=bool(it.get("early_ok")))
     mid, memo = it.get("manager_id"), it.get("memo")
     old = conn.execute(text("""
-        SELECT id, punch_in, clock_in, clock_out, break_min, manager_id, memo FROM work_logs
+        SELECT id, punch_in, clock_in, clock_out, break_min, manager_id, memo, early_ok FROM work_logs
         WHERE worker_id = :w AND work_date = :d AND deleted_at IS NULL
     """), {"w": wid, "d": d}).mappings().fetchone()
     if old and (old["punch_in"], old["clock_in"], old["clock_out"], old["break_min"], old["manager_id"],
-                old["memo"]) == (v["punch_in"], v["clock_in"], v["clock_out"], v["break_min"], mid, memo):
+                old["memo"], bool(old["early_ok"])) == (v["punch_in"], v["clock_in"], v["clock_out"],
+                                                         v["break_min"], mid, memo, v["early_ok"]):
         return False, v["warns"]
     if old:
         conn.execute(text("UPDATE work_logs SET deleted_at = NOW(), deleted_by = :e WHERE id = :i"),
                      {"i": old["id"], "e": email})
     conn.execute(text("""
         INSERT INTO work_logs
-            (worker_id, work_date, punch_in, clock_in, clock_out, break_min, manager_id, source, memo, created_by)
-        VALUES (:w, :d, :p, :i, :o, :b, :m, 'manual', :memo, :e)
+            (worker_id, work_date, punch_in, clock_in, clock_out, break_min, manager_id, source, memo, early_ok,
+             created_by)
+        VALUES (:w, :d, :p, :i, :o, :b, :m, 'manual', :memo, :eo, :e)
     """), {"w": wid, "d": d, "p": v["punch_in"], "i": v["clock_in"], "o": v["clock_out"],
-           "b": v["break_min"], "m": mid, "memo": memo, "e": email})
+           "b": v["break_min"], "m": mid, "memo": memo, "eo": v["early_ok"], "e": email})
     return True, v["warns"]
 
 
@@ -426,6 +428,9 @@ def close_check(month: date) -> dict:
         long = [lg["work_date"].day for lg in mine if _mins(lg["clock_out"]) - _mins(lg["clock_in"]) > 720]
         if long:
             add("warn", w, long[0], f"12시간 넘는 근무 {len(long)}일 ({_short_days(long)}) — 시각 오기 확인")
+        early = [lg["work_date"].day for lg in mine if lg.get("early_ok")]
+        if early:
+            add("info", w, early[0], f"조기 출근 인정 {len(early)}일 ({_short_days(early)}) — 사전 지시한 날이 맞는지 확인")            
         s = month_summary(mine, rs)
         if s["days"]:
             totals["people"] += 1

@@ -12,7 +12,7 @@ import { OFF_LABEL, deleteWorkLog, getWorkDay, hmm, saveWorkDay } from "@/api/wo
 import type { WorkDayItem, WorkDayView, WorkLogInput } from "@/api/worklogs";
 import { errText } from "@/lib/form";
 import { num, todayKst } from "@/lib/format";
-import { EMPTY_FORM, contractText, defaultBreak, defaultIn, isDefaultBreak, isDefaultIn, logToForm, preview, sameForm, toInput } from "./calc";
+import { EMPTY_FORM, contractText, defaultBreak, defaultIn, earlyAble, isDefaultBreak, isDefaultIn, logToForm, preview, sameForm, toInput } from "./calc";
 import type { LogForm } from "./calc";
 
 const WD = "일월화수목금토";
@@ -182,6 +182,12 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
                     onChange={(e) => set(it.worker_id, { punch: e.target.value })}
                     onBlur={() => { if (!f.punch) set(it.worker_id, { punch: defaultIn(c) }); }} />
                   {pv.cin != null && toMinSafe(f.punch) !== pv.cin && <div className="muted small">인정 {hmm(pv.cin)}</div>}
+                  {(earlyAble(c, f.punch) || f.early) && (
+                    <label className="muted small" title="그날 한시적으로 출근 시각을 앞당긴 경우만 체크 — 지문 시각 그대로 인정">
+                      <input type="checkbox" checked={f.early} disabled={dis}
+                        onChange={(e) => set(it.worker_id, { early: e.target.checked })} /> 조기 출근 인정
+                    </label>
+                  )}                  
                 </td>
                 <td>
                   <input type="time" className="input input-sm wl-time" value={f.out} disabled={dis}

@@ -1,6 +1,7 @@
 """S2-P4a-1 근무 기록 검증·계산 순수 함수 (DB 없음 → 단위 테스트 대상).
 
-- 출근: 지문 시각(punch_in) → 인정 출근(clock_in). 비우면 지정 출근
+- 출근: 지문 시각(punch_in) → 인정 출근(clock_in). 비우면 지정 출근. 지정보다 이르면 지정 시각
+  (조기 출근 인정 early_ok = 그날만 지문 시각 그대로, 한시적 출근 시각 조정)
 - 휴게: 입력 = 실제 휴게 시간 (비우면 계약 휴게). 계약이 무급이면 합계에서 빼고 유급이면 빼지 않음 (근무표 '휴게' 칸 = 뺀 분)
   → 시스템 유급 분 = 근무표 합계(퇴근 − 출근 − 휴게)
 - 금액: 근무표 지급(초과수당 제외) / 예상 총액(초과 기준 있을 때만) = worker_calc.pay_summary
@@ -79,7 +80,7 @@ def sheet_break(log_break: int | None, rate: dict) -> int:
 
 
 def check_log(punch_in: time | None, clock_out: time | None, break_min: int | None, rate: dict | None,
-              *, day: date, today: date) -> dict:
+              *, day: date, today: date, early_ok: bool = False) -> dict:
     """입력 검증 → 저장할 값 + 경고. 저장을 막는 사유는 ValueError (메시지 그대로 화면 표시)."""
     if day > today:
         raise ValueError("미래 날짜는 입력할 수 없습니다")
@@ -88,7 +89,8 @@ def check_log(punch_in: time | None, clock_out: time | None, break_min: int | No
     if clock_out is None:
         raise ValueError("퇴근 시각을 입력하세요")
     ws, we = rate.get("work_start"), rate.get("work_end")
-    cin = recognized_in(punch_in or ws, ws)
+    early = bool(early_ok and punch_in is not None and ws is not None and _m(punch_in) < _m(ws))
+    cin = punch_in if early else recognized_in(punch_in or ws, ws)
     span = _m(clock_out) - _m(cin)
     if span <= 0:
         raise ValueError("퇴근은 출근보다 늦어야 합니다 (자정 넘김 미지원)")
@@ -102,7 +104,10 @@ def check_log(punch_in: time | None, clock_out: time | None, break_min: int | No
         warns.append(f"지정 퇴근 {we.strftime('%H') + '시 ' + we.strftime('%M') + '분'}보다 2시간 이상 늦음")
     if punch_in is not None and ws is not None and _m(punch_in) > _m(ws) + 60:
         warns.append("지정 출근보다 1시간 이상 늦음")
-    return {"punch_in": punch_in, "clock_in": cin, "clock_out": clock_out, "break_min": break_min, "warns": warns}
+    if early and _m(ws) - _m(punch_in) > 60:
+        warns.append("지정 출근보다 1시간 넘게 이른 출근을 인정 — 시각 확인")
+    return {"punch_in": punch_in, "clock_in": cin, "clock_out": clock_out, "break_min": break_min,
+            "early_ok": early, "warns": warns}
 
 
 def day_result(log: dict, rate: dict) -> dict:
