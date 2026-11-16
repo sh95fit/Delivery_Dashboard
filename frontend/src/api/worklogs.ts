@@ -28,6 +28,7 @@ export interface WorkDayView { date: string; closed: boolean; future: boolean; i
 export interface PaySet { supply: number; vat: number; total: number }
 export interface WorkMonthPerson {
   worker_id: number; name: string; income_type: IncomeType; active: boolean;
+  start_date: string | null; end_date: string | null;   // [S2-P4d-2b] 근무 대상 기간 (서버 month_view)
   sheet: "labor" | "business" | null; contract: WorkContract | null; contracts: ContractSpan[]; accounts: AccountSpan[];
   days: Record<string, WorkLog>; offs: Record<string, WorkOff>; missing_days: number[];
   summary: { days: number; nocontract: number; paid_min: number; ot_min: number; base: number; ot_allow: number; weekend_days: number; weekend_min: number };
@@ -95,6 +96,10 @@ export const reopenMonth = (month: string, reason: string) =>
 /** 근무 요일 판정 (서버 is_workday와 같은 규칙): 월=1 … 일=64 */
 export const dayBit = (iso: string) => 1 << ((new Date(`${iso}T00:00:00Z`).getUTCDay() + 6) % 7);
 export const isWorkday = (c: WorkContract | null, iso: string) => !!c && (c.work_days & dayBit(iso)) !== 0;
+
+/** [S2-P4d-2b] 근무 대상 기간 밖이면 사유 (서버 employed와 같은 규칙: 입사일·퇴사일 당일은 포함) */
+export const termOut = (start: string | null, end: string | null, iso: string): "입사 전" | "퇴사 뒤" | null =>
+  start && iso < start ? "입사 전" : end && iso > end ? "퇴사 뒤" : null;
 
 /** 시작일 순 이력에서 d 날짜에 적용되는 항목 */
 export function spanOn<T extends { from: string }>(spans: T[], d: string): T | null {

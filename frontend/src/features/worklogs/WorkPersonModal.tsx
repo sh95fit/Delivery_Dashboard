@@ -5,7 +5,7 @@ import Chip from "@/components/ui/Chip";
 import ErrorBox from "@/components/ui/ErrorBox";
 import type { ManagerRow } from "@/api/masters";
 import { INCOME_LABEL } from "@/api/workers";
-import { OFF_LABEL, OFF_REASONS, hmm, isWorkday, saveWorkPerson, spanOn, toMin } from "@/api/worklogs";
+import { OFF_LABEL, OFF_REASONS, hmm, isWorkday, saveWorkPerson, spanOn, termOut, toMin } from "@/api/worklogs";
 import type { OffReason, WorkLogDateInput, WorkMonthPerson, WorkOffInput } from "@/api/worklogs";
 import { errText } from "@/lib/form";
 import { num, todayKst } from "@/lib/format";
@@ -58,7 +58,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
       weekend: wd === 0 || wd === 6, work: isWorkday(c, iso), miss: !dirty && missing.has(d),
       del: dirty && !!log && f.out === "",          // 근무 삭제 (휴무로 전환 포함)
       offDel: dirty && !!off && !isOff,             // 휴무 해제
-      future: iso > today, pv: preview(c, f),
+      future: iso > today, pv: preview(c, f), out: termOut(person.start_date, person.end_date, iso),
     };
   }), [forms, init, person, lastDay, month, today, missing]);
 
@@ -118,7 +118,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
   }
 
   function fillWorkdays() {
-    const targets = rows.filter((r) => !r.log && !r.isOff && !r.future && r.c?.work_end && r.work && r.f.out === "");
+    const targets = rows.filter((r) => !r.out && !r.log && !r.isOff && !r.future && r.c?.work_end && r.work && r.f.out === "");
     if (targets.length === 0) { alert("채울 빈 근무일이 없습니다."); return; }
     if (!confirm(`빈 근무일(계약 근무 요일) ${targets.length}일에 지정 퇴근 시각을 채웁니다.\n쉰 날은 근무/휴무 칸에서 휴무로 바꾸고, 실제와 다른 날만 고치세요.`)) return;
     setForms((s) => {
@@ -166,7 +166,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
     if (r.dirty && !r.log && r.f.out === "") return <Chip tone="danger">퇴근 필요</Chip>;
     if (r.dirty) return <Chip tone="caution">{r.log ? "수정 · 저장 전" : "새 입력 · 저장 전"}</Chip>;
     if (r.log) return <Chip tone="ok">저장됨</Chip>;
-    if (r.future) return <span className="muted small">미래</span>;
+    if (r.out) return <span className="muted small">{r.out}</span>;
     if (r.miss) return <Chip tone="caution">미입력</Chip>;
     if (r.c && !r.work) return <span className="muted small">쉬는 요일</span>;
     return null;
@@ -226,7 +226,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
           </thead>
           <tbody>
             {rows.map((r) => {
-              const dis = locked || r.future || !r.c || r.isOff;
+              const dis = locked || r.future || !r.c || r.isOff || r.out === "퇴사 뒤";
               const memoDis = locked || (!r.isOff && (r.future || !r.c));
               const cls = [r.wd === 0 ? "wp-sun" : r.wd === 6 ? "wp-sat" : "", r.d === focusDay ? "wp-focus" : "",
                 r.dirty ? "wl-dirty" : "", r.future ? "off" : "", r.isOff ? "wp-off" : "", r.miss ? "wp-miss" : ""]
@@ -235,7 +235,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
                 <tr key={r.d} ref={(el) => { rowRefs.current[r.d] = el; }} className={cls || undefined}>
                   <td>{r.d}일 ({WD[r.wd]}){r.weekend && !r.isOff && r.f.out !== "" && <> <Chip>주말</Chip></>}</td>
                   <td>
-                    <select className="input input-sm wl-sel" value={r.f.off} disabled={locked}
+                    <select className="input input-sm wl-sel" value={r.f.off} disabled={locked || (r.out === "퇴사 뒤" && !r.off)}
                       onChange={(e) => setOff(r.d, e.target.value)}>
                       <option value="">근무</option>
                       {OFF_REASONS.map(([k, l]) => <option key={k} value={k}>휴무 · {l}</option>)}

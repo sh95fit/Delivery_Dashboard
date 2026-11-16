@@ -4,7 +4,7 @@ import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import ErrorBox from "@/components/ui/ErrorBox";
 import { INCOME_LABEL } from "@/api/workers";
-import { OFF_LABEL, OFF_REASONS, isWorkday, saveWorkOffs, spanOn } from "@/api/worklogs";
+import { OFF_LABEL, OFF_REASONS, isWorkday, saveWorkOffs, spanOn, termOut } from "@/api/worklogs";
 import type { OffReason, WorkMonthPerson } from "@/api/worklogs";
 import { errText } from "@/lib/form";
 import { num } from "@/lib/format";
@@ -31,13 +31,14 @@ export default function BulkOffModal({ month, lastDay, day: firstDay, people, cl
   const iso = isoOf(day);
 
   const rows = useMemo(() => people
-    .filter((p) => p.active || p.offs[String(day)])
+    .filter((p) => !termOut(p.start_date, p.end_date, iso) || p.offs[String(day)])
     .map((p) => {
       const c = spanOn(p.contracts, iso)?.contract ?? null;
       const log = p.days[String(day)] ?? null;
       const off = p.offs[String(day)] ?? null;
-      const why = mode === "set" ? (log ? "근무 기록 있음" : !c ? "계약 없음" : null) : (!off ? "휴무 아님" : null);
-      return { p, c, log, off, work: isWorkday(c, iso), why };
+      const out = termOut(p.start_date, p.end_date, iso);
+      const why = mode === "set" ? (out ?? (log ? "근무 기록 있음" : !c ? "계약 없음" : null)) : (!off ? "휴무 아님" : null);
+      return { p, c, log, off, out, work: isWorkday(c, iso), why };
     }), [people, day, iso, mode]);
 
   // 기본 선택: 지정 = 그날 근무 요일이고 휴무 없는 사람 / 해제 = 휴무 지정된 사람 전체
@@ -64,7 +65,7 @@ export default function BulkOffModal({ month, lastDay, day: firstDay, people, cl
         mode === "set" ? reason : null, mode === "set" ? memo.trim() || null : null);
       const parts = [mode === "set" ? `휴무 지정 ${num(r.saved)}명` : `휴무 해제 ${num(r.released)}명`];
       if (r.unchanged) parts.push(`기존과 같아 건너뜀 ${num(r.unchanged)}명`);
-      if (r.skipped.length) parts.push(`근무 기록이 있어 제외: ${r.skipped.join(", ")}`);
+      if (r.skipped.length) parts.push(`제외: ${r.skipped.join(", ")}`);
       onSaved(`${Number(month.slice(5))}/${day}: ${parts.join(" · ")}`);
     } catch (e) {
       setError(errText(e));
@@ -127,6 +128,7 @@ export default function BulkOffModal({ month, lastDay, day: firstDay, people, cl
                 <td>
                   {r.log ? <Chip tone="ok">근무 기록 있음</Chip>
                     : r.off ? <Chip>휴무 · {OFF_LABEL[r.off.reason]}{r.off.memo ? ` · ${r.off.memo}` : ""}</Chip>
+                    : r.out ? <span className="muted small">{r.out}</span>                    
                     : !r.c ? <Chip tone="danger">계약 없음</Chip>
                     : <span className="muted small">{r.work ? "근무 요일" : "쉬는 요일"}</span>}
                 </td>

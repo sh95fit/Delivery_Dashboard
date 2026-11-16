@@ -164,7 +164,7 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
       {loading ? (
         <Spinner />
       ) : rows.length === 0 ? (
-        <div className="muted small">이 날짜에 근무 대상(활성 시급 계약)이 없습니다.</div>
+        <div className="muted small">이 날짜에 근무 대상(입사일~퇴사일 안 · 시급 계약)이 없습니다.</div>
       ) : (
         <DataTable columns={["이름", "지정", "출근(지문)", "퇴근(지문)", "휴게(분)", "그날 계정", "메모",
           { label: "유급", num: true }, "상태", ""]}>
