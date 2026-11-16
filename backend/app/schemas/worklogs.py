@@ -58,6 +58,18 @@ class WorkOffBulkIn(BaseModel):
     memo: str | None = Field(default=None, max_length=200)
 
 
+class WorkOffPair(BaseModel):
+    work_date: date
+    worker_id: int
+
+
+class WorkOffMultiIn(BaseModel):
+    """[S2-P4d-3] 여러 날짜 × 여러 사람 휴무 지정(reason) / 해제(reason=None). 화면이 적용할 (날짜, 인력) 쌍을 골라 보냄"""
+    items: list[WorkOffPair] = Field(min_length=1, max_length=3000)
+    reason: OffReason | None = None
+    memo: str | None = Field(default=None, max_length=200)
+
+
 class MonthCloseIn(BaseModel):
     month: date                                             # 그 달 1일
     memo: str | None = Field(default=None, max_length=200)

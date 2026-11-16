@@ -72,7 +72,12 @@ export interface BulkOffResult { ok: boolean; saved: number; released: number; u
 
 /** 하루 × 여러 사람 휴무 지정(reason) / 해제(reason=null) */
 export const saveWorkOffs = (d: string, worker_ids: number[], reason: OffReason | null, memo: string | null) =>
-  put<BulkOffResult>(`/api/worklogs/offs/${d}`, { worker_ids, reason, memo });    
+  put<BulkOffResult>(`/api/worklogs/offs/${d}`, { worker_ids, reason, memo });  
+
+/** [S2-P4d-3] 여러 날짜 × 여러 사람 휴무 지정(reason) / 해제(reason=null) — 적용할 (날짜, 인력) 쌍만 보냄 */
+export type OffPair = { work_date: string; worker_id: number };
+export const saveWorkOffsMulti = (items: OffPair[], reason: OffReason | null, memo: string | null) =>
+  put<BulkOffResult>("/api/worklogs/offs", { items, reason, memo });  
 
 /* ---------- S2-P4b-2 월 마감 ---------- */
 export interface CloseIssue {

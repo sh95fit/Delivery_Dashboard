@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from app.auth import get_current_email
 from app.deps import guard, memo, require_admin
-from app.schemas.worklogs import MonthCloseIn, MonthReopenIn, WorkDayIn, WorkOffBulkIn, WorkPersonIn
+from app.schemas.worklogs import MonthCloseIn, MonthReopenIn, WorkDayIn, WorkOffBulkIn, WorkOffMultiIn, WorkPersonIn
 from app.services import worklog_service as svc
 
 router = APIRouter(prefix="/worklogs", tags=["worklogs"])
@@ -47,6 +47,13 @@ def save_person(wid: int, body: WorkPersonIn, email: str = Depends(require_admin
 def save_offs(d: date, body: WorkOffBulkIn, email: str = Depends(require_admin)):
     return guard(svc.save_offs_bulk, d, body.worker_ids, body.reason, memo(body.memo), email,
                  fail="휴무 일괄 저장 실패")
+
+
+@router.put("/offs")
+def save_offs_multi(body: WorkOffMultiIn, email: str = Depends(require_admin)):
+    """[S2-P4d-3] 여러 날짜 × 여러 사람 휴무 일괄"""
+    pairs = [(i.work_date, i.worker_id) for i in body.items]
+    return guard(svc.save_offs_multi, pairs, body.reason, memo(body.memo), email, fail="휴무 일괄 저장 실패")
 
 
 @router.get("/close/check")

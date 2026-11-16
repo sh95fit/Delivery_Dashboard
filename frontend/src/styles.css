@@ -634,3 +634,12 @@ tr.wl-dirty td { background: #fffbeb; }
 .wl-early.on, .wl-early-in.on { color: var(--caution); font-weight: 600; }
 .wp-tbl col.wp-c-in.wp-c-in-wide { width: 250px; }
 .wl-cin-early { color: var(--caution); font-weight: 700; }
+
+/* [S2-P4d-3] 휴무 일괄: 여러 날짜 고르기 */
+.bo-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; max-width: 360px; margin: 4px 0 8px; }
+.bo-cal-h { text-align: center; font-size: 12px; color: var(--muted, #6b7280); }
+.bo-day { height: 32px; border: 1px solid var(--border, #e5e7eb); border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; }
+.bo-day.sun { color: var(--danger, #dc2626); }
+.bo-day.sat { color: var(--brand, #2563eb); }
+.bo-day.on { background: var(--brand, #2563eb); border-color: var(--brand, #2563eb); color: #fff; }
+.bo-day:disabled { opacity: .5; cursor: default; }

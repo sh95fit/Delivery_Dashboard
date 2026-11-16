@@ -94,7 +94,7 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
         회색 <b>예상</b> 칸은 초과 기준이 있는 사람만 참고로 표시하며 엑셀에는 들어가지 않습니다.
         {" "}<b>휴</b> = 휴무(사유는 관리용, 엑셀 제외), <b>!</b> = 어제까지 근무 요일인데 근무·휴무가 없는 날, 파란 테두리 = 주말 근무,
         {" "}<b className="wl-cin-early">주황 출근 시각</b> = 조기 출근 인정.
-        {" "}<b>날짜 머리글</b>을 누르면 그날 여러 명의 휴무를 한 번에 지정·해제합니다 (공휴일·공장 휴무).
+        {" "}<b>날짜 머리글</b>을 누르면 그날부터 여러 날짜 × 여러 명의 휴무를 한 번에 지정·해제합니다 (공휴일·연휴·공장 휴무).
       </>}
     >
       {error && <ErrorBox message={error} />}
