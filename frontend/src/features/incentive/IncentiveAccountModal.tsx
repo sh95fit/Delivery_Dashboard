@@ -1,23 +1,27 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
 import Chip from "@/components/ui/Chip";
 import ErrorBox from "@/components/ui/ErrorBox";
-import { saveIncAccountsMonth } from "@/api/incentive";
-import type { IncMonthPerson } from "@/api/incentive";
+import { getIncDay, saveIncAccountsMonth } from "@/api/incentive";
+import type { IncDayView, IncMonthPerson } from "@/api/incentive";
 import { errText } from "@/lib/form";
 import { num, todayKst } from "@/lib/format";
+import IncentiveDetailModal from "./IncentiveDetailModal";
+import IncentiveOwnerModal from "./IncentiveOwnerModal";
 import { STATUS, wd } from "./util";
 
 type Props = {
   month: string; lastDay: number; person: IncMonthPerson; closed: boolean; isAdmin: boolean;
-  onClose: () => void; onSaved: (msg: string) => void; onPick: (d: string) => void;
+  focusDay: number | null;          // 월 보드에서 누른 날짜 (이름으로 열면 null)
+  onClose: () => void; onChanged: () => void;   // onChanged: 월 보드 다시 불러오기 (창은 유지)
 };
 const str = (v: number | null) => (v == null ? "" : String(v));
 const MAX = 500;   // 서버 AccountDayItem le=500
 
-/** [S2-P4c-3] 한 계정의 한 달 고객사 수 입력 (근무표 월 표 한 달 입력과 같은 방식) */
-export default function IncentiveAccountModal({ month, lastDay, person, closed, isAdmin, onClose, onSaved, onPick }: Props) {
+/** [S2-P4c-3] 한 계정의 한 달 고객사 수 입력 (근무표 월 표 한 달 입력과 같은 방식)
+ *  [S2-P4c-3b] [상세]로 제외·조정·미지급·특수 수당·담당 변경까지 이 창에서 처리 */
+export default function IncentiveAccountModal({ month, lastDay, person, closed, isAdmin, focusDay, onClose, onChanged }: Props) {
   const today = todayKst();
   const iso = (d: number) => `${month}-${String(d).padStart(2, "0")}`;
   const days = useMemo(() => Array.from({ length: lastDay }, (_, i) => i + 1)
@@ -26,7 +30,12 @@ export default function IncentiveAccountModal({ month, lastDay, person, closed, 
     Object.fromEntries(days.map((d) => [d, str(person.days[String(d)].accounts)])));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [note, setNote] = useState("");
+  const [detail, setDetail] = useState<IncDayView | null>(null);
+  const [opening, setOpening] = useState<number | null>(null);
+  const [ownerOpen, setOwnerOpen] = useState(false);
   const refs = useRef<Record<number, HTMLInputElement | null>>({});
+  const rowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
 
   const rows = days.map((d) => {
     const c = person.days[String(d)];
@@ -39,6 +48,17 @@ export default function IncentiveAccountModal({ month, lastDay, person, closed, 
   const dirty = rows.filter((r) => r.dirty);
   const bad = dirty.filter((r) => r.bad);
   const empty = rows.filter((r) => !r.lock && r.f === "");
+
+  /* 월 보드에서 날짜 칸으로 열었으면 그 날짜 행으로 이동 */
+  useEffect(() => {
+    if (focusDay == null) return;
+    const t = setTimeout(() => {
+      rowRefs.current[focusDay]?.scrollIntoView({ block: "center" });
+      const el = refs.current[focusDay];
+      if (el && !el.disabled) { el.focus(); el.select(); }
+    }, 0);
+    return () => clearTimeout(t);
+  }, []);
 
   function next(i: number) {
     for (let k = i + 1; k < rows.length; k++) {
@@ -66,11 +86,13 @@ export default function IncentiveAccountModal({ month, lastDay, person, closed, 
       "지우면 그날 인센티브가 '고객사 수 입력 필요'로 바뀝니다. 계속할까요?")) return;
     setBusy(true);
     setError("");
+    setNote("");
     try {
       const r = await saveIncAccountsMonth(person.manager_id,
         dirty.map((x) => ({ work_date: iso(x.d), value: x.f === "" ? null : Number(x.f) })));
-      onSaved(`${person.manager_name}: 고객사 수 저장 ${num(r.saved)}일` +
+      setNote(`고객사 수 저장 ${num(r.saved)}일` +
         `${r.cleared ? ` · 지움 ${num(r.cleared)}일` : ""}${r.unchanged ? ` · 기존과 같아 건너뜀 ${num(r.unchanged)}일` : ""}`);
+      onChanged();
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -78,10 +100,46 @@ export default function IncentiveAccountModal({ month, lastDay, person, closed, 
     }
   }
 
+  /* ---- [S2-P4c-3b] 상세 (일자별 입력과 같은 상세 창을 이 창 위에 띄움) ---- */
+  async function fetchDay(d: string): Promise<IncDayView | null> {
+    const v = await getIncDay(d);
+    if (!v.items.some((x) => x.manager_id === person.manager_id)) {
+      setError(`${d}: 이 계정의 그날 정보를 찾지 못했습니다 (새로고침하세요)`);
+      return null;
+    }
+    return v;
+  }
+  async function openDetail(day: number) {
+    setOpening(day);
+    setError("");
+    try {
+      const v = await fetchDay(iso(day));
+      if (v) setDetail(v);
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setOpening(null);
+    }
+  }
+  /** 상세에서 저장하면: 상세 다시 불러오기 + 월 보드 다시 불러오기 (입력 중인 고객사 수는 유지) */
+  async function detailChanged() {
+    if (detail) {
+      try {
+        setDetail(await fetchDay(detail.date));
+      } catch (e) {
+        setError(errText(e));
+      }
+    }
+    onChanged();
+  }
+  const dRow = detail?.items.find((x) => x.manager_id === person.manager_id) ?? null;
+  const dLocked = !isAdmin || !detail || detail.closed || detail.future;
+  const ownerLocked = !isAdmin || !detail || detail.closed;
+
   const pending = rows.filter((r) => !r.future && r.c.stops > 0 && r.c.accounts == null).length;
   return (
     <Modal open size="lg" onClose={() => leave(onClose)}
-      title={<>{person.manager_name} · {Number(month.slice(5))}월 고객사 수</>}
+      title={<>{person.manager_name} · {Number(month.slice(5))}월 인센티브</>}
       footer={<>
         <span className="muted small grow">배송일 {num(rows.filter((r) => r.c.stops > 0).length)}일 · 입력 필요 {num(pending)}일 · 변경 {num(dirty.length)}일</span>
         <Button onClick={() => leave(onClose)}>닫기</Button>
@@ -93,6 +151,7 @@ export default function IncentiveAccountModal({ month, lastDay, person, closed, 
       </>}
     >
       {error && <ErrorBox message={error} />}
+      {note && <div className="notice">✓ {note}</div>}
       {closed && <Chip tone="warn">마감된 달 · 수정 불가 (근무 기록 › 월 표 › 마감 관리에서 해제)</Chip>}
       {bad.length > 0 && <div className="wl-block">고객사 수는 0~{MAX} 숫자로 입력하세요: {bad.map((r) => `${r.d}일`).join(", ")}</div>}
       <div className="bo-tools">
@@ -103,7 +162,8 @@ export default function IncentiveAccountModal({ month, lastDay, person, closed, 
         )}
         <span className="muted small">
           고객사 수(수거 포함)를 입력하고 Enter로 다음 날로 넘어갑니다. 금액은 저장 후 다시 계산됩니다.
-          배송지 제외·조정·미지급·특수 수당·담당 변경은 [일자별]에서 처리합니다.
+          배송지 제외·제품 수 조정·미지급·특수 수당·담당 변경은 그 날짜의 [상세]에서 이 창을 벗어나지 않고 처리합니다
+          (상세 변경은 바로 저장되고, 입력 중인 고객사 수는 그대로 남습니다).
         </span>
       </div>
       <div className="ia-wrap">
@@ -117,35 +177,51 @@ export default function IncentiveAccountModal({ month, lastDay, person, closed, 
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
-              <tr key={r.d} className={r.c.stops === 0 || r.future ? "off" : undefined}>
-                <td>{r.d}일 ({wd(iso(r.d))})</td>
-                <td className="num">{num(r.c.stops)}</td>
-                <td className="num">{num(r.c.product_total)}</td>
-                <td className="num inc-ref">{num(r.c.order_accounts)}</td>
-                <td>
-                  {r.c.stops > 0 ? (
-                    <input className={`input input-sm inc-acc${r.bad ? " bad" : r.dirty ? " dirty" : ""}`} inputMode="numeric"
-                      value={r.f} placeholder={r.future ? "예정" : "입력"} disabled={r.lock}
-                      ref={(el) => { refs.current[r.d] = el; }}
-                      onChange={(e) => setForms((s) => ({ ...s, [r.d]: e.target.value.trim() }))}
-                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); next(i); } }} />
-                  ) : <span className="muted small">배송 없음</span>}
-                </td>
-                <td className="num">{r.c.payable == null ? "-" : num(r.c.payable)}</td>
-                <td className="num">{r.c.extras ? num(r.c.extras) : "-"}</td>
-                <td className="num"><b>{num(r.c.total)}</b></td>
-                <td>
-                  {r.future ? <Chip tone="neutral">예정</Chip> : <Chip tone={STATUS[r.c.status][1]}>{STATUS[r.c.status][0]}</Chip>}
-                  {r.dirty && <Chip tone="neutral">저장 전</Chip>}
-                  {r.c.warns.length > 0 && <span className="inc-warn" title={r.c.warns.join("\n")}>⚠{r.c.warns.length}</span>}
-                </td>
-                <td><Button size="sm" onClick={() => leave(() => onPick(iso(r.d)))}>일자별</Button></td>
-              </tr>
-            ))}
+            {rows.map((r, i) => {
+              const cls = [r.c.stops === 0 || r.future ? "off" : "", r.d === focusDay ? "ia-focus" : ""].filter(Boolean).join(" ");
+              return (
+                <tr key={r.d} className={cls || undefined} ref={(el) => { rowRefs.current[r.d] = el; }}>
+                  <td>{r.d}일 ({wd(iso(r.d))})</td>
+                  <td className="num">{num(r.c.stops)}</td>
+                  <td className="num">{num(r.c.product_total)}</td>
+                  <td className="num inc-ref">{num(r.c.order_accounts)}</td>
+                  <td>
+                    {r.c.stops > 0 ? (
+                      <input className={`input input-sm inc-acc${r.bad ? " bad" : r.dirty ? " dirty" : ""}`} inputMode="numeric"
+                        value={r.f} placeholder={r.future ? "예정" : "입력"} disabled={r.lock}
+                        ref={(el) => { refs.current[r.d] = el; }}
+                        onChange={(e) => setForms((s) => ({ ...s, [r.d]: e.target.value.trim() }))}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); next(i); } }} />
+                    ) : <span className="muted small">배송 없음</span>}
+                  </td>
+                  <td className="num">{r.c.payable == null ? "-" : num(r.c.payable)}</td>
+                  <td className="num">{r.c.extras ? num(r.c.extras) : "-"}</td>
+                  <td className="num"><b>{num(r.c.total)}</b></td>
+                  <td>
+                    {r.future ? <Chip tone="neutral">예정</Chip> : <Chip tone={STATUS[r.c.status][1]}>{STATUS[r.c.status][0]}</Chip>}
+                    {r.dirty && <Chip tone="neutral">저장 전</Chip>}
+                    {r.c.warns.length > 0 && <span className="inc-warn" title={r.c.warns.join("\n")}>⚠{r.c.warns.length}</span>}
+                  </td>
+                  <td>
+                    <Button size="sm" disabled={opening != null} onClick={() => openDetail(r.d)}>
+                      {opening === r.d ? "여는 중…" : "상세"}
+                    </Button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
+      {detail && dRow && (
+        <IncentiveDetailModal row={dRow} view={detail} locked={dLocked}
+          onClose={() => { setDetail(null); setOwnerOpen(false); }} onChanged={detailChanged}
+          onOwner={ownerLocked ? undefined : () => setOwnerOpen(true)} />
+      )}
+      {ownerOpen && detail && dRow && (
+        <IncentiveOwnerModal row={dRow} view={detail}
+          onClose={() => setOwnerOpen(false)} onSaved={() => { void detailChanged(); }} />
+      )}
     </Modal>
   );
 }

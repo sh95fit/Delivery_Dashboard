@@ -19,7 +19,13 @@ export default function Modal({ open, title, onClose, children, footer, size = "
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeRef.current(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // [S2-P4c-3b] 창이 겹치면 맨 위(마지막으로 열린) 창만 Esc로 닫음
+      const backs = document.querySelectorAll(".modal-back");
+      if (backs[backs.length - 1] !== boxRef.current?.parentElement) return;
+      closeRef.current();
+    };
     document.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";

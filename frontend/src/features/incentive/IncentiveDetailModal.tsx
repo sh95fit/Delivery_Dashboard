@@ -9,7 +9,10 @@ import { errText } from "@/lib/form";
 import { num } from "@/lib/format";
 import { STATUS, parseAmt, signed, wonOr } from "./util";
 
-type Props = { row: IncDayRow; view: IncDayView; locked: boolean; onClose: () => void; onChanged: () => Promise<void> };
+type Props = {
+  row: IncDayRow; view: IncDayView; locked: boolean; onClose: () => void; onChanged: () => Promise<void>;
+  onOwner?: () => void;   // [S2-P4c-3b] 계정별 한 달 입력에서 열 때만: 담당 변경 버튼
+};
 type ExForm = { aid: number; reason: ExcludeReason | ""; memo: string };
 type AForm = { lineup: string; qty: string; reason: string };          // lineup "total" = 제품 총량
 type XForm = { item: string; unit: string; qty: string; memo: string };
@@ -34,7 +37,7 @@ function parseDelta(s: string): number | null {
   return n === 0 || Math.abs(n) > 2000 ? null : n;
 }
 
-export default function IncentiveDetailModal({ row, view, locked, onClose, onChanged }: Props) {
+export default function IncentiveDetailModal({ row, view, locked, onClose, onChanged, onOwner }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
@@ -166,6 +169,11 @@ export default function IncentiveDetailModal({ row, view, locked, onClose, onCha
       {msg && <div className="notice">{msg}</div>}
 
       <div className="inc-calc">
+        <div>
+          담당 = {row.owner.worker_id != null ? <b>{row.owner.name}</b>
+            : <Chip tone="warn" title={row.owner.why ?? ""}>미확인</Chip>}
+          {onOwner && <>{" "}<Button size="sm" onClick={onOwner}>담당 변경</Button></>}
+        </div>        
         <table className="tbl inc-mini inc-lu">
           <thead><tr><th>제품 수</th><th className="num">자동</th><th className="num">제외</th><th className="num">조정</th><th className="num">반영</th></tr></thead>
           <tbody>
@@ -196,7 +204,7 @@ export default function IncentiveDetailModal({ row, view, locked, onClose, onCha
         </div>
         <div>
           고객사 수 = {row.accounts == null
-            ? <><Chip tone="caution">입력 필요</Chip><span className="inc-ref"> 일자별 입력 표의 '고객사 수' 칸에 입력하세요</span></>
+            ? <><Chip tone="caution">입력 필요</Chip><span className="inc-ref"> '고객사 수' 칸에 입력하세요 (일자별 입력 표 또는 월 보드 계정별 입력)</span></>
             : <><b>{num(row.accounts)}</b> → {wonOr(row.account_incentive)}
                 {row.account_unit ? <span className="inc-ref"> (초과분 × {num(row.account_unit)}원)</span> : null}</>}
           <span className="inc-ref"> · 참고: 배송지 {num(row.stops)} · 주문 고객사 {num(row.order_accounts)}</span>

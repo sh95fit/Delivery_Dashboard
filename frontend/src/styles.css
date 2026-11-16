@@ -646,3 +646,6 @@ tr.wl-dirty td { background: #fffbeb; }
 
 /* [S2-P4c-3] 인센티브 계정별 한 달 입력 */
 .ia-wrap { max-height: 60vh; overflow: auto; }
+
+/* [S2-P4c-3b] 계정별 한 달 입력: 월 보드에서 누른 날짜 행 */
+.ia-focus td { background: #eff6ff; }
