@@ -1,7 +1,7 @@
 """S2-P4a-1 근무 기록 검증·계산 순수 함수 (DB 없음 → 단위 테스트 대상).
 
 - 출근: 지문 시각(punch_in) → 인정 출근(clock_in). 비우면 지정 출근
-- 휴게(근무표 '휴게' 칸 = 합계에서 빼는 분): 직접 입력값, 비우면 계약 무급 휴게 (유급이면 0)
+- 휴게: 입력 = 실제 휴게 시간 (비우면 계약 휴게). 계약이 무급이면 합계에서 빼고 유급이면 빼지 않음 (근무표 '휴게' 칸 = 뺀 분)
   → 시스템 유급 분 = 근무표 합계(퇴근 − 출근 − 휴게)
 - 금액: 근무표 지급(초과수당 제외) / 예상 총액(초과 기준 있을 때만) = worker_calc.pay_summary
 """
@@ -42,14 +42,40 @@ def is_workday(rate: dict | None, d: date) -> bool:
     wd = rate.get("work_days")
     return bool((DEFAULT_WORK_DAYS if wd is None else int(wd)) & day_bit(d))
 
+
+def work_term(w: dict) -> tuple[date | None, date | None] | None:
+    """근무 대상 기간 (입사일, 퇴사일) — 양 끝 포함, None 칸 = 제한 없음.
+    비활성인데 퇴사일이 없으면 None (예전 데이터: 기간을 몰라 미입력 검사 제외, 기록 있는 날만 표시)"""
+    if not w.get("active") and w.get("end_date") is None:
+        return None
+    return w.get("start_date"), w.get("end_date")
+
+
+def employed(d: date, term) -> bool:
+    """그날이 근무 대상 기간 안인지"""
+    if term is None:
+        return False
+    s, e = term
+    return (s is None or d >= s) and (e is None or d <= e)
+
+
+def in_term(a: date, b: date, term) -> bool:
+    """기간 a~b 중 하루라도 근무 대상 기간인지"""
+    if term is None:
+        return False
+    s, e = term
+    return (s is None or s <= b) and (e is None or e >= a)
+
+
 def _m(t: time | None) -> int | None:
     return None if t is None else t.hour * 60 + t.minute
 
 
 def sheet_break(log_break: int | None, rate: dict) -> int:
-    if log_break is not None:
-        return int(log_break)
-    return 0 if rate.get("break_paid") else int(rate.get("break_min") or 0)
+    """근무표 '휴게' 칸 = 유급시간에서 빼는 분.
+    휴게 시간 = 그날 입력값, 비우면 계약 휴게 시간. 계약이 유급 휴게면 빼지 않음 (0)"""
+    b = int(rate.get("break_min") or 0) if log_break is None else int(log_break)
+    return 0 if rate.get("break_paid") else b
 
 
 def check_log(punch_in: time | None, clock_out: time | None, break_min: int | None, rate: dict | None,
@@ -66,7 +92,8 @@ def check_log(punch_in: time | None, clock_out: time | None, break_min: int | No
     span = _m(clock_out) - _m(cin)
     if span <= 0:
         raise ValueError("퇴근은 출근보다 늦어야 합니다 (자정 넘김 미지원)")
-    if sheet_break(break_min, rate) >= span:
+    raw = int(rate.get("break_min") or 0) if break_min is None else int(break_min)
+    if raw >= span:
         raise ValueError("휴게시간이 근무시간보다 깁니다")
     warns: list[str] = []
     if span > 720:

@@ -18,11 +18,13 @@ from app.services.manager_service import _hm, _iso, today
 from app.services.worker_service import _managers
 from app.services.timesheet_export import SHEET_TITLE, build_timesheet, schedule_note, verify_timesheet
 from app.services.worker_calc import pay_total
-from app.services.worklog_calc import check_log, day_result, is_workday, month_summary, sheet_break
+from app.services.worklog_calc import (check_log, day_result, employed, in_term, is_workday, month_summary,
+                                       sheet_break, work_term)
 
 
 SQL_LOGS = "SELECT * FROM work_logs WHERE deleted_at IS NULL AND work_date BETWEEN :a AND :b"
-SQL_WORKERS = "SELECT id, name, income_type, active FROM workers WHERE deleted_at IS NULL ORDER BY name"
+SQL_WORKERS = ("SELECT id, name, income_type, active, start_date, end_date FROM workers "
+               "WHERE deleted_at IS NULL ORDER BY name")
 SQL_OFFS = "SELECT * FROM work_offs WHERE deleted_at IS NULL AND work_date BETWEEN :a AND :b"
 SHEET_OF = {"employee": "labor", "business": "business", "freelancer": "business"}   # 근로소득 / 사업소득 파일
 
@@ -94,16 +96,18 @@ def month_view(month: date) -> dict:
     for w in dash_db.rows(SQL_WORKERS):
         rs, mine, off = rates.get(w["id"], []), logs.get(w["id"], []), offs.get(w["id"], [])
         cands = _spans(rs, "effective_from", first, last)
-        if not mine and not off and not (w["active"] and any(_hourly(c) for c in cands)):
+        term = work_term(w)
+        if not mine and not off and not (in_term(first, last, term) and any(_hourly(c) for c in cands)):
             continue
         s = month_summary(mine, rs)
         done = {lg["work_date"] for lg in mine} | {o["work_date"] for o in off}
-        missing = [] if not w["active"] else [
+        missing = [
             d.day for d in (first + timedelta(days=i) for i in range((end - first).days + 1))
-            if d not in done and is_workday(effective_on(rs, d, "effective_from"), d)]
+            if d not in done and employed(d, term) and is_workday(effective_on(rs, d, "effective_from"), d)]
         people.append({
             "worker_id": w["id"], "name": w["name"], "income_type": w["income_type"], "active": bool(w["active"]),
             "sheet": SHEET_OF.get(w["income_type"]),
+            "start_date": _iso(w.get("start_date")), "end_date": _iso(w.get("end_date")),            
             "contract": contract_out(effective_on(rs, last, "effective_from")),
             # 월 표 팝업: 날짜마다 그날 계약·고정 계정을 고르기 위한 이력
             "contracts": [{"from": _iso(r["effective_from"]), "contract": contract_out(r)} for r in cands],
@@ -131,13 +135,14 @@ def day_view(d: date) -> dict:
     for w in dash_db.rows(SQL_WORKERS):
         r = effective_on(rates.get(w["id"], []), d, "effective_from")
         lg, off = logs.get(w["id"]), offs.get(w["id"])
-        if not lg and not off and not (w["active"] and _hourly(r)):
+        on = employed(d, work_term(w))
+        if not lg and not off and not (on and _hourly(r)):
             continue
         a = effective_on(accs.get(w["id"], []), d, "start_date")
         fixed = a["manager_id"] if a else None
         items.append({
             "worker_id": w["id"], "name": w["name"], "income_type": w["income_type"], "active": bool(w["active"]),
-            "contract": contract_out(r), "workday": is_workday(r, d),
+            "contract": contract_out(r), "workday": on and is_workday(r, d), "employed": on,
             "fixed_manager_id": fixed, "fixed_manager_name": (mgrs.get(fixed) or {}).get("name"),
             "log": log_out(lg, r) if lg else None,
             "off": off_out(off) if off else None,
@@ -162,6 +167,9 @@ def _rates(conn, wid: int) -> list[dict]:
 
 def _write(conn, wid: int, d: date, it: dict, rs: list[dict], email: str, t: date) -> tuple[bool, list[str]]:
     """한 사람·하루 저장 → (새로 썼는지, 경고). 값이 같으면 다시 쓰지 않음. 수정 = 기존 행 삭제 표시 + 새 행."""
+    end = conn.execute(text("SELECT end_date FROM workers WHERE id = :w"), {"w": wid}).scalar()
+    if end is not None and d > end:
+        raise ValueError(f"퇴사일({end}) 뒤 날짜는 입력할 수 없습니다 (퇴사일이 틀렸으면 인력 › 기본 정보에서 고치세요)")    
     if conn.execute(text("SELECT 1 FROM work_offs WHERE worker_id = :w AND work_date = :d AND deleted_at IS NULL"),
                     {"w": wid, "d": d}).fetchone():
         raise ValueError("휴무로 지정된 날입니다 (월 표 한 달 입력에서 휴무를 해제한 뒤 입력하세요)")    
@@ -219,6 +227,9 @@ def save_day(d: date, items: list[dict], email: str) -> dict:
 def _write_off(conn, wid: int, it: dict, email: str) -> bool:
     """휴무 지정·사유 수정 → 새로 썼는지. 같은 값이면 다시 쓰지 않음. 수정 = 기존 행 삭제 표시 + 새 행."""
     d = it["work_date"]
+    end = conn.execute(text("SELECT end_date FROM workers WHERE id = :w"), {"w": wid}).scalar()
+    if end is not None and d > end:
+        raise ValueError(f"퇴사일({end}) 뒤 날짜는 휴무로 지정할 수 없습니다")    
     if conn.execute(text("SELECT 1 FROM work_logs WHERE worker_id = :w AND work_date = :d AND deleted_at IS NULL"),
                     {"w": wid, "d": d}).fetchone():
         raise ValueError("근무 기록이 있는 날은 휴무로 지정할 수 없습니다 (퇴근을 지워 근무를 삭제한 뒤 지정)")
@@ -328,6 +339,10 @@ def save_offs_bulk(d: date, ids: list[int], reason: str | None, memo: str | None
                 else:
                     unchanged += 1
                 continue
+            st, en = conn.execute(text("SELECT start_date, end_date FROM workers WHERE id = :w"), {"w": wid}).fetchone()
+            if (st is not None and d < st) or (en is not None and d > en):
+                skipped.append(f"{name}(입사 전·퇴사 뒤)")
+                continue            
             if conn.execute(text("""SELECT 1 FROM work_logs
                 WHERE worker_id = :w AND work_date = :d AND deleted_at IS NULL"""), {"w": wid, "d": d}).fetchone():
                 skipped.append(name)
@@ -390,16 +405,20 @@ def close_check(month: date) -> dict:
     for w in dash_db.rows(SQL_WORKERS):
         rs, mine, off = rates.get(w["id"], []), logs.get(w["id"], []), offs.get(w["id"], [])
         cands = _spans(rs, "effective_from", first, last)
-        if not mine and not off and not (w["active"] and any(_hourly(c) for c in cands)):
+        term = work_term(w)
+        if not mine and not off and not (in_term(first, last, term) and any(_hourly(c) for c in cands)):
             continue
         done = {lg["work_date"] for lg in mine} | {o["work_date"] for o in off}
-        if w["active"]:
+        if term is not None:
             miss = [d.day for d in (first + timedelta(days=i) for i in range((end - first).days + 1))
-                    if d not in done and is_workday(effective_on(rs, d, "effective_from"), d)]
+                    if d not in done and employed(d, term) and is_workday(effective_on(rs, d, "effective_from"), d)]
             if miss:
                 add("error", w, miss[0], f"미입력 {len(miss)}일 ({_short_days(miss)}) — 근무 또는 휴무를 입력하세요")
+            out = [lg["work_date"].day for lg in mine if not employed(lg["work_date"], term)]
+            if out:
+                add("warn", w, out[0], f"입사일 전·퇴사일 뒤 근무 {len(out)}일 ({_short_days(out)}) — 특수 근무가 맞는지 확인")
         elif mine:
-            add("info", w, None, f"비활성 인력 — 미입력 검사 제외 (기록 {len(mine)}일은 근무표에 포함)")
+            add("info", w, None, f"퇴사일 없는 비활성 인력 — 미입력 검사 제외 (기록 {len(mine)}일은 근무표에 포함 · 퇴사일 입력 권장)")
         bad = [lg["work_date"].day for lg in mine
                if not _hourly(effective_on(rs, lg["work_date"], "effective_from"))]
         if bad:
@@ -512,7 +531,7 @@ def export_plan(month: date, start: date | None = None, end: date | None = None,
             continue
         pi = inc_people.get(w["id"], {})
         spans = [r for r in cands if _hourly(r)]
-        if not mine and not (spans and (w["active"] or want is not None)):
+        if not mine and not (spans and (in_term(a, b, work_term(w)) or want is not None)):
             if pi.get("incentive") or pi.get("extras"):
                 add("warn", sheet, name, "기간 안 근무 기록이 없는데 인센티브가 배정되어 빠집니다 (고정 계정·그날 계정 확인)")
             elif want is not None:

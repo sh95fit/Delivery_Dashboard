@@ -100,6 +100,7 @@ def list_workers() -> list[dict]:
         out.append({
             "id": wid, "name": w["name"], "income_type": w["income_type"], "active": bool(w["active"]),
             "memo": w.get("memo"), "legacy_manager_id": w.get("legacy_manager_id"),
+            "start_date": _iso(w.get("start_date")),            
             "end_date": _iso(w.get("end_date")), "last_pay_full": w.get("last_pay_full") is not False,
             "last_pay_amount": w.get("last_pay_amount"),
             "updated_at": _iso(w.get("updated_at")), "updated_by": w.get("updated_by"),
@@ -119,7 +120,8 @@ def worker_detail(wid: int) -> dict:
 
 
 def save_worker(wid: int | None, name: str, income_type: str, active: bool, memo: str | None, email: str,
-                end_date: date | None = None, last_pay_full: bool = True, last_pay_amount: int | None = None) -> int:
+                end_date: date | None = None, last_pay_full: bool = True, last_pay_amount: int | None = None,
+                start_date: date | None = None) -> int:
     """[S2-P0c] 비활성(퇴사·중단)이면 퇴사일 필수 → 물류비 인건비는 퇴사일까지 그대로 계산.
     정규직 마지막 달: 월급 그대로(last_pay_full) 또는 지급액(last_pay_amount)을 퇴사일까지 영업일로 나눔."""
     name = (name or "").strip()
@@ -134,6 +136,8 @@ def save_worker(wid: int | None, name: str, income_type: str, active: bool, memo
             last_pay_full, last_pay_amount = True, None
         elif last_pay_amount is None:
             raise ValueError("마지막 달 지급액을 입력하세요 (월급 그대로면 '월급 그대로 지급'을 체크)")
+    if start_date is not None and end_date is not None and end_date < start_date:
+        raise ValueError("퇴사일이 입사일보다 빠릅니다")        
     with get_dash_engine().begin() as conn:
         dup = conn.execute(text(
             "SELECT 1 FROM workers WHERE name = :n AND deleted_at IS NULL AND id <> :w"
@@ -141,18 +145,18 @@ def save_worker(wid: int | None, name: str, income_type: str, active: bool, memo
         if dup:
             raise ValueError("같은 이름의 인력이 이미 있습니다. 동명이인은 '김민수B'처럼 구분해 입력하세요")
         p = {"n": name, "t": income_type, "a": active, "m": memo, "e": email,
-             "ed": end_date, "lf": last_pay_full, "la": last_pay_amount}
+             "ed": end_date, "lf": last_pay_full, "la": last_pay_amount, "sd": start_date}
         if wid is None:
             return int(conn.execute(text("""
-                INSERT INTO workers (name, income_type, active, memo, end_date, last_pay_full, last_pay_amount,
-                                     created_by, updated_by)
-                VALUES (:n, :t, :a, :m, :ed, :lf, :la, :e, :e) RETURNING id
+                INSERT INTO workers (name, income_type, active, memo, start_date, end_date, last_pay_full,
+                                     last_pay_amount, created_by, updated_by)
+                VALUES (:n, :t, :a, :m, :sd, :ed, :lf, :la, :e, :e) RETURNING id
             """), p).scalar_one())
         old_end = conn.execute(text("SELECT end_date FROM workers WHERE id = :w AND deleted_at IS NULL"),
                                {"w": wid}).scalar()            
         res = conn.execute(text("""
             UPDATE workers SET name = :n, income_type = :t, active = :a, memo = :m,
-                   end_date = :ed, last_pay_full = :lf, last_pay_amount = :la,
+                   start_date = :sd, end_date = :ed, last_pay_full = :lf, last_pay_amount = :la,
                    updated_by = :e, updated_at = NOW()
             WHERE id = :w AND deleted_at IS NULL
         """), {**p, "w": wid})

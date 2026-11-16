@@ -8,8 +8,10 @@ import { workDaysText } from "@/api/workers";
 export type LogForm = { punch: string; out: string; brk: string; mid: string; memo: string; off: string };
 export const EMPTY_FORM: LogForm = { punch: "", out: "", brk: "", mid: "", memo: "", off: "" };
 
-/** 근무표 '휴게' 칸 기본값 = 유급시간에서 빼는 분 (무급 휴게만) */
-export const defaultBreak = (c: WorkContract | null) => (c ? (c.break_paid ? 0 : c.break_min) : 0);
+/** 휴게 칸 기본값 = 인력 계약의 휴게 시간 (유급·무급 모두 실제 휴게 분) */
+export const defaultBreak = (c: WorkContract | null) => (c ? c.break_min : 0);
+/** 유급시간에서 빼는 분: 계약이 유급 휴게면 0 (서버 sheet_break와 같은 규칙) */
+export const deductOf = (c: WorkContract | null, brk: number) => (c?.break_paid ? 0 : brk);
 export const defaultIn = (c: WorkContract | null) => c?.work_start ?? "";
 
 export const isDefaultIn = (c: WorkContract | null, v: string) =>
@@ -62,5 +64,5 @@ export function preview(c: WorkContract | null, f: LogForm): { cin: number | nul
   const brk = f.brk !== "" ? Number(f.brk) : defaultBreak(c);
   if (out <= cin) return { cin, paid: null, err: "퇴근이 출근보다 빠름" };
   if (brk >= out - cin) return { cin, paid: null, err: "휴게가 근무보다 김" };
-  return { cin, paid: out - cin - brk, err: "" };
+  return { cin, paid: out - cin - deductOf(c, brk), err: "" };
 }

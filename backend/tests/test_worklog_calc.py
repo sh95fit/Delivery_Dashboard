@@ -46,7 +46,8 @@ def test_sheet_break():
     assert sheet_break(None, R) == 0
     assert sheet_break(None, {**R, "break_min": 30, "break_paid": False}) == 30
     assert sheet_break(None, {**R, "break_min": 30, "break_paid": True}) == 0
-    assert sheet_break(20, {**R, "break_min": 30, "break_paid": True}) == 20
+    assert sheet_break(20, {**R, "break_min": 30, "break_paid": True}) == 0      # 유급 휴게 = 입력값과 관계없이 안 뺌
+    assert sheet_break(45, {**R, "break_min": 30, "break_paid": False}) == 45    # 그날만 휴게가 다른 경우
 
 
 def test_day_result():
