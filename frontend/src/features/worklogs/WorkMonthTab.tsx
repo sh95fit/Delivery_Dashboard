@@ -145,6 +145,11 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
                           title="한 달 입력 열기">{p.name}</button>
                         <span className="muted small">{INCOME_LABEL[p.income_type]}</span>
                       </span>
+                      {Object.values(p.days).some((l) => l.ride_along) && (
+                        <span className="wl-flags">
+                          <Chip tone="internal" title="동승 근무 — 담당·차량 판정에서 제외">동승 {Object.values(p.days).filter((l) => l.ride_along).length}일</Chip>
+                        </span>
+                      )}                      
                       {(p.summary.nocontract > 0 || p.missing_days.length > 0) && (
                         <span className="wl-flags">
                           {p.summary.nocontract > 0 && <Chip tone="danger">계약 없는 날 {p.summary.nocontract}</Chip>}
@@ -163,8 +168,9 @@ export default function WorkMonthTab({ month, onMonth, managers, isAdmin, onSave
                       <td key={d}>
                         {lg ? (
                           <button type="button" className={`wl-cell${lg.no_contract ? " wl-bad" : ""}${wk ? " wl-wkend" : ""}`} onClick={open}
-                            title={`${wk ? "주말 근무 · " : ""}출근 ${lg.clock_in}${lg.punch_in ? ` (지문 ${lg.punch_in})` : ""}${lg.early_ok ? " · 조기 출근 인정" : ""} · 퇴근 ${lg.clock_out} · 휴게 ${lg.sheet_break ?? 0}분${lg.memo ? ` · ${lg.memo}` : ""}`}>
+                            title={`${lg.ride_along ? "동승 · " : ""}${wk ? "주말 근무 · " : ""}출근 ${lg.clock_in}${lg.punch_in ? ` (지문 ${lg.punch_in})` : ""}${lg.early_ok ? " · 조기 출근 인정" : ""} · 퇴근 ${lg.clock_out} · 휴게 ${lg.sheet_break ?? 0}분${lg.memo ? ` · ${lg.memo}` : ""}`}>
                             <span className={lg.early_ok ? "wl-cin-early" : undefined}>{lg.clock_in}</span><span>{lg.clock_out}</span><b>{hmm(lg.paid_min)}</b>
+                            {lg.ride_along && <span className="wl-ride">동승</span>}                            
                           </button>
                         ) : off ? (
                           <button type="button" className="wl-cell wl-offcell" onClick={open}

@@ -409,6 +409,7 @@ tr.wl-dirty td { background: #fffbeb; }
 .wl-cell b { font-weight: 600; }
 .wl-cell.wl-bad { background: #fef2f2; color: #b91c1c; }
 .wl-cell.wl-empty { min-height: 40px; width: 100%; justify-content: center; color: #cbd5e1; }
+.wl-ride { font-size: 10px; color: var(--internal); }
 .wl-month .wl-exp { background: #f8fafc; color: #64748b; }
 .wl-month tr.wl-total td { font-weight: 600; border-top: 2px solid #e5e7eb; }
 

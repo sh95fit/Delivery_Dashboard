@@ -181,6 +181,15 @@ def cost_view(frm: date, to: date) -> dict:
         for name in sorted(no_end):
             add("warn", f"{name}: 비활성인데 퇴사일이 없어 근무 기록 있는 날만 계산 — 인력 화면에서 퇴사일을 넣으면 그 전 기간 인건비가 다시 잡힘",
                 link_workers)
+        ride_by: dict[str, int] = {}   # [S2-P4e-2c] 동승 안내 (담당·차량 판정 제외, 금액 영향 없음)
+        for (wid, d), lg in logs.items():
+            if lg.get("ride_along"):
+                nm = next((w["name"] for w in workers if w["id"] == wid), f"인력 {wid}")
+                ride_by[nm] = ride_by.get(nm, 0) + 1
+        if ride_by:
+            total = sum(ride_by.values())
+            who = ", ".join(f"{n} {c}일" for n, c in sorted(ride_by.items(), key=lambda x: (-x[1], x[0])))
+            add("info", f"동승 {total}일({who}) — 담당·차량 판정에서 제외됨(금액 영향 없음)", link_month)            
         if not any(r.get("pay_type") == "monthly" for rs in rates.values() for r in rs):
             add("info", "월급(정규직)으로 등록된 인력이 없어 정규직 인건비가 0원 — 인력 화면에서 정규직 등록 후 계약을 '월급'으로 입력",
                 link_workers)
