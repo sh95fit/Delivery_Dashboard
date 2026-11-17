@@ -271,11 +271,18 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
                       onBlur={() => { if (r.f.brk === "" && r.c) set(r.d, { brk: String(defaultBreak(r.c)) }); }} />
                   </td>
                   <td>
-                    <select className="input input-sm wl-sel" value={r.f.mid} disabled={dis}
-                      onChange={(e) => set(r.d, { mid: e.target.value })}>
-                      <option value="">고정: {r.acc?.manager_name ?? "없음"}</option>
-                      {sortedManagers.map((x) => <option key={x.manager_id} value={x.manager_id}>{x.name}</option>)}
-                    </select>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <select className="input input-sm wl-sel" value={r.f.mid} disabled={dis}
+                        onChange={(e) => set(r.d, { mid: e.target.value })}>
+                        <option value="">고정: {r.acc?.manager_name ?? "없음"}</option>
+                        {sortedManagers.map((x) => <option key={x.manager_id} value={x.manager_id}>{x.name}</option>)}
+                      </select>
+                      <label className="small" style={{ whiteSpace: "nowrap" }}
+                        title="다른 노선에 함께 타서 교육·인수인계한 날 — 인건비는 고른 계정으로, 담당·차량은 그 계정의 고정 담당 그대로">
+                        <input type="checkbox" checked={r.f.ride} disabled={dis}
+                          onChange={(e) => set(r.d, { ride: e.target.checked })} /> 동승
+                      </label>
+                    </div>
                   </td>
                   <td>
                     <input className="input input-sm wl-memo" value={r.f.memo} maxLength={200} disabled={memoDis}

@@ -202,11 +202,18 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
                     onBlur={() => { if (f.brk === "" && c) set(it.worker_id, { brk: String(defaultBreak(c)) }); }} />
                 </td>
                 <td>
-                  <select className="input input-sm wl-sel" value={f.mid} disabled={dis}
-                    onChange={(e) => set(it.worker_id, { mid: e.target.value })}>
-                    <option value="">고정: {it.fixed_manager_name ?? "없음"}</option>
-                    {sortedManagers.map((m) => <option key={m.manager_id} value={m.manager_id}>{m.name}</option>)}
-                  </select>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <select className="input input-sm wl-sel" value={f.mid} disabled={dis}
+                      onChange={(e) => set(it.worker_id, { mid: e.target.value })}>
+                      <option value="">고정: {it.fixed_manager_name ?? "없음"}</option>
+                      {sortedManagers.map((m) => <option key={m.manager_id} value={m.manager_id}>{m.name}</option>)}
+                    </select>
+                    <label className="small" style={{ whiteSpace: "nowrap" }}
+                      title="다른 노선에 함께 타서 교육·인수인계한 날 — 인건비는 고른 계정으로, 담당·차량은 그 계정의 고정 담당 그대로">
+                      <input type="checkbox" checked={f.ride} disabled={dis}
+                        onChange={(e) => set(it.worker_id, { ride: e.target.checked })} /> 동승
+                    </label>
+                  </div>
                 </td>
                 <td>
                   <input className="input input-sm wl-memo" value={f.memo} maxLength={200} disabled={dis}
