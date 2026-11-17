@@ -236,7 +236,7 @@ def cost_view(frm: date, to: date) -> dict:
                 loose += a
                 loose_by.setdefault(vid, {})[x] = loose_by.get(vid, {}).get(x, 0) + a
         if moved:
-            add("info", f"차량 비용 {moved:,}원은 차가 운행하지 않은 영업일 몫이라 같은 달 그 차의 운행일(계정)에 다시 나눔")                    
+            add("info", f"차량 비용 {moved:,}원은 차를 쓰지 않은 영업일에 해당하는 금액. 같은 달 그 차가 실제 운행한 날의 계정에 나눠 반영. 물류비 합계는 변경 X")                    
         if fuel_open:
             months = ", ".join(f"{y}-{m:02d}" for y, m in sorted(fuel_open))
             add("info", f"유류비 미마감 {months} — 지금까지 입력한 주유 기록으로 예상 계산 (월 마감 후 확정)", link_vehicles)
