@@ -52,7 +52,7 @@ def route_fuel(frm: date, to: date, asg: Assign) -> tuple[dict[tuple[date, int],
     ev_cfg, ev_sets = ev_rate_service.basis()
     evc = {"matrix": 0, "fallback": 0, "early": 0, "manual": 0, "none": 0}
     out: dict[tuple[date, int], dict] = {}
-    no_calc = other = default_n = scaled_n = bad = nov = 0
+    no_calc = other = default_n = scaled_n = bad = nov = own_n = 0
     for r in rows:
         d, mid = r["route_date"], int(r["manager_id"])
         vid = asg.vehicle(d, mid)
@@ -72,7 +72,10 @@ def route_fuel(frm: date, to: date, asg: Assign) -> tuple[dict[tuple[date, int],
             else:                                   # [S3-P2e-2] 모든 구간을 지금 연비로 다시 산출
                 ncp = ncp_scaled(r["ncp_w"], eff)
                 if not v:
-                    nov += 1
+                    if (asg.day(d).get(mid) or {}).get("basis") == "own":   # [S3-P2l-4] 자차는 미판정이 아님
+                        own_n += 1
+                    else:
+                        nov += 1
                 elif eff:
                     scaled_n += 1
                 else:
@@ -85,6 +88,9 @@ def route_fuel(frm: date, to: date, asg: Assign) -> tuple[dict[tuple[date, int],
         notes.append(f"NCP 예상 유류비: {default_n}건은 연비 미입력이라 NAVER 기본 연비(14km/L) 기준 — 차량에 연비를 넣으면 그 연비로 환산")
     if scaled_n:
         notes.append(f"NCP 예상 유류비: {scaled_n}건은 지금 차량 연비로 다시 산출 (연비를 넣거나 바꾸면 지난 날짜도 NAVER 재호출 없이 새 연비로 환산)")
+    if own_n:
+        notes.append(f"자차 {own_n}건(계정×일): 차량 이용이 '자차'라 회사 차량 연비가 없어 "
+                     "NCP 예상 유류비는 NAVER 기본 연비(14km/L) 기준, 오피넷 기준은 0원 (참고용 · 입력할 것 없음)")        
     if nov:
         notes.append(f"차량 미판정 {nov}건(계정×일): 그날 계정에 차량이 판정되지 않아(담당 인력 없음·차량 이력 없음) "
                      "NCP 예상 유류비는 NAVER 기본 연비(14km/L) 기준, 오피넷 기준은 0원 — 인력 › 차량 이용 또는 배정 점검 탭에서 확인") 

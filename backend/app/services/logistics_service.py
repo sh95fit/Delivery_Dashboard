@@ -265,6 +265,8 @@ def cost_view(frm: date, to: date) -> dict:
         for n in rf_notes:
             if "판정되지 않아" in n:
                 add("info", n, link_assign)
+            elif n.startswith("자차"):
+                add("info", n)                      # [S3-P2l-4] 조치할 것 없음 → 바로가기 없음
             else:
                 add("info", n, link_vehicles if ("연비" in n or "충전" in n) else None)
         for n in asg.notes():
