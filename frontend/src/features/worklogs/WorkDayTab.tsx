@@ -203,7 +203,7 @@ export default function WorkDayTab({ date, onDate, managers, isAdmin, reloadKey 
                 </td>
                 <td>
                   <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <select className="input input-sm wl-sel" style={{ minWidth: 180, flex: "1 1 auto" }} value={f.mid} disabled={dis}
+                    <select className="input input-sm wl-sel" style={{ width: 230, minWidth: 230, flex: "0 0 230px" }} value={f.mid} disabled={dis}
                       onChange={(e) => set(it.worker_id, { mid: e.target.value })}>
                       <option value="">고정: {it.fixed_manager_name ?? "없음"}</option>
                       {sortedManagers.map((m) => <option key={m.manager_id} value={m.manager_id}>{m.name}</option>)}
