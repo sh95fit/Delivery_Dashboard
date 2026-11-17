@@ -13,6 +13,7 @@ class WorkLogItem(BaseModel):
     clock_out: time                       # 지문 퇴근
     break_min: int | None = Field(default=None, ge=0, le=600)   # 비우면 계약 휴게
     manager_id: int | None = None         # 그날만 다른 계정을 쓴 경우 (NULL = 고정 계정)
+    ride_along: bool = False              # [S2-P4e] 동승 (인건비는 manager_id 계정, 담당·차량 판정 제외)    
     early_ok: bool = False                # [S2-P4d-1b] 조기 출근 인정 (그날만 지문 시각 그대로)    
     memo: str | None = Field(default=None, max_length=200)
 
@@ -28,6 +29,7 @@ class WorkLogDay(BaseModel):
     clock_out: time
     break_min: int | None = Field(default=None, ge=0, le=600)
     manager_id: int | None = None
+    ride_along: bool = False              # [S2-P4e] 동승 (인건비는 manager_id 계정, 담당·차량 판정 제외)    
     early_ok: bool = False                # [S2-P4d-1b] 조기 출근 인정 (그날만 지문 시각 그대로)    
     memo: str | None = Field(default=None, max_length=200)
 

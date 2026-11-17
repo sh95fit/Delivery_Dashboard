@@ -70,6 +70,7 @@ def log_out(lg: dict, rate: dict | None) -> dict:
             "clock_in": _hm(lg["clock_in"]), "clock_out": _hm(lg["clock_out"]),
             "break_min": lg.get("break_min"), "manager_id": lg.get("manager_id"),
             "memo": lg.get("memo"), "source": lg.get("source"), "early_ok": bool(lg.get("early_ok")),
+            "ride_along": bool(lg.get("ride_along")),
             "paid_min": d["paid"] if d else None, "ot_min": d["ot"] if d else None,
             "ot_pay": d["ot_pay"] if d else None, "sheet_break": d["break"] if d else None,
             "no_contract": d is None}
@@ -209,13 +210,23 @@ def _write(conn, wid: int, d: date, it: dict, rs: list[dict], email: str, t: dat
     v = check_log(it.get("punch_in"), it.get("clock_out"), it.get("break_min"),
                   effective_on(rs, d, "effective_from"), day=d, today=t, early_ok=bool(it.get("early_ok")))
     mid, memo = it.get("manager_id"), it.get("memo")
+    ride = bool(it.get("ride_along"))
+    if ride:      # [S2-P4e] 동승 = 다른 노선에 타서 교육 등 → 그 계정 필수, 본인 고정 계정 불가
+        if mid is None:
+            raise ValueError("동승은 함께 탄 계정을 지정해야 합니다")
+        accs = [dict(r) for r in conn.execute(text(
+            "SELECT manager_id, start_date FROM worker_accounts WHERE worker_id = :w AND deleted_at IS NULL"),
+            {"w": wid}).mappings()]
+        fa = effective_on(accs, d, "start_date")
+        if fa and fa["manager_id"] is not None and int(fa["manager_id"]) == int(mid):
+            raise ValueError("본인 고정 계정에는 동승으로 넣을 수 없습니다 (동승 체크 해제)")
     old = conn.execute(text("""
-        SELECT id, punch_in, clock_in, clock_out, break_min, manager_id, memo, early_ok FROM work_logs
+        SELECT id, punch_in, clock_in, clock_out, break_min, manager_id, memo, early_ok, ride_along FROM work_logs
         WHERE worker_id = :w AND work_date = :d AND deleted_at IS NULL
     """), {"w": wid, "d": d}).mappings().fetchone()
     if old and (old["punch_in"], old["clock_in"], old["clock_out"], old["break_min"], old["manager_id"],
-                old["memo"], bool(old["early_ok"])) == (v["punch_in"], v["clock_in"], v["clock_out"],
-                                                         v["break_min"], mid, memo, v["early_ok"]):
+                old["memo"], bool(old["early_ok"]), bool(old["ride_along"])) == (
+                    v["punch_in"], v["clock_in"], v["clock_out"], v["break_min"], mid, memo, v["early_ok"], ride):
         return False, v["warns"]
     if old:
         conn.execute(text("UPDATE work_logs SET deleted_at = NOW(), deleted_by = :e WHERE id = :i"),
@@ -223,10 +234,10 @@ def _write(conn, wid: int, d: date, it: dict, rs: list[dict], email: str, t: dat
     conn.execute(text("""
         INSERT INTO work_logs
             (worker_id, work_date, punch_in, clock_in, clock_out, break_min, manager_id, source, memo, early_ok,
-             created_by)
-        VALUES (:w, :d, :p, :i, :o, :b, :m, 'manual', :memo, :eo, :e)
+             ride_along, created_by)
+        VALUES (:w, :d, :p, :i, :o, :b, :m, 'manual', :memo, :eo, :ra, :e)
     """), {"w": wid, "d": d, "p": v["punch_in"], "i": v["clock_in"], "o": v["clock_out"],
-           "b": v["break_min"], "m": mid, "memo": memo, "eo": v["early_ok"], "e": email})
+           "b": v["break_min"], "m": mid, "memo": memo, "eo": v["early_ok"], "ra": ride, "e": email})
     return True, v["warns"]
 
 
