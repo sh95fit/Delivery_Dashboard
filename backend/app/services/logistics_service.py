@@ -194,6 +194,7 @@ def cost_view(frm: date, to: date) -> dict:
         asg = Assign(frm, to)   # [S3-P2h-1b] 날짜별 계정 → 인력 → 차량 (인센티브 담당 판정과 같은 결과)
         vcost = vehicle_costs(periods, expenses, deductible, is_open, frm, to)
         loose = 0
+        loose_by: dict[int, dict[date, int]] = {}   # [S3-P2l] 차량 → {일자: 계정 없는 금액}
         for d in days:
             day_cost = vcost.get(d)
             if not day_cost:
@@ -203,6 +204,7 @@ def cost_view(frm: date, to: date) -> dict:
                 if not users.get(vid):
                     cell(d, None)["vehicle"] += amt
                     loose += amt
+                    loose_by.setdefault(vid, {})[d] = loose_by.get(vid, {}).get(d, 0) + amt
                     continue
                 for mid, share in split_even(amt, users[vid]).items():
                     cell(d, mid)["vehicle"] += share
@@ -220,6 +222,7 @@ def cost_view(frm: date, to: date) -> dict:
                 if not users.get(vid):
                     cell(d, None)[key] += amt
                     loose += amt
+                    loose_by.setdefault(vid, {})[d] = loose_by.get(vid, {}).get(d, 0) + amt
                     continue
                 for mid, share in split_even(amt, users[vid]).items():
                     cell(d, mid)[key] += share
@@ -227,8 +230,14 @@ def cost_view(frm: date, to: date) -> dict:
             months = ", ".join(f"{y}-{m:02d}" for y, m in sorted(fuel_open))
             add("info", f"유류비 미마감 {months} — 지금까지 입력한 주유 기록으로 예상 계산 (월 마감 후 확정)", link_vehicles)
         if loose:
-            add("info", f"배정 계정이 없는 차량 비용 {loose:,}원은 '{NO_ACCOUNT}'로 들어감",
-                {"to": "/settings/workers", "label": "인력 › 차량 이용"})
+            plates = {r["id"]: r["plate_no"] for r in dash_db.rows("SELECT id, plate_no FROM vehicles")}
+            for vid, dd in sorted(loose_by.items(), key=lambda x: -sum(x[1].values())):
+                ds = sorted(dd)
+                more = f" 외 {len(ds) - 5}일" if len(ds) > 5 else ""
+                txt = ", ".join(f"{x.month}/{x.day}" for x in ds[:5]) + more
+                add("info", f"{plates.get(vid, f'차량 {vid}')}: {txt} 이 차를 쓴 계정이 없어 차량 비용 "
+                            f"{sum(dd.values()):,}원이 '{NO_ACCOUNT}'로 들어감 — 그날 이 차의 차량 이력(인력 › 차량 이용)과 "
+                            "그 인력의 담당 계정 확인", link_vehicles)
 
         timing["vehicle"] = round(time.perf_counter() - s, 2)
 
