@@ -7,6 +7,7 @@
 - 결제결과가 '승인'인 행만 저장. 나머지는 건수만 보고
 - 날짜 = 결제일시(없으면 충전시작일시), 충전량(kWh)=수량, 결제금액=합계 → 공급가·부가세는 기존 규칙(합계÷1.1)으로 분리
 - 차량 매칭·행 판정·저장은 주유 거래내역과 같은 흐름(fuel_excel.judge)을 그대로 쓴다
+- 양식 판별·분기는 이 파일이 아니라 fuel_import_service.py(오케스트레이터)가 한다 — 이 파일은 충전 양식만 안다
 """
 from __future__ import annotations
 
@@ -63,15 +64,3 @@ def parse_rows(rows: list[list]) -> dict:
     return {"items": items, "skipped": skipped,
             "checks": [{"level": "ok", "text": f"전기차 충전 내역 {len(items)}행 · 합계 {total:,}원 (승인 결제만)"}],
             "header_row": h + 1, "ev": True}
-
-
-def parse_upload(data: bytes) -> dict:
-    """엑셀 업로드 진입점: 환경부 충전 양식이면 충전 파서, 아니면 기존 주유 파서."""
-    from app.services.fuel_excel import parse_file as parse_fuel, read_sheets
-    kind, sheets = read_sheets(data)
-    for rows in sheets:
-        if is_ev_sheet(rows):
-            out = parse_rows(rows)
-            out["file_kind"] = kind
-            return out
-    return parse_fuel(data)

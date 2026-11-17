@@ -16,8 +16,8 @@ from sqlalchemy import text
 from app.database import get_dash_engine
 from app.services import dash_db
 from app.services.day_aggregate import KST
-from app.services.fuel_excel import judge, norm_code
-from app.services.fuel_excel_ev import parse_upload
+from app.services.fuel_excel import judge, norm_code, parse_file, read_sheets
+from app.services.fuel_excel_ev import is_ev_sheet, parse_rows as parse_ev_rows
 from app.services.fuel_log_calc import month_bounds
 from app.services.manager_service import today
 
@@ -52,9 +52,20 @@ def _vehicles() -> list[dict]:
                         "WHERE deleted_at IS NULL ORDER BY plate_no")
 
 
+def _parse_any(data: bytes) -> dict:
+    """양식 자동 분기: 환경부 이용요금 현황(전기차 충전)이면 충전 파서, 아니면 주유 거래내역 파서."""
+    kind, sheets = read_sheets(data)
+    for rows in sheets:
+        if is_ev_sheet(rows):
+            out = parse_ev_rows(rows)
+            out["file_kind"] = kind
+            return out
+    return parse_file(data)
+
+
 def _evaluate(content_b64: str, vehicle_map: dict | None):
     data = _decode(content_b64)
-    parsed = parse_upload(data)
+    parsed = _parse_any(data)
     items = parsed["items"]
     if not items:
         raise ValueError("주유 행이 없습니다 — 양식(일자·차량·합계 머리글 아래 거래 행)을 확인하세요")
