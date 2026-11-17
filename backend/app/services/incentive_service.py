@@ -689,8 +689,10 @@ def _owner_ctx(s: date, e: date) -> dict:
     """배정에 필요한 기록을 한 번에 읽음 (기간 s~e)."""
     p = {"s": s, "e": e}
     ctx: dict = {"day_acc": {}, "logged": {}, "off": {}, "accs": {}, "chosen": {}, "taken": {}}
-    for lg in dash_db.rows("""SELECT worker_id, work_date, manager_id FROM work_logs
+    for lg in dash_db.rows("""SELECT worker_id, work_date, manager_id, ride_along FROM work_logs
                               WHERE deleted_at IS NULL AND work_date BETWEEN :s AND :e""", p):
+        if lg["ride_along"]:      # [S2-P4e] 동승 = 담당·차량 판정에서 제외 (인건비는 물류비에서 그날 계정으로)
+            continue
         wid, d = int(lg["worker_id"]), lg["work_date"]
         mid = None if lg["manager_id"] is None else int(lg["manager_id"])
         ctx["day_acc"].setdefault(d, {})[wid] = mid
