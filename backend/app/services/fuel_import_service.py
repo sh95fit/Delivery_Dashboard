@@ -16,7 +16,8 @@ from sqlalchemy import text
 from app.database import get_dash_engine
 from app.services import dash_db
 from app.services.day_aggregate import KST
-from app.services.fuel_excel import judge, norm_code, parse_file
+from app.services.fuel_excel import judge, norm_code
+from app.services.fuel_excel_ev import parse_upload
 from app.services.fuel_log_calc import month_bounds
 from app.services.manager_service import today
 
@@ -53,7 +54,7 @@ def _vehicles() -> list[dict]:
 
 def _evaluate(content_b64: str, vehicle_map: dict | None):
     data = _decode(content_b64)
-    parsed = parse_file(data)
+    parsed = parse_upload(data)
     items = parsed["items"]
     if not items:
         raise ValueError("주유 행이 없습니다 — 양식(일자·차량·합계 머리글 아래 거래 행)을 확인하세요")
