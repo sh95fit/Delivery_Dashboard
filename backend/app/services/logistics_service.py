@@ -195,6 +195,7 @@ def cost_view(frm: date, to: date) -> dict:
         vcost = vehicle_costs(periods, expenses, deductible, is_open, frm, to)
         loose = 0
         loose_by: dict[int, dict[date, int]] = {}   # [S3-P2l] 차량 → {일자: 계정 없는 금액}
+        hold: dict[tuple[int, int, int, str], list[tuple[date, int]]] = {}   # [S3-P2l-2] 안 쓴 영업일 몫 → 같은 달 운행일로        
         for d in days:
             day_cost = vcost.get(d)
             if not day_cost:
@@ -202,9 +203,7 @@ def cost_view(frm: date, to: date) -> dict:
             users = asg.users(d)
             for vid, amt in day_cost.items():
                 if not users.get(vid):
-                    cell(d, None)["vehicle"] += amt
-                    loose += amt
-                    loose_by.setdefault(vid, {})[d] = loose_by.get(vid, {}).get(d, 0) + amt
+                    hold.setdefault((vid, d.year, d.month, "vehicle"), []).append((d, amt))
                     continue
                 for mid, share in split_even(amt, users[vid]).items():
                     cell(d, mid)["vehicle"] += share
@@ -220,12 +219,24 @@ def cost_view(frm: date, to: date) -> dict:
             users = asg.users(d)
             for vid, amt in per_vid.items():
                 if not users.get(vid):
-                    cell(d, None)[key] += amt
-                    loose += amt
-                    loose_by.setdefault(vid, {})[d] = loose_by.get(vid, {}).get(d, 0) + amt
+                    hold.setdefault((vid, d.year, d.month, key), []).append((d, amt))
                     continue
                 for mid, share in split_even(amt, users[vid]).items():
                     cell(d, mid)[key] += share
+        moved = 0
+        for (vid, y, m, k), items in hold.items():
+            used = [(x, u) for x in days if (x.year, x.month) == (y, m) for u in (asg.users(x).get(vid) or [])]
+            if used:
+                for (x, u), share in split_even(sum(a for _, a in items), used).items():
+                    cell(x, u)[k] += share
+                moved += sum(a for _, a in items)
+                continue
+            for x, a in items:
+                cell(x, None)[k] += a
+                loose += a
+                loose_by.setdefault(vid, {})[x] = loose_by.get(vid, {}).get(x, 0) + a
+        if moved:
+            add("info", f"차량 비용 {moved:,}원은 차가 운행하지 않은 영업일 몫이라 같은 달 그 차의 운행일(계정)에 다시 나눔")                    
         if fuel_open:
             months = ", ".join(f"{y}-{m:02d}" for y, m in sorted(fuel_open))
             add("info", f"유류비 미마감 {months} — 지금까지 입력한 주유 기록으로 예상 계산 (월 마감 후 확정)", link_vehicles)
