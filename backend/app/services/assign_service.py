@@ -33,6 +33,7 @@ class Assign:
             self.mids_on.setdefault(d, set()).add(int(mid))
         self.basis: dict[str, int] = {}
         self._days: dict[date, dict[int, dict]] = {}
+        self.asked: set[tuple[date, int]] = set()   # [S3-P2l-3] 실제 배송한 (일자, 계정) — 경로 계산이 차량을 물은 것만        
 
     def day(self, d: date) -> dict[int, dict]:
         """그날 {계정: {worker_id, vehicle_id, basis}}"""
@@ -61,13 +62,15 @@ class Assign:
         return users_by_vehicle(self.day(d))
 
     def vehicle(self, d: date, mid: int) -> int | None:
+        self.asked.add((d, int(mid)))
         return (self.day(d).get(int(mid)) or {}).get("vehicle_id")
 
     def notes(self) -> list[str]:
-        n = self.basis.get("unknown", 0)
+        """[S3-P2l-3] 실제 배송한 계정×일 중 차량을 못 찾은 건수만 (휴일·배송 없는 날의 고정 계정은 세지 않음)"""
+        n = sum(1 for d, m in self.asked if (self._days.get(d, {}).get(m) or {}).get("basis") == "unknown")
         if not n:
             return []
-        return [f"차량: {n}건(계정×일)은 담당 인력을 못 찾았거나 그 날짜의 차량 이용 이력이 없어 차량 없음으로 계산 — "
+        return [f"차량: 배송한 {n}건(계정×일)은 담당 인력을 못 찾았거나 그 날짜의 차량 이용 이력이 없어 차량 없음으로 계산 — "
                 "인력 › 차량 이용에 회사 차량·자차·차량 없음 중 하나를 넣으세요"]
 
 

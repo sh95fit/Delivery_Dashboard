@@ -261,10 +261,14 @@ def cost_view(frm: date, to: date) -> dict:
             c["ncp_fuel"] += x["ncp"]
             c["calc_fuel"] += x["calc"]
             c["route_ms"] += x["route_ms"]            
+        link_assign = {"to": "/settings/workers", "label": "인력 › 차량 이용"}   # [S3-P2l-3] 차량 판정 문제는 차량 이용 화면으로
         for n in rf_notes:
-            add("info", n, link_vehicles if ("연비" in n or "충전" in n) else None)
+            if "판정되지 않아" in n:
+                add("info", n, link_assign)
+            else:
+                add("info", n, link_vehicles if ("연비" in n or "충전" in n) else None)
         for n in asg.notes():
-            add("info", n, {"to": "/settings/workers", "label": "인력 › 차량 이용"})
+            add("info", n, link_assign)
         timing["route"] = round(time.perf_counter() - s, 2)        
         rev_views = f_rev.result()
         inc_rows = f_inc.result()

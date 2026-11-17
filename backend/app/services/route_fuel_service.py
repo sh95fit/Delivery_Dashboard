@@ -63,7 +63,7 @@ def route_fuel(frm: date, to: date, asg: Assign) -> tuple[dict[tuple[date, int],
             ncp = calc = _ev_cost(dist, eff, d, idx, ev_cfg, ev_sets, evc)
         else:
             calc = direct_cost(dist, eff, price_on(idx, v["fuel_type"], d)) if v else None
-            if calc is None:
+            if calc is None and v:                  # [S3-P2l-3] 차량 미판정은 아래 nov로만 셈
                 no_calc += 1
             calc = calc or 0
             if v and v["fuel_type"] not in NCP_OK:  # 연료 미지정 → NAVER 유류비 없음
@@ -86,7 +86,8 @@ def route_fuel(frm: date, to: date, asg: Assign) -> tuple[dict[tuple[date, int],
     if scaled_n:
         notes.append(f"NCP 예상 유류비: {scaled_n}건은 지금 차량 연비로 다시 산출 (연비를 넣거나 바꾸면 지난 날짜도 NAVER 재호출 없이 새 연비로 환산)")
     if nov:
-        notes.append(f"NCP 예상 유류비: {nov}건은 그날 계정에 차량이 판정되지 않아(담당 인력 없음·차량 이력 없음) NAVER 기본 연비(14km/L) 기준 — 배정 점검 탭에서 확인")        
+        notes.append(f"차량 미판정 {nov}건(계정×일): 그날 계정에 차량이 판정되지 않아(담당 인력 없음·차량 이력 없음) "
+                     "NCP 예상 유류비는 NAVER 기본 연비(14km/L) 기준, 오피넷 기준은 0원 — 인력 › 차량 이용 또는 배정 점검 탭에서 확인") 
     if other:
         notes.append(f"NCP 예상 유류비: {other}건은 차량 연료 미지정이라 0원")
     sp = SPEED_LABEL[ev_cfg["ev_speed"]]
