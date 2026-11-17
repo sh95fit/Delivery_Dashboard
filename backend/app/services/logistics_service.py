@@ -315,6 +315,15 @@ def cost_view(frm: date, to: date) -> dict:
 
     # ---------- 조립 ----------
     mgrs = _managers()
+    # [S3-P2m] 고정 담당자 휴무인데 그 계정에 배송 있음 → 추가/대체 담당 지정 필요 (금액 계산 영향 없음)
+    wname = {int(w["id"]): w["name"] for w in workers}
+    for o in asg.off_days():
+        d, mid = o["date"], o["manager_id"]
+        who = ", ".join(wname.get(w, f"인력 {w}") for w in o["worker_ids"])
+        acc_name = (mgrs.get(mid) or {}).get("name") or names.get(mid) or f"계정 {mid}"
+        add("warn", f"{d.month}/{d.day} {acc_name}: 고정 담당 {who} 휴무인데 배송 있음 — 실제 배송한 사람을 "
+                    "추가 담당(본인 노선도 함) 또는 대체 담당으로 지정 (지정 전까지 담당 미확인 · 차량 미판정 · 인센티브 미배정)",
+            {"to": f"/finance/incentive?tab=day&date={d.isoformat()}", "label": f"{d.month}/{d.day} 인센티브 일자별 입력"})    
     accounts: dict[int | None, dict] = {}
     by_day = {d: _blank() for d in days}
     for (d, mid), c in cells.items():

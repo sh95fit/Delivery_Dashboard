@@ -65,9 +65,26 @@ class Assign:
         self.asked.add((d, int(mid)))
         return (self.day(d).get(int(mid)) or {}).get("vehicle_id")
 
+    def off_days(self) -> list[dict]:
+        """[S3-P2m] 배송했는데 담당 없음 중 '고정 담당자가 그날 휴무'인 건 → 추가/대체 담당 지정 필요"""
+        from app.services.incentive_service import _fixed_mid
+        out: list[dict] = []
+        for d, m in sorted(self.asked):
+            r = self._days.get(d, {}).get(m) or {}
+            if r.get("worker_id") is not None:
+                continue
+            off = self.ctx["off"].get(d, set())
+            ws = [w for w in self.ctx["accs"] if w in off and _fixed_mid(self.ctx, w, d) == m]
+            if ws:
+                out.append({"date": d, "manager_id": m, "worker_ids": ws})
+        return out
+
     def notes(self) -> list[str]:
-        """[S3-P2l-3] 실제 배송한 계정×일 중 차량을 못 찾은 건수만 (휴일·배송 없는 날의 고정 계정은 세지 않음)"""
-        n = sum(1 for d, m in self.asked if (self._days.get(d, {}).get(m) or {}).get("basis") == "unknown")
+        """[S3-P2l-3] 실제 배송한 계정×일 중 차량을 못 찾은 건수만 (휴일·배송 없는 날의 고정 계정은 세지 않음)
+        [S3-P2m] 고정 담당자 휴무 건은 off_days()로 따로 안내 → 여기서 뺌"""
+        skip = {(o["date"], o["manager_id"]) for o in self.off_days()}
+        n = sum(1 for d, m in self.asked
+                if (d, m) not in skip and (self._days.get(d, {}).get(m) or {}).get("basis") == "unknown")
         if not n:
             return []
         return [f"차량: 배송한 {n}건(계정×일)은 담당 인력을 못 찾았거나 그 날짜의 차량 이용 이력이 없어 차량 없음으로 계산 — "
