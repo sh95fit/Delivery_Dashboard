@@ -1,0 +1,1 @@
+ALTER TABLE incentive_owners ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'replace';

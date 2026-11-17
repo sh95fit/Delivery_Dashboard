@@ -123,8 +123,9 @@ export const getIncPeople = (ym: string) => http<IncPeopleView>(`/api/incentive/
 
 export type OwnerSource = "chosen" | "log" | "fixed";
 export interface IncOwner {
-  worker_id: number | null; name: string | null; source: OwnerSource | null; why: string | null; memo: string | null;
+  worker_id: number | null; name: string | null; source: OwnerSource | null; why: string | null; memo: string | null; 
+  mode?: "add" | "replace" | null;  
 }
 export interface IncWorkerOpt { worker_id: number; name: string; pay_type: string | null; fixed_name: string | null }
-export const saveIncOwner = (d: string, b: { manager_id: number; worker_id: number | null; memo: string | null }) =>
+export const saveIncOwner = (d: string, b: { manager_id: number; worker_id: number | null; memo: string | null; mode: "add" | "replace" }) =>
   put<Ok & { changed: boolean }>(`/api/incentive/owners/${d}`, b);

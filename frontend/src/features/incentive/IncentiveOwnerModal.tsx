@@ -13,6 +13,7 @@ export default function IncentiveOwnerModal({ row, view, onClose, onSaved }: Pro
   const chosen = o.source === "chosen";
   const [wid, setWid] = useState(chosen && o.worker_id != null ? String(o.worker_id) : "");
   const [memo, setMemo] = useState(chosen ? o.memo ?? "" : "");
+  const [mode, setMode] = useState<"add" | "replace">(chosen ? (o.mode ?? "replace") : "add");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -21,7 +22,7 @@ export default function IncentiveOwnerModal({ row, view, onClose, onSaved }: Pro
     setBusy(true);
     try {
       await saveIncOwner(view.date, { manager_id: row.manager_id, worker_id: clear ? null : Number(wid),
-        memo: clear ? null : memo.trim() || null });
+        memo: clear ? null : memo.trim() || null, mode });
       onSaved();
       onClose();
     } catch (e) {
@@ -43,6 +44,10 @@ export default function IncentiveOwnerModal({ row, view, onClose, onSaved }: Pro
         지금: {o.worker_id != null ? `${o.name} (${o.source === "chosen" ? "담당 지정" : o.source === "log" ? "근무 기록 그날 계정" : "고정 계정"})` : `미확인 — ${o.why ?? ""}`}
         <br />고정 담당자가 부상·휴가로 빠지고 다른 사람이 뛴 날에 지정하세요 (정규직 포함). 지정이 근무 기록·고정 계정보다 우선합니다.
       </div>
+      <div className="mt">
+        <label><input type="radio" checked={mode === "add"} onChange={() => setMode("add")} /> 추가 담당 — 본인 노선도 하고 이 계정까지 처리 (본인 고정 계정 유지 · 인건비는 본인 계정)</label>
+        <br /><label><input type="radio" checked={mode === "replace"} onChange={() => setMode("replace")} /> 대체 담당 — 본인 계정 대신 이 계정만 처리</label>
+      </div>      
       <label className="mt">담당자
         <select className="input" value={wid} onChange={(e) => setWid(e.target.value)}>
           <option value="">선택</option>

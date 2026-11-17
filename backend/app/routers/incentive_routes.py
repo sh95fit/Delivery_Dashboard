@@ -28,7 +28,7 @@ def people_board(month: date = Query(...), _: str = Depends(require_admin)):
 
 @router.put("/owners/{d}")
 def save_owner(d: date, body: OwnerIn, email: str = Depends(require_admin)):
-    return guard(svc.save_owner, d, body.manager_id, body.worker_id, memo(body.memo), email,
+    return guard(svc.save_owner, d, body.manager_id, body.worker_id, memo(body.memo), email, body.mode,
                  fail="담당자 지정 실패")
 
 

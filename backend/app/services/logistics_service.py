@@ -129,7 +129,7 @@ def cost_view(frm: date, to: date) -> dict:
             "SELECT worker_id, work_date FROM work_offs WHERE deleted_at IS NULL AND work_date BETWEEN :a AND :b", p)}
         owned: dict[tuple[int, date], int] = {}
         for o in dash_db.rows("""SELECT worker_id, work_date, manager_id FROM incentive_owners
-                                 WHERE deleted_at IS NULL AND work_date BETWEEN :a AND :b ORDER BY id""", p):
+                                 WHERE deleted_at IS NULL AND mode = 'replace' AND work_date BETWEEN :a AND :b ORDER BY id""", p):
             owned.setdefault((o["worker_id"], o["work_date"]), int(o["manager_id"]))
         missing: dict[str, list[str]] = {}
         no_acc: dict[str, int] = {}

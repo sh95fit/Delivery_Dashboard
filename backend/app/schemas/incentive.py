@@ -100,3 +100,5 @@ class OwnerIn(BaseModel):
     manager_id: int
     worker_id: int | None = None                               # None = 지정 해제 (기본 규칙으로)
     memo: str | None = Field(default=None, max_length=200)
+    mode: Literal["add", "replace"] = "replace"                # [S2-P4c-2] add = 본인 계정 유지 + 이 계정 추가
+    

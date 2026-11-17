@@ -370,7 +370,9 @@ def day_view(d: date) -> dict:
         # 담당 지정 후보 = 그날 계약(월급·시급)이 있는 활성 인력
         "workers": [{"worker_id": v["worker_id"], "name": v["name"], "pay_type": v["pay_type"],
                      "fixed_name": (mgrs.get(_fixed_mid(ctx, v["worker_id"], d)) or {}).get("name")}
-                    for v in wk.values() if v["active"] and v["pay_type"] in ("monthly", "hourly")],
+                    for v in wk.values() if v["pay_type"] in ("monthly", "hourly")
+                    and (v["active"] or v["end"] is not None)
+                    and (v["start"] is None or v["start"] <= d) and (v["end"] is None or d <= v["end"])],
         "totals": {
             "payable": sum(i["payable"] or 0 for i in items),
             "extras": sum(i["extras"] for i in items),
@@ -681,7 +683,7 @@ def release_hold(hid: int, reason: str, email: str) -> dict:
 
 
 # ---------- S2-P4c-2 계정 → 담당자 (정규직 포함 · 근무표 '인센티브' 칸은 시급제만) ----------
-SQL_OWNERS = """SELECT id, work_date, manager_id, worker_id, memo, created_by, created_at FROM incentive_owners
+SQL_OWNERS = """SELECT id, work_date, manager_id, worker_id, memo, mode, created_by, created_at FROM incentive_owners
 WHERE deleted_at IS NULL AND work_date BETWEEN :s AND :e"""
 
 
@@ -711,7 +713,8 @@ def _owner_ctx(s: date, e: date) -> dict:
     for c in dash_db.rows(SQL_OWNERS, p):
         d, mid, wid = c["work_date"], int(c["manager_id"]), int(c["worker_id"])
         ctx["chosen"][(d, mid)] = c
-        ctx["taken"].setdefault(d, {}).setdefault(wid, set()).add(mid)
+        if (c.get("mode") or "replace") == "replace":   # [S2-P4c-2] 추가 담당은 본인 고정 계정 담당 유지
+            ctx["taken"].setdefault(d, {}).setdefault(wid, set()).add(mid)
     return ctx
 
 
@@ -735,7 +738,8 @@ def _owner_out(ctx: dict, wk: dict, d: date, mid: int) -> dict:
     wid, src, why = _owner(ctx, d, mid)
     c = ctx["chosen"].get((d, mid))
     return {"worker_id": wid, "name": (wk.get(wid) or {}).get("name") if wid is not None else None,
-            "source": src, "why": why, "memo": c.get("memo") if c else None}
+            "source": src, "why": why, "memo": c.get("memo") if c else None,
+            "mode": (c.get("mode") or "replace") if c else None}
 
 
 def _workers_on(d: date) -> dict[int, dict]:
@@ -744,38 +748,48 @@ def _workers_on(d: date) -> dict[int, dict]:
     for r in dash_db.rows("SELECT worker_id, pay_type, effective_from FROM worker_pay_rates WHERE deleted_at IS NULL"):
         rates.setdefault(int(r["worker_id"]), []).append(r)
     out: dict[int, dict] = {}
-    for w in dash_db.rows("SELECT id, name, income_type, active FROM workers WHERE deleted_at IS NULL ORDER BY name"):
+    for w in dash_db.rows("SELECT id, name, income_type, active, start_date, end_date FROM workers WHERE deleted_at IS NULL ORDER BY name"):
         r = effective_on(rates.get(int(w["id"]), []), d, "effective_from")
         out[int(w["id"])] = {"worker_id": int(w["id"]), "name": w["name"], "income_type": w["income_type"],
-                             "active": bool(w["active"]), "pay_type": r["pay_type"] if r else None}
+                             "active": bool(w["active"]), "pay_type": r["pay_type"] if r else None,
+                             "start": w["start_date"], "end": w["end_date"]}
     return out
 
 
-def save_owner(d: date, mid: int, wid: int | None, memo: str | None, email: str) -> dict:
+def save_owner(d: date, mid: int, wid: int | None, memo: str | None, email: str,
+               mode: str = "replace") -> dict:
     """계정 그날 담당 지정 / 해제(wid=None → 기본 규칙). 수정 = 기존 행 삭제 표시 + 새 행.
-    미래 날짜 허용 (예정된 대체 근무), 마감된 달은 불가."""
+    미래 날짜 허용 (예정된 대체 근무), 마감된 달은 불가.
+    [S2-P4c-2] mode = add(본인 고정 계정 유지 + 이 계정 추가) / replace(본인 계정 대신 이 계정).
+    퇴사자는 재직 기간(입사일~퇴사일) 안의 날짜면 지정 가능."""
     with get_dash_engine().begin() as conn:
         if conn.execute(text("SELECT 1 FROM month_closings WHERE month = :m AND reopened_at IS NULL"),
                         {"m": d.replace(day=1)}).first():
             raise ValueError(f"{d.year}년 {d.month}월은 마감되었습니다. 근무 기록 > 월 표 > 마감 관리에서 해제 후 수정하세요")
         if wid is not None:
-            w = conn.execute(text("SELECT name, active FROM workers WHERE id = :w AND deleted_at IS NULL"),
-                             {"w": wid}).first()
+            w = conn.execute(text("""SELECT name, active, start_date, end_date FROM workers
+                WHERE id = :w AND deleted_at IS NULL"""), {"w": wid}).first()
             if not w:
                 raise ValueError("인력을 찾을 수 없습니다 (새로고침하세요)")
-            if not w[1]:
-                raise ValueError(f"{w[0]}은(는) 비활성 인력입니다")
-        old = conn.execute(text("""SELECT id, worker_id, memo FROM incentive_owners
+            name, active, start, end = w[0], w[1], w[2], w[3]
+            if end is not None and d > end:
+                raise ValueError(f"{name}은(는) {end} 퇴사 — 그 뒤 날짜에는 지정할 수 없습니다")
+            if start is not None and d < start:
+                raise ValueError(f"{name}은(는) {start} 입사 — 그 전 날짜에는 지정할 수 없습니다")
+            if not active and end is None:
+                raise ValueError(f"{name}은(는) 비활성 인력입니다 (퇴사일이 없음)")
+        old = conn.execute(text("""SELECT id, worker_id, memo, mode FROM incentive_owners
             WHERE work_date = :d AND manager_id = :m AND deleted_at IS NULL"""), {"d": d, "m": mid}).first()
         if (old is None and wid is None) or (old is not None and wid is not None
-                                              and (int(old[1]), old[2]) == (wid, memo)):
+                                              and (int(old[1]), old[2], old[3]) == (wid, memo, mode)):
             return {"ok": True, "changed": False}
         if old:
             conn.execute(text("UPDATE incentive_owners SET deleted_at = NOW(), deleted_by = :e WHERE id = :i"),
                          {"i": old[0], "e": email})
         if wid is not None:
-            conn.execute(text("""INSERT INTO incentive_owners (work_date, manager_id, worker_id, memo, created_by)
-                VALUES (:d, :m, :w, :memo, :e)"""), {"d": d, "m": mid, "w": wid, "memo": memo, "e": email})
+            conn.execute(text("""INSERT INTO incentive_owners (work_date, manager_id, worker_id, memo, mode, created_by)
+                VALUES (:d, :m, :w, :memo, :mode, :e)"""),
+                         {"d": d, "m": mid, "w": wid, "memo": memo, "mode": mode, "e": email})
     return {"ok": True, "changed": True}
 
 
