@@ -31,6 +31,7 @@ type Props = {
   managers: ManagerRow[];
   isAdmin: boolean;
   justCreated?: boolean;
+  initialTab?: string;   // [S3-P2n] ?tab= 바로가기. 모르는 값이면 무시  
   onChanged: (id: number, created?: boolean) => Promise<void>;
   onClose: () => void;
 };
@@ -78,10 +79,11 @@ const toForm = (r: WorkerRate | null, from: string, defVat: boolean, memo = ""):
   memo, days: r?.work_days ?? 31,
 });
 
-export default function WorkerEditor({ row, workers, managers, isAdmin, justCreated, onChanged, onClose }: Props) {
+export default function WorkerEditor({ row, workers, managers, isAdmin, justCreated, initialTab, onChanged, onClose }: Props) {
   const isNew = row === null;
   const today = todayKst();
-  const [tab, setTab] = useState<Tab>(justCreated ? "rate" : "basic");
+  const [tab, setTab] = useState<Tab>(
+    justCreated ? "rate" : (["basic", "rate", "account", "vehicle"] as const).find((k) => k === initialTab) ?? "basic");
   const [detail, setDetail] = useState<WorkerDetail | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<Tab | null>(null);

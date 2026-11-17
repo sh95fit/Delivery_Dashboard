@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import PageLayout from "@/layouts/PageLayout";
 import Panel from "@/components/ui/Panel";
 import Button from "@/components/ui/Button";
@@ -33,6 +34,8 @@ export default function WorkersPage() {
   const [lastSaved, setLastSaved] = useState<{ id: number; at: string } | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [imported, setImported] = useState("");
+  const [params, setParams] = useSearchParams();
+  const [linked, setLinked] = useState<{ id: number; tab: string | null } | null>(null);
 
   async function reload() {
     try {
@@ -48,6 +51,23 @@ export default function WorkersPage() {
     }
   }
   useEffect(() => { reload().catch(() => {}); }, []);
+
+  // ?worker=ID&tab=vehicle 바로가기: 목록을 불러온 뒤 한 번만 처리하고 쿼리를 지운다(닫은 뒤 다시 열리지 않게)
+  useEffect(() => {
+    if (loading) return;
+    const raw = params.get("worker");
+    if (!raw) return;
+    const id = Number(raw);
+    const row = rows.find((r) => r.id === id);
+    if (row) {
+      if (!row.active) setView("all");
+      setLinked({ id, tab: params.get("tab") });
+      setSel(id);
+    } else {
+      setError(`바로가기 대상 인력 #${raw}을(를) 찾을 수 없습니다.`);
+    }
+    setParams({}, { replace: true });
+  }, [loading, rows, params, setParams]);
 
   const counts = useMemo(() => ({
     active: rows.filter((r) => r.active).length,
@@ -154,6 +174,7 @@ export default function WorkersPage() {
           managers={managers}
           isAdmin={isAdmin}
           justCreated={selRow !== null && created === selRow.id}
+          initialTab={linked && sel === linked.id ? linked.tab ?? undefined : undefined}          
           onChanged={async (id, isCreated) => {
             await reload();
             setLastSaved({ id, at: nowHms() });
@@ -162,7 +183,7 @@ export default function WorkersPage() {
               setSel(id);
             }
           }}
-          onClose={() => { setSel(null); setCreated(null); }}
+          onClose={() => { setSel(null); setCreated(null); setLinked(null); }}
         />
       )}
       {imported && <div className="mt"><span className="save-note ok">✓ {imported}</span></div>}
