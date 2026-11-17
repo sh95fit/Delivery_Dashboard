@@ -117,7 +117,7 @@ export default function ControlTable({ data, names, selected, onSelect, live, is
           right={<span className="muted small">아직 완료 안 된 곳 중 희망 시각보다 1분 이상 늦게 도착할 것으로 예상되는 곳 · 늦은 순 · 행 = 노선 상세 · 지도 = 마커로 이동</span>}
         >
           {lateAll.length > 0 && (
-            <DataTable columns={["노선", { label: "번호", num: true }, "고객사", "희망", "예상 도착", { label: "지연", num: true }, ""]}>
+            <DataTable columns={["노선", { label: "실제 순서", num: true }, "고객사", "희망", "예상 도착", { label: "지연", num: true }, ""]}>
               {lateAll.map(({ mid, s }) => (
                 <tr key={`${mid}:${s.id}`} onClick={() => open(mid)} style={rowStyle(selected === mid)}>
                   <td>{nameOf(mid)}</td>
@@ -265,9 +265,9 @@ function RouteDetail({ m, name, live, isAdmin, busy, excludes, noOf, onClose, on
       }
     >
       <div className="muted small" style={{ marginBottom: 6 }}>
-        번호 = 지도 마커 번호 (완료한 곳은 완료 순서, 남은 곳은 앱 배송 순서대로 이어서) · 앱 순서 = 앱에 저장된 배송 순서 — 두 값이 다르면 계획과 다른 순서로 배송한 곳
+        실제 순서 = 지도 마커 번호 (완료한 곳은 완료한 순서, 남은 곳은 계획 순서대로 이어서) · 계획 순서 = 처음 정한 배송 순서 — 두 값이 다르면 계획과 다르게 배송한 곳
       </div>
-      <DataTable columns={[{ label: "번호", num: true }, { label: "앱 순서", num: true }, "고객사", "희망", "완료 / 예상 도착", "구분", { label: "정차", num: true }, { label: "희망 대비", num: true }, ...(isAdmin ? ["관제"] : [])]}>
+      <DataTable columns={[{ label: "실제 순서", num: true }, { label: "계획 순서", num: true }, "고객사", "희망", "완료 / 예상 도착", "구분", { label: "정차", num: true }, { label: "희망 대비", num: true }, ...(isAdmin ? ["관제"] : [])]}>
         {list.map(({ s, kind }) => {
           const ex = kind === "excluded" ? exOf(s) : undefined;
           return (
