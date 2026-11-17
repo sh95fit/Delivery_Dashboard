@@ -216,7 +216,7 @@ export default function WorkPersonModal({ person, month, lastDay, focusDay, clos
             <col className="wp-c-day" /><col className="wp-c-off" />
             {multi && <col className="wp-c-con" />}
             <col className={`wp-c-in${anyEarly ? " wp-c-in-wide" : ""}`} /><col className="wp-c-out" /><col className="wp-c-brk" />            
-            <col className="wp-c-acc" /><col /><col className="wp-c-paid" /><col className="wp-c-st" />
+            <col className="wp-c-acc" /><col className="wp-c-memo" /><col className="wp-c-paid" /><col className="wp-c-st" />
           </colgroup>
           <thead>
             <tr>

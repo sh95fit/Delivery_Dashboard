@@ -448,16 +448,17 @@ tr.wl-dirty td { background: #fffbeb; }
 .wp-tbl .input-sm { width: 100%; max-width: none; height: 21px; padding: 0 4px; }
 .wp-tbl .chip { padding: 0 6px; font-size: 11px; line-height: 17px; }
 .wp-in { display: flex; align-items: center; gap: 4px; }
-.wp-in .input-sm { flex: 0 0 96px; width: 96px; }
+.wp-in .input-sm { flex: 0 0 110px; width: 110px; }
 .wp-note { font-size: 11px; color: var(--muted); white-space: nowrap; }
 .wp-tbl col.wp-c-day { width: 76px; }
 .wp-tbl col.wp-c-con { width: 190px; }
-.wp-tbl col.wp-c-in { width: 160px; }
-.wp-tbl col.wp-c-out { width: 104px; }
+.wp-tbl col.wp-c-in { width: 176px; }
+.wp-tbl col.wp-c-out { width: 128px; }
 .wp-tbl col.wp-c-brk { width: 72px; }
-.wp-tbl col.wp-c-acc { width: 180px; }
+.wp-tbl col.wp-c-acc { width: 210px; }
 .wp-tbl col.wp-c-paid { width: 130px; }
-.wp-tbl col.wp-c-st { width: 84px; }
+.wp-tbl col.wp-c-st { width: 120px; }
+.wp-tbl col.wp-c-memo { width: 200px; }
 
 /* ---------- 근무표 다운로드 (S2-P4a-2b) ---------- */
 .ex-opts { display: grid; gap: 10px; margin-bottom: 12px; }
