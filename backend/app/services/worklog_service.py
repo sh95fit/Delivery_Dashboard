@@ -501,6 +501,21 @@ def close_check(month: date) -> dict:
             totals["days"] += s["days"]
             totals["paid_min"] += s["paid_min"]
             totals["sheet_total"] += int(s["pay"]["sheet"]["total"])
+    # [S3-P2m-1] 고정 담당자 휴무인데 그 계정에 배송(인센티브) 있음 → 담당 지정 필요 (경고만 · 마감 차단 안 함)
+    try:
+        from app.services.incentive_service import _fixed_mid, _owner_ctx, person_month   # 함수 안 import = 순환 import 방지
+        ctx = _owner_ctx(first, last)
+        wname = {int(x["id"]): x["name"] for x in dash_db.rows(SQL_WORKERS)}
+        for u in person_month(first)["unassigned"]:
+            d = date.fromisoformat(u["date"])
+            ws = [wname.get(x, f"인력 {x}") for x in ctx["accs"]
+                  if x in ctx["off"].get(d, set()) and _fixed_mid(ctx, x, d) == u["manager_id"]]
+            if ws:
+                add("warn", None, d.day, f"{d.month}/{d.day} {u['manager_name']}: 고정 담당 {', '.join(ws)} 휴무인데 배송 있음 — "
+                                         "인센티브 > 일자별 입력에서 추가/대체 담당 지정 (지정 전까지 그날 인센티브 미배정)")
+    except Exception as e:  # noqa: BLE001
+        add("warn", None, None, f"휴무 담당 점검을 하지 못했습니다 ({type(e).__name__}) — 새로고침하세요")
+                    
     return {"month": first.isoformat(), "closed": closed, "ended": ended,
             "can_close": not closed and not any(i["level"] == "error" for i in issues),
             "issues": issues, "totals": totals, "history": history}
