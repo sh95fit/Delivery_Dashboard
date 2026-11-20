@@ -3,6 +3,7 @@ import os
 from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.openapi.utils import get_openapi
+from app.permissions import PermissionMiddleware
 
 from app.routers import (
     allowlist_routes, auth_routes, control_exclude_routes, delivery_routes, health_routes,
@@ -17,6 +18,7 @@ app.add_middleware(
     max_age=60 * 60 * 24 * 7,
 )
 
+app.add_middleware(PermissionMiddleware)
 app.include_router(health_routes.router)
 app.include_router(auth_routes.router)
 app.include_router(me_routes.router)

@@ -1,16 +1,19 @@
 """라우터 공통 (S1-P1). 권한 세트(P11) 전까지 수정은 ADMIN_EMAILS만."""
 import logging
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 
 from app.auth import get_current_email, is_admin_email
 
 logger = logging.getLogger("api")
 
 
-def require_admin(email: str = Depends(get_current_email)) -> str:
-    if not is_admin_email(email):
-        raise HTTPException(status_code=403, detail="관리자만 가능합니다")
+def require_admin(request: Request, email: str = Depends(get_current_email)) -> str:
+    """[P11-a] 관리자 검사를 권한셋 판정으로 교체 — 미들웨어와 같은 로직(2중 방어)."""
+    from app.permissions import allowed, resolve
+    page, op = resolve(request.url.path, request.method)
+    if not allowed(email, page, op):
+        raise HTTPException(status_code=403, detail="권한이 없습니다")
     return email
 
 
