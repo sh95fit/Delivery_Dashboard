@@ -30,5 +30,13 @@ def guard(fn, *args, fail: str = "처리 실패"):
         raise HTTPException(status_code=500, detail=f"{fail}: {exc}") from exc
 
 
+def require_super(email: str = Depends(get_current_email)) -> str:
+    """P11-b 시스템 어드민 전용 — 계정·권한셋·초대 API. grants와 무관."""
+    from app.services import permission_service
+    if not permission_service.is_super(email):
+        raise HTTPException(status_code=403, detail="시스템 어드민만 가능합니다")
+    return email
+
+
 def memo(v: str | None) -> str | None:
     return (v or "").strip() or None

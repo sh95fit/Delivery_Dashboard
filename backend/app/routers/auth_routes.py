@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.auth import is_allowed_email, oauth, set_session_cookie
+from app.services import account_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -23,6 +24,9 @@ async def auth_callback(request: Request):
             content={"detail": "접근 권한이 없습니다 — 관리자에게 문의하세요"},
         )
     response = RedirectResponse(url="/")
+    
+    account_service.auto_account_for_allowed(email)   # P11-b: 허용 목록 통과자 '열람' 자동 계정    
+    
     set_session_cookie(response, email)
     return response
 
