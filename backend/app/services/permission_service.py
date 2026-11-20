@@ -46,7 +46,7 @@ def perm_of(email: str) -> dict | None:
     try:
         with get_dash_engine().connect() as conn:
             r = conn.execute(text("""SELECT ps.grants FROM accounts a
-                JOIN permission_sets ps ON ps.id = a.permission_set_id
+                JOIN auth_permission_sets ps ON ps.id = a.auth_permission_set_id
                 WHERE a.email = :e AND a.active AND a.deleted_at IS NULL"""),
                              {"e": email}).fetchone()
             out = r[0] if r else None
