@@ -6,6 +6,7 @@ P11-b 가이드 8장의 서버 검증이 그 역할입니다.
 import datetime
 
 from app.services import account_service as svc
+from datetime import datetime
 
 
 def _inv_row(email="a@lunchlab.me", expires_in=1, used_at=None, revoked_at=None):
