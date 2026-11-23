@@ -1,58 +1,94 @@
-import json
+"""P11-b 계정·초대 서비스 테스트 — DB 없이 순수 로직만 검증 (CI 안전).
+
+DB 의존 동작(수락 시 계정 생성 등)은 배포 후 서버 검증 스크립트로 확인합니다 —
+P11-b 가이드 8장의 서버 검증이 그 역할입니다.
+"""
+import datetime
 
 from app.services import account_service as svc
-from sqlalchemy import create_engine, text
 
 
-def _seed(pg):
-    with pg.connect() as c:
-        c.execute(text("DROP TABLE IF EXISTS accounts, invitations, auth_permission_sets CASCADE"))
-        c.execute(text("CREATE TABLE auth_permission_sets (id SERIAL PRIMARY KEY, name TEXT UNIQUE, "
-                       "grants JSONB, builtin BOOLEAN DEFAULT FALSE, deleted_at TIMESTAMPTZ)"))
-        c.execute(text("""CREATE TABLE accounts (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL,
-                       name TEXT, auth_permission_set_id INT REFERENCES auth_permission_sets(id),
-                       is_super BOOLEAN DEFAULT FALSE, active BOOLEAN DEFAULT TRUE,
-                       last_login_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ)"""))
-        c.execute(text("""CREATE TABLE invitations (id SERIAL PRIMARY KEY, token TEXT UNIQUE,
-                       email TEXT, auth_permission_set_id INT REFERENCES auth_permission_sets(id),
-                       invited_by TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), expires_at TIMESTAMPTZ,
-                       used_at TIMESTAMPTZ, revoked_at TIMESTAMPTZ)"""))
-        c.execute(text("INSERT INTO auth_permission_sets (name, grants, builtin) "
-                       "VALUES ('열람', '{\\\"routes\\\":{\\\"R\\\":true}}', TRUE) RETURNING id"))
-        c.commit()
+def _inv_row(email="a@lunchlab.me", expires_in=1, used_at=None, revoked_at=None):
+    """invitations 행 모양(dict) — accept_invitation이 읽는 칸만."""
+    tz = datetime.timezone.utc
+    return {"id": 1, "email": email,
+            "auth_permission_set_id": 1,
+            "expires_at": datetime.datetime.now(tz) + datetime.timedelta(hours=expires_in),
+            "used_at": used_at, "revoked_at": revoked_at}
 
 
-def test_invite_accept_creates_account(monkeypatch):
-    from sqlalchemy import create_engine as ce
-    pg = ce("postgresql+psycopg2://user:migtest@localhost:5432/migtest2")
-    _seed(pg)
-    monkeypatch.setattr("app.services.account_service.get_dash_engine", lambda: pg)
-    inv = svc.create_invitation("new@lunchlab.me", 1, "admin@x")
-    r = svc.accept_invitation(inv["token"], "new@lunchlab.me")
-    assert r["ok"]
-    with pg.connect() as c:
-        row = c.execute(text("SELECT email, auth_permission_set_id FROM accounts WHERE email='new@lunchlab.me'")).fetchone()
-        used = c.execute(text("SELECT used_at FROM invitations WHERE token=:t"),
-                         {"t": inv["token"]}).scalar()
-    assert row and row[1] == 1 and used is not None
+class _FakeResult:
+    def __init__(self, value): self._v = value
+    def scalar(self): return self._v
+    def mappings(self): return self
+    def fetchone(self): return self._v
 
 
-def test_invite_rejects_wrong_email(monkeypatch):
-    from sqlalchemy import create_engine as ce
-    pg = ce("postgresql+psycopg2://user:migtest@localhost:5432/migtest2")
-    _seed(pg)
-    monkeypatch.setattr("app.services.account_service.get_dash_engine", lambda: pg)
-    inv = svc.create_invitation("a@lunchlab.me", 1, "admin@x")
+class _FakeConn:
+    """accept_invitation의 with get_dash_engine().begin() conn 최소 모조."""
+    def __init__(self, rows):
+        self._rows = list(rows); self._i = 0
+        self.executed = []
+    def execute(self, q, params=None):
+        self.executed.append((str(q)[:40], params))
+        r = _FakeResult(self._rows[self._i] if self._i < len(self._rows) else None)
+        self._i += 1
+        return r
+    def begin(self): return self
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+
+
+def test_accept_rejects_used_invitation(monkeypatch):
+    row = _inv_row(used_at=datetime.datetime.now(datetime.timezone.utc))
+    monkeypatch.setattr(svc, "get_dash_engine", lambda: _FakeConn([row]))
     try:
-        svc.accept_invitation(inv["token"], "b@lunchlab.me")
+        svc.accept_invitation("tok", "a@lunchlab.me")
+        assert False, "사용된 초대가 수락되면 안 됨"
+    except ValueError as e:
+        assert "사용·만료·취소" in str(e)
+
+
+def test_accept_rejects_expired_invitation(monkeypatch):
+    row = _inv_row(expires_in=-1)
+    monkeypatch.setattr(svc, "get_dash_engine", lambda: _FakeConn([row]))
+    try:
+        svc.accept_invitation("tok", "a@lunchlab.me")
+        assert False, "만료된 초대가 수락되면 안 됨"
+    except ValueError as e:
+        assert "사용·만료·취소" in str(e)
+
+
+def test_accept_rejects_revoked_invitation(monkeypatch):
+    row = _inv_row(revoked_at=datetime.datetime.now(datetime.timezone.utc))
+    monkeypatch.setattr(svc, "get_dash_engine", lambda: _FakeConn([row]))
+    try:
+        svc.accept_invitation("tok", "a@lunchlab.me")
+        assert False, "취소된 초대가 수락되면 안 됨"
+    except ValueError as e:
+        assert "사용·만료·취소" in str(e)
+
+
+def test_accept_rejects_email_mismatch(monkeypatch):
+    row = _inv_row(email="a@lunchlab.me")
+    conn = _FakeConn([row, None, None, None])
+    monkeypatch.setattr(svc, "get_dash_engine", lambda: conn)
+    try:
+        svc.accept_invitation("tok", "b@lunchlab.me")
         assert False, "다른 이메일이 수락되면 안 됨"
     except ValueError as e:
         assert "다릅니다" in str(e)
 
 
-def test_builtin_set_cannot_be_modified():
-    try:
-        svc.save_permission_set("관리자", {}, "x@y", set_id=1)
-        assert False
-    except ValueError:
-        pass
+def test_accept_success_flow(monkeypatch):
+    row = _inv_row(email="a@lunchlab.me")
+    conn = _FakeConn([row, 1, 1, 1])
+    monkeypatch.setattr(svc, "get_dash_engine", lambda: conn)
+    calls = []
+    monkeypatch.setattr("app.services.permission_service.invalidate",
+                        lambda e=None: calls.append(e))
+    r = svc.accept_invitation("tok", "a@lunchlab.me")
+    assert r["ok"]
+    assert "a@lunchlab.me" in calls           # 수락 후 캐시 무효화 확인
+    sql_all = " | ".join(s for s, _ in conn.executed)
+    assert "accounts" in sql_all and "used_at = NOW()" in sql_all

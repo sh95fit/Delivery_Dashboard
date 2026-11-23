@@ -132,7 +132,7 @@ def accept_invitation(token: str, google_email: str) -> dict:
             FROM invitations WHERE token = :t"""), {"t": token}).mappings().fetchone()
         if not row:
             raise ValueError("초대를 찾을 수 없습니다")
-        if row["used_at"] or row["revoked_at"] or row["expires_at"] < __import__("datetime").datetime.now(row["expires_at"].tzinfo):
+        if row["used_at"] or row["revoked_at"] or row["expires_at"] < datetime.now(row["expires_at"].tzinfo):
             raise ValueError("사용·만료·취소된 초대입니다 — 새로 초대해 주세요")
         if row["email"] != google_email:
             raise ValueError(f"초대된 이메일({row['email']})과 로그인한 계정이 다릅니다")
