@@ -4,7 +4,7 @@ from sqlalchemy import text
 
 from app.auth import oauth, set_session_cookie
 from app.database import get_dash_engine
-from app.services import permission_service
+from app.services import account_service, permission_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -20,6 +20,9 @@ async def auth_callback(request: Request):
     token = await oauth.google.authorize_access_token(request)
     userinfo = token.get("userinfo") or {}
     email = (userinfo.get("email") or "").lower()
+    # P11 Step3-3: 첫 로그인 = 초대 수락 (유효한 초대 + 접근 규칙이 모두 있을 때만 활성화)
+    if email:
+        account_service.accept_on_login(email)
     # P11-c: 초대 수락 계정 + 접근 규칙(또는 시스템 마스터)만 로그인 허용
     if not email or not permission_service.can_login(email):
         return JSONResponse(
