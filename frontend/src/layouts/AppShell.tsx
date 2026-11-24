@@ -123,11 +123,18 @@ export default function AppShell() {
               ))}
             </nav>
 
-            <div className="sb-foot" title={me?.email}>
-              {me?.email}
-              {me?.is_super ? " · 마스터" : ""}
-              <div style={{ marginTop: 6 }}>
-                <a href="/api/auth/logout" className="sb-logout">로그아웃</a>
+            <div className="sb-foot">
+              <div className="sb-user">
+                <div className="sb-who" title={me?.email}>
+                  <div className="sb-email">{me?.email}</div>
+                  <div className="sb-role">{me?.is_super ? "마스터" : "사용자"}</div>
+                </div>
+                <a
+                  href="/api/auth/logout"
+                  className="sb-logout"
+                  title="로그아웃"
+                  onClick={(e) => { if (!window.confirm("로그아웃할까요?")) e.preventDefault(); }}
+                >로그아웃</a>
               </div>
             </div>
           </aside>

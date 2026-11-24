@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState } from "react";
 import { ApiError } from "@/api/client";
 import {
   OPS, OP_LABELS, PAGE_KEYS, PAGE_LABELS, cleanGrants, toggleOp,
@@ -8,30 +8,23 @@ import {
 import UsersTab from "./UsersTab";
 
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e));
-const cell: CSSProperties = { border: "1px solid #ddd", padding: "6px 8px", textAlign: "left" };
-const box: CSSProperties = { border: "1px solid #ddd", borderRadius: 8, padding: 12, marginBottom: 16 };
-const errStyle: CSSProperties = { color: "#c0392b", margin: "8px 0" };
 
 type Tab = "sets" | "users";
 
 export default function PermissionsPage() {
   const [tab, setTab] = useState<Tab>("users");
   const tabBtn = (k: Tab, label: string) => (
-    <button
-      onClick={() => setTab(k)}
-      style={{ padding: "6px 14px", marginRight: 6, fontWeight: tab === k ? 700 : 400,
-        borderBottom: tab === k ? "2px solid #333" : "2px solid transparent" }}
-    >{label}</button>
+    <button className={`tab${tab === k ? " active" : ""}`} onClick={() => setTab(k)}>{label}</button>
   );
   return (
-    <div style={{ padding: 16 }}>
-      <h2>권한 관리</h2>
-      <div style={{ marginBottom: 16 }}>
-        {tabBtn("users", "사용자")}{tabBtn("sets", "권한셋")}
+    <>
+      <header className="topbar"><h1>권한 관리</h1></header>
+      <div className="page">
+        <div className="tabs">{tabBtn("users", "사용자")}{tabBtn("sets", "권한셋")}</div>
+        {tab === "users" && <UsersTab />}
+        {tab === "sets" && <SetsTab />}
       </div>
-      {tab === "users" && <UsersTab />}
-      {tab === "sets" && <SetsTab />}
-    </div>
+    </>
   );
 }
 
@@ -75,64 +68,91 @@ function SetsTab() {
   };
 
   return (
-    <div>
-      {err && <div style={errStyle}>{err}</div>}
-      <button onClick={() => startEdit(null)} style={{ marginBottom: 8 }}>+ 새 권한셋</button>
-      <table style={{ borderCollapse: "collapse", width: "100%", marginBottom: 16 }}>
-        <thead><tr>
-          <th style={cell}>이름</th><th style={cell}>메모</th><th style={cell}>사용자 수</th>
-          <th style={cell}>구분</th><th style={cell}></th>
-        </tr></thead>
-        <tbody>
-          {sets.map((s) => {
-            const blockReason = s.builtin ? "기본 제공 권한셋은 삭제할 수 없습니다"
-              : s.rule_count > 0 ? `접근 규칙 ${s.rule_count}개가 사용 중입니다` : "";
-            return (
-              <tr key={s.id} style={{ background: editId === s.id ? "#f5f8ff" : undefined }}>
-                <td style={cell}>{s.name}</td>
-                <td style={cell}>{s.memo ?? ""}</td>
-                <td style={cell}>{s.rule_count}</td>
-                <td style={cell}>{s.builtin ? "기본 제공" : "사용자"}</td>
-                <td style={cell}>
-                  <button onClick={() => startEdit(s)}>편집</button>{" "}
-                  <button onClick={() => remove(s)} disabled={Boolean(blockReason)} title={blockReason}>삭제</button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <>
+      {err && <p className="error-box mt">{err}</p>}
 
-      {editId !== null && (
-        <div style={box}>
-          <h3 style={{ marginTop: 0 }}>{editId === "new" ? "새 권한셋" : "권한셋 편집"}</h3>
-          <div style={{ marginBottom: 8 }}>
-            <label>이름 <input value={name} maxLength={50} onChange={(e) => setName(e.target.value)} /></label>{" "}
-            <label>메모 <input value={memo} onChange={(e) => setMemo(e.target.value)} style={{ width: 300 }} /></label>
+      <section className="panel">
+        <div className="panel-head">
+          <h2 className="panel-title">권한셋 목록</h2>
+          <div className="panel-right">
+            <button className="btn btn-primary" onClick={() => startEdit(null)}>+ 새 권한셋</button>
           </div>
-          <table style={{ borderCollapse: "collapse", marginBottom: 8 }}>
+        </div>
+        <div className="tbl-wrap">
+          <table className="tbl">
             <thead><tr>
-              <th style={cell}>화면</th>
-              {OPS.map((op) => <th key={op} style={{ ...cell, textAlign: "center" }}>{op} ({OP_LABELS[op]})</th>)}
+              <th>이름</th><th>메모</th><th className="num">사용자 수</th><th>구분</th><th>동작</th>
             </tr></thead>
             <tbody>
-              {PAGE_KEYS.map((k) => (
-                <tr key={k}>
-                  <td style={cell}>{PAGE_LABELS[k]}</td>
-                  {OPS.map((op) => (
-                    <td key={op} style={{ ...cell, textAlign: "center" }}>
-                      <input type="checkbox" checked={grants[k][op]}
-                        onChange={() => setGrants((g) => toggleOp(g, k, op))} />
+              {sets.map((s) => {
+                const blockReason = s.builtin ? "기본 제공 권한셋은 삭제할 수 없습니다"
+                  : s.rule_count > 0 ? `사용자 ${s.rule_count}명이 사용 중입니다` : "";
+                return (
+                  <tr key={s.id} className={editId === s.id ? "selected" : undefined}>
+                    <td>{s.name}</td>
+                    <td className="small muted">{s.memo ?? ""}</td>
+                    <td className="num">{s.rule_count}</td>
+                    <td>
+                      <span className={`chip ${s.builtin ? "chip-internal" : "chip-neutral"}`}>
+                        {s.builtin ? "기본 제공" : "사용자"}
+                      </span>
                     </td>
-                  ))}
-                </tr>
-              ))}
+                    <td>
+                      <div className="toolbar">
+                        <button className="btn btn-sm" onClick={() => startEdit(s)}>편집</button>
+                        <button className="btn btn-sm btn-danger" onClick={() => remove(s)}
+                          disabled={Boolean(blockReason)} title={blockReason}>삭제</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {sets.length === 0 && <tr><td colSpan={5} className="muted">권한셋이 없습니다</td></tr>}
             </tbody>
           </table>
-          <button onClick={save} disabled={busy}>{busy ? "저장 중…" : "저장"}</button>{" "}
-          <button onClick={() => setEditId(null)} disabled={busy}>취소</button>
         </div>
+      </section>
+
+      {editId !== null && (
+        <section className="panel">
+          <div className="panel-head">
+            <h2 className="panel-title">{editId === "new" ? "새 권한셋" : "권한셋 편집"}</h2>
+          </div>
+          <p className="panel-desc">보기(R)를 끄면 생성·수정·삭제도 함께 꺼집니다.</p>
+          <div className="form-row">
+            <input className="input" placeholder="이름" value={name} maxLength={50}
+              onChange={(e) => setName(e.target.value)} />
+            <input className="input grow" placeholder="메모(선택)" value={memo}
+              onChange={(e) => setMemo(e.target.value)} />
+          </div>
+          <div className="tbl-wrap mt">
+            <table className="tbl perm-grid">
+              <thead><tr>
+                <th>화면</th>
+                {OPS.map((op) => <th key={op} className="center">{OP_LABELS[op]}</th>)}
+              </tr></thead>
+              <tbody>
+                {PAGE_KEYS.map((k) => (
+                  <tr key={k}>
+                    <td>{PAGE_LABELS[k]}</td>
+                    {OPS.map((op) => (
+                      <td key={op} className="center">
+                        <input type="checkbox" checked={grants[k][op]}
+                          aria-label={`${PAGE_LABELS[k]} ${OP_LABELS[op]}`}
+                          onChange={() => setGrants((g) => toggleOp(g, k, op))} />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="toolbar mt">
+            <button className="btn btn-primary" onClick={save} disabled={busy}>{busy ? "저장 중…" : "저장"}</button>
+            <button className="btn" onClick={() => setEditId(null)} disabled={busy}>취소</button>
+          </div>
+        </section>
       )}
-    </div>
+    </>
   );
 }
