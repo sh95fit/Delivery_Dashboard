@@ -39,7 +39,7 @@ export const NAV: NavSection[] = [
       { to: "/settings/managers", label: "매니저 계정", hint: "운영 앱 배송 계정 (이름·색·운영 상태)", icon: "idcard", ready: true, page: "managers" },
       { to: "/settings/vehicles", label: "차량·지출", hint: "차량 · 유류비", icon: "truck", ready: true, page: "vehicles" },
       { to: "/settings/internal", label: "직원식", hint: "직원식 대상 설정", icon: "tag", ready: true, page: "internal" },
-      { to: "/settings/permissions", label: "권한", icon: "lock", ready: false, step: "P11", superOnly: true },
+      { to: "/settings/permissions", label: "권한", hint: "권한셋 · 접근 규칙 (마스터 전용)", icon: "lock", ready: true, superOnly: true },
     ],
   },
 ];

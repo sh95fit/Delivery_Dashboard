@@ -10,6 +10,7 @@ import WorkLogPage from "./features/worklogs/WorkLogPage";
 import IncentivePage from "./features/incentive/IncentivePage";
 import LogisticsPage from "./features/logistics/LogisticsPage";
 import RequirePage from "./layouts/RequirePage";
+import PermissionsPage from "./features/settings/PermissionsPage";
 
 
 export const router = createBrowserRouter([
@@ -25,6 +26,7 @@ export const router = createBrowserRouter([
       { path: "/ops/work", element: <RequirePage page="worklogs"><WorkLogPage /></RequirePage> },
       { path: "/finance/incentive", element: <RequirePage page="incentive"><IncentivePage /></RequirePage> },
       { path: "/finance/cost", element: <RequirePage page="logistics"><LogisticsPage /></RequirePage> },
+      { path: "/settings/permissions", element: <RequirePage superOnly><PermissionsPage /></RequirePage> },      
     ],
   },
   { path: "*", element: <Navigate to="/" replace /> },
