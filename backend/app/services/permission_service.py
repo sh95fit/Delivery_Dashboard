@@ -24,14 +24,12 @@ _SQL_PERM = text("""
     FROM accounts a
     JOIN auth_access_rules r
       ON r.active AND r.deleted_at IS NULL
-     AND ((r.kind = 'email'  AND lower(r.value) = a.email)
-       OR (r.kind = 'domain' AND lower(r.value) = split_part(a.email, '@', 2)))
+     AND r.kind = 'email' AND lower(r.value) = a.email
     JOIN auth_permission_sets ps
       ON ps.id = r.permission_set_id AND ps.deleted_at IS NULL
     WHERE a.email = :e
       AND a.active AND a.deleted_at IS NULL
       AND a.activated_at IS NOT NULL
-    ORDER BY CASE r.kind WHEN 'email' THEN 0 ELSE 1 END
     LIMIT 1
 """)
 

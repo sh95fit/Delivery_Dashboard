@@ -22,8 +22,7 @@ _SQL_HAS_RULE = """
     SELECT 1 FROM auth_access_rules r
     JOIN auth_permission_sets ps ON ps.id = r.permission_set_id AND ps.deleted_at IS NULL
     WHERE r.active AND r.deleted_at IS NULL
-      AND ((r.kind = 'email'  AND lower(r.value) = :e)
-        OR (r.kind = 'domain' AND lower(r.value) = split_part(:e, '@', 2)))
+      AND r.kind = 'email' AND lower(r.value) = :e
     LIMIT 1"""
 
 
