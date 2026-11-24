@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import Panel from "@/components/ui/Panel";
 import Chip, { type ChipTone } from "@/components/ui/Chip";
 import {
-  type UserRow, type PermSetLite, type UserStatus, listUsers, listPermSets, createUser,
-  revokeUserInvite, statusLabel, fmtDate, openGmailInvite,
+  type UserRow, type PermSetLite, type UserStatus, type InviteResult, listUsers, listPermSets, createUser,
+  revokeUserInvite, resendInvite, statusLabel, fmtDate,
 } from "@/api/users";
 import UserEditModal from "./UserEditModal";
 
@@ -39,21 +39,35 @@ export default function UsersTab() {
     finally { setBusy(false); }
   };
 
-  const setName = (id: number | null) => sets.find((s) => s.id === id)?.name ?? null;
+  const [note, setNote] = useState("");
+  const mailNote = (to: string, r: InviteResult) =>
+    r.mail_sent ? setNote(`${to} 주소로 초대 메일을 보냈습니다`)
+      : setErr(`초대는 저장됐지만 메일을 보내지 못했습니다: ${r.mail_error ?? ""} (메일 다시 보내기를 눌러 주세요)`);
 
   const invite = async () => {
     const to = email.trim();
+    setNote("");
     if (!to) return setErr("이메일을 입력하세요");
     if (psId === "") return setErr("권한셋을 선택하세요");
     if (days < 1 || days > 30) return setErr("유효기간은 1~30일입니다");
-    const ok = await run(() => createUser({ email: to, permission_set_id: psId, days, memo: memo.trim() || null }));
-    if (ok) { openGmailInvite(to, setName(psId), days); setEmail(""); setMemo(""); setDays(7); }
+    const h: { r?: InviteResult } = {};
+    const ok = await run(async () => { h.r = await createUser({ email: to, permission_set_id: psId, days, memo: memo.trim() || null }); });
+    if (ok && h.r) { mailNote(to, h.r); setEmail(""); setMemo(""); setDays(7); }
   };
 
   const reinvite = async (u: UserRow) => {
+    setNote("");
     if (!u.permission_set_id) return setErr("권한셋 정보가 없어 재초대할 수 없습니다");
-    const ok = await run(() => createUser({ email: u.email, permission_set_id: u.permission_set_id!, days: 7, memo: u.memo }));
-    if (ok) openGmailInvite(u.email, u.permission_set_name, 7);
+    const h: { r?: InviteResult } = {};
+    const ok = await run(async () => { h.r = await createUser({ email: u.email, permission_set_id: u.permission_set_id!, days: 7, memo: u.memo }); });
+    if (ok && h.r) mailNote(u.email, h.r);
+  };
+
+  const resend = async (u: UserRow) => {
+    setBusy(true); setErr(""); setNote("");
+    try { mailNote(u.email, await resendInvite(u.email, u.days_left ?? 7)); }
+    catch (e) { setErr((e as Error).message); }
+    finally { setBusy(false); }
   };
 
   const invites = rows.filter((u) => !u.is_super && ["invited", "expired", "revoked", "none"].includes(u.status));
@@ -62,13 +76,14 @@ export default function UsersTab() {
   const shown = filter === "all" ? members : members.filter((u) => u.status === filter);
   const fBtn = (k: Filter, label: string) => (
     <button className={`tab${filter === k ? " active" : ""}`} onClick={() => setFilter(k)}>{label}</button>
-  );
+  );  
 
   return (
     <>
       {err && <p className="error-box mt">{err}</p>}
+      {note && <p className="notice mt">{note}</p>}      
 
-      <Panel title="사용자 추가" desc="초대 메일 작성을 누르면 Gmail 창이 열립니다. 보내기를 누르면 발송되고, 받은 사람이 구글 로그인하면 사용자 목록으로 옮겨집니다.">
+      <Panel title="사용자 추가" desc="초대 메일이 자동으로 발송됩니다. 받은 사람이 구글 로그인하면 사용자 목록으로 옮겨집니다.">
         <div className="form-row">
           <input className="input grow" placeholder="이메일" value={email} onChange={(e) => setEmail(e.target.value)} />
           <select className="input" value={psId} onChange={(e) => setPsId(e.target.value ? Number(e.target.value) : "")}>
@@ -79,7 +94,7 @@ export default function UsersTab() {
             onChange={(e) => setDays(Number(e.target.value))} />
           <span className="muted small">일 유효</span>
           <input className="input grow" placeholder="메모(선택)" value={memo} onChange={(e) => setMemo(e.target.value)} />
-          <button className="btn btn-primary" disabled={busy} onClick={invite}>초대 메일 작성</button>
+          <button className="btn btn-primary" disabled={busy} onClick={invite}>{busy ? "발송 중…" : "초대 메일 발송"}</button>
         </div>
 
         {invites.length > 0 && (
@@ -97,7 +112,7 @@ export default function UsersTab() {
                     <td>
                       <div className="toolbar">
                         {u.status === "invited" ? (<>
-                          <button className="btn btn-sm" onClick={() => openGmailInvite(u.email, u.permission_set_name, u.days_left ?? 7)}>메일 다시 작성</button>
+                          <button className="btn btn-sm" disabled={busy} onClick={() => resend(u)}>메일 다시 보내기</button>
                           <button className="btn btn-sm btn-danger" disabled={busy}
                             onClick={() => confirm("초대를 취소할까요?") && run(() => revokeUserInvite(u.email))}>초대취소</button>
                         </>) : (

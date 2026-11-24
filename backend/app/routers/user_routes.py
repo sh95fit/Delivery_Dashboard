@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.deps import guard, require_super
+from app.services import mail_service
 from app.services import user_service as svc
 
 router = APIRouter(tags=["users"], dependencies=[Depends(require_super)])
@@ -30,8 +31,17 @@ def list_users(me: str = Depends(require_super)):
 
 @router.post("/users")
 def create_user(b: UserBody, me: str = Depends(require_super)):
-    return guard(svc.create_user, b.email, b.permission_set_id, b.days, b.memo, me,
-                 fail="초대 실패")
+    r = guard(svc.create_user, b.email, b.permission_set_id, b.days, b.memo, me, fail="초대 실패")
+    return {**r, **mail_service.send_invite(r["email"], b.days or 7)}
+
+
+class ResendBody(BaseModel):
+    days: int = 7
+
+
+@router.post("/users/{email}/invitation/resend")
+def resend_invite(email: str, b: ResendBody):
+    return mail_service.send_invite(email.strip().lower(), b.days)
 
 
 @router.put("/users/{email}/permission-set")

@@ -60,7 +60,10 @@ const enc = (e: string) => encodeURIComponent(e);
 
 export const listUsers = () => http<UserRow[]>("/api/users");
 export const listPermSets = () => http<PermSetLite[]>("/api/permission-sets");
-export const createUser = (b: UserInput) => post<{ email: string }>("/api/users", b);
+export type InviteResult = { email?: string; mail_sent: boolean; mail_error: string | null };
+export const createUser = (b: UserInput) => post<InviteResult>("/api/users", b);
+export const resendInvite = (email: string, days: number) =>
+  post<InviteResult>(`/api/users/${enc(email)}/invitation/resend`, { days });
 export const setUserPermSet = (email: string, permission_set_id: number) =>
   put<{ email: string }>(`/api/users/${enc(email)}/permission-set`, { permission_set_id });
 export const setUserActive = (email: string, active: boolean) =>
