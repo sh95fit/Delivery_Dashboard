@@ -1,8 +1,16 @@
 import { useEffect, useState } from "react";
+import Panel from "@/components/ui/Panel";
+import Chip, { type ChipTone } from "@/components/ui/Chip";
 import {
-  UserRow, PermSetLite, listUsers, listPermSets, createUser, setUserPermSet,
-  setUserActive, revokeUserInvite, statusLabel, STATUS_COLORS, fmtDate,
-} from "../../api/users";
+  type UserRow, type PermSetLite, type UserStatus, listUsers, listPermSets, createUser,
+  revokeUserInvite, statusLabel, fmtDate, openGmailInvite,
+} from "@/api/users";
+import UserEditModal from "./UserEditModal";
+
+const TONE: Record<UserStatus, ChipTone> = {
+  active: "ok", inactive: "danger", invited: "warn", expired: "caution", revoked: "neutral", none: "neutral",
+};
+type Filter = "active" | "inactive" | "all";
 
 export default function UsersTab() {
   const [rows, setRows] = useState<UserRow[]>([]);
@@ -12,99 +20,126 @@ export default function UsersTab() {
   const [days, setDays] = useState(7);
   const [memo, setMemo] = useState("");
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [filter, setFilter] = useState<Filter>("active");
+  const [editing, setEditing] = useState<UserRow | null>(null);
 
   const load = async () => {
     try {
       const [u, s] = await Promise.all([listUsers(), listPermSets()]);
-      setRows(u);
-      setSets(s);
-    } catch (e) {
-      alert((e as Error).message);
-    }
+      setRows(u); setSets(s); setErr("");
+    } catch (e) { setErr((e as Error).message); }
   };
   useEffect(() => { load(); }, []);
 
   const run = async (fn: () => Promise<unknown>) => {
-    setBusy(true);
-    try { await fn(); await load(); }
-    catch (e) { alert((e as Error).message); }
+    setBusy(true); setErr("");
+    try { await fn(); await load(); return true; }
+    catch (e) { setErr((e as Error).message); return false; }
     finally { setBusy(false); }
   };
 
-  const invite = () => {
-    if (!email.trim()) return alert("이메일을 입력하세요");
-    if (psId === "") return alert("권한셋을 선택하세요");
-    if (days < 1 || days > 30) return alert("유효기간은 1~30일입니다");
-    run(async () => {
-      await createUser({ email: email.trim(), permission_set_id: psId, days, memo: memo.trim() || null });
-      setEmail(""); setMemo(""); setDays(7);
-    });
+  const setName = (id: number | null) => sets.find((s) => s.id === id)?.name ?? null;
+
+  const invite = async () => {
+    const to = email.trim();
+    if (!to) return setErr("이메일을 입력하세요");
+    if (psId === "") return setErr("권한셋을 선택하세요");
+    if (days < 1 || days > 30) return setErr("유효기간은 1~30일입니다");
+    const ok = await run(() => createUser({ email: to, permission_set_id: psId, days, memo: memo.trim() || null }));
+    if (ok) { openGmailInvite(to, setName(psId), days); setEmail(""); setMemo(""); setDays(7); }
   };
 
-  const reinvite = (u: UserRow) => {
-    if (!u.permission_set_id) return alert("먼저 권한셋을 선택하세요");
-    run(() => createUser({ email: u.email, permission_set_id: u.permission_set_id!, days: 7, memo: u.memo }));
+  const reinvite = async (u: UserRow) => {
+    if (!u.permission_set_id) return setErr("권한셋 정보가 없어 재초대할 수 없습니다");
+    const ok = await run(() => createUser({ email: u.email, permission_set_id: u.permission_set_id!, days: 7, memo: u.memo }));
+    if (ok) openGmailInvite(u.email, u.permission_set_name, 7);
   };
 
-  const cell = { padding: "6px 8px", borderBottom: "1px solid #eee" } as const;
+  const invites = rows.filter((u) => !u.is_super && ["invited", "expired", "revoked", "none"].includes(u.status));
+  const members = rows.filter((u) => u.status === "active" || u.status === "inactive");
+  const cnt = (s: UserStatus) => members.filter((u) => u.status === s).length;
+  const shown = filter === "all" ? members : members.filter((u) => u.status === filter);
+  const fBtn = (k: Filter, label: string) => (
+    <button className={`tab${filter === k ? " active" : ""}`} onClick={() => setFilter(k)}>{label}</button>
+  );
 
   return (
-    <div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-        <input placeholder="이메일" value={email} onChange={(e) => setEmail(e.target.value)} />
-        <select value={psId} onChange={(e) => setPsId(e.target.value ? Number(e.target.value) : "")}>
-          <option value="">권한셋 선택</option>
-          {sets.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-        <input type="number" min={1} max={30} value={days} style={{ width: 70 }}
-          onChange={(e) => setDays(Number(e.target.value))} />일
-        <input placeholder="메모" value={memo} onChange={(e) => setMemo(e.target.value)} />
-        <button disabled={busy} onClick={invite}>초대</button>
-      </div>
+    <>
+      {err && <p className="error-box mt">{err}</p>}
 
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr>{["이메일", "권한셋", "상태", "최근 로그인", "메모", "동작"].map((h) =>
-            <th key={h} style={{ ...cell, textAlign: "left" }}>{h}</th>)}</tr>
-        </thead>
-        <tbody>
-          {rows.map((u) => (
-            <tr key={u.email}>
-              <td style={cell}>
-                {u.email}
-                {u.is_super && <b style={{ marginLeft: 6, color: "#7c3aed" }}>마스터</b>}
-                {u.is_me && <span style={{ marginLeft: 6, color: "#666" }}>(나)</span>}
-              </td>
-              <td style={cell}>
-                {u.is_super ? "전체" : (
-                  <select disabled={busy} value={u.permission_set_id ?? ""}
-                    onChange={(e) => e.target.value &&
-                      run(() => setUserPermSet(u.email, Number(e.target.value)))}>
-                    <option value="">선택</option>
-                    {sets.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                )}
-              </td>
-              <td style={{ ...cell, color: STATUS_COLORS[u.status] }}>{statusLabel(u)}</td>
-              <td style={cell}>{fmtDate(u.last_login_at)}</td>
-              <td style={cell}>{u.memo ?? ""}</td>
-              <td style={cell}>
-                {u.status === "active" && u.can_deactivate && (
-                  <button disabled={busy} onClick={() =>
-                    confirm(`${u.email} 비활성화할까요?`) && run(() => setUserActive(u.email, false))}>
-                    비활성화</button>)}
-                {u.status === "inactive" && (
-                  <button disabled={busy} onClick={() => run(() => setUserActive(u.email, true))}>활성화</button>)}
-                {u.status === "invited" && (
-                  <button disabled={busy} onClick={() =>
-                    confirm("초대를 취소할까요?") && run(() => revokeUserInvite(u.email))}>초대취소</button>)}
-                {["expired", "revoked", "none"].includes(u.status) && !u.is_super && (
-                  <button disabled={busy} onClick={() => reinvite(u)}>재초대(7일)</button>)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+      <Panel title="사용자 추가" desc="초대 메일 작성을 누르면 Gmail 창이 열립니다. 보내기를 누르면 발송되고, 받은 사람이 구글 로그인하면 사용자 목록으로 옮겨집니다.">
+        <div className="form-row">
+          <input className="input grow" placeholder="이메일" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <select className="input" value={psId} onChange={(e) => setPsId(e.target.value ? Number(e.target.value) : "")}>
+            <option value="">권한셋 선택</option>
+            {sets.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <input className="input input-num" type="number" min={1} max={30} value={days}
+            onChange={(e) => setDays(Number(e.target.value))} />
+          <span className="muted small">일 유효</span>
+          <input className="input grow" placeholder="메모(선택)" value={memo} onChange={(e) => setMemo(e.target.value)} />
+          <button className="btn btn-primary" disabled={busy} onClick={invite}>초대 메일 작성</button>
+        </div>
+
+        {invites.length > 0 && (
+          <div className="tbl-wrap mt">
+            <table className="tbl">
+              <thead><tr><th>초대 이메일</th><th>권한셋</th><th>상태</th><th>만료</th><th>메모</th><th>관리</th></tr></thead>
+              <tbody>
+                {invites.map((u) => (
+                  <tr key={u.email}>
+                    <td>{u.email}</td>
+                    <td>{u.permission_set_name ?? "-"}</td>
+                    <td><Chip tone={TONE[u.status]}>{statusLabel(u)}</Chip></td>
+                    <td className="small">{fmtDate(u.expires_at)}</td>
+                    <td className="small muted">{u.memo ?? ""}</td>
+                    <td>
+                      <div className="toolbar">
+                        {u.status === "invited" ? (<>
+                          <button className="btn btn-sm" onClick={() => openGmailInvite(u.email, u.permission_set_name, u.days_left ?? 7)}>메일 다시 작성</button>
+                          <button className="btn btn-sm btn-danger" disabled={busy}
+                            onClick={() => confirm("초대를 취소할까요?") && run(() => revokeUserInvite(u.email))}>초대취소</button>
+                        </>) : (
+                          <button className="btn btn-sm" disabled={busy} onClick={() => reinvite(u)}>재초대(7일)</button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+
+      <Panel title={`사용자 ${members.length}명`}
+        right={<div className="tabs">{fBtn("active", `활성 ${cnt("active")}`)}{fBtn("inactive", `비활성 ${cnt("inactive")}`)}{fBtn("all", `전체 ${members.length}`)}</div>}>
+        <div className="tbl-wrap">
+          <table className="tbl">
+            <thead><tr><th>이메일</th><th>권한셋</th><th>상태</th><th>최근 로그인</th><th>메모</th><th>관리</th></tr></thead>
+            <tbody>
+              {shown.map((u) => (
+                <tr key={u.email}>
+                  <td>
+                    {u.email}
+                    {u.is_super && <span className="tag-inline"><Chip tone="internal">마스터</Chip></span>}
+                    {u.is_me && <span className="muted tag-inline">(나)</span>}
+                  </td>
+                  <td>{u.is_super ? <span className="muted">전체</span> : (u.permission_set_name ?? <Chip tone="caution">미지정</Chip>)}</td>
+                  <td><Chip tone={TONE[u.status]}>{statusLabel(u)}</Chip></td>
+                  <td className="small">{fmtDate(u.last_login_at)}</td>
+                  <td className="small muted">{u.memo ?? "-"}</td>
+                  <td><button className="btn btn-sm" onClick={() => setEditing(u)}>편집</button></td>
+                </tr>
+              ))}
+              {shown.length === 0 && <tr><td colSpan={6} className="muted">해당하는 사용자가 없습니다</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+
+      <UserEditModal user={editing} sets={sets} onClose={() => setEditing(null)} onSaved={load} />
+    </>
   );
 }

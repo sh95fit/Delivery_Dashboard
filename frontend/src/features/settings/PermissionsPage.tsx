@@ -6,6 +6,7 @@ import {
   type PermissionSet, type CleanGrants,
 } from "@/api/permissions";
 import UsersTab from "./UsersTab";
+import Modal from "@/components/ui/Modal";
 
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e));
 
@@ -113,46 +114,37 @@ function SetsTab() {
         </div>
       </section>
 
-      {editId !== null && (
-        <section className="panel">
-          <div className="panel-head">
-            <h2 className="panel-title">{editId === "new" ? "새 권한셋" : "권한셋 편집"}</h2>
-          </div>
-          <p className="panel-desc">보기(R)를 끄면 생성·수정·삭제도 함께 꺼집니다.</p>
-          <div className="form-row">
-            <input className="input" placeholder="이름" value={name} maxLength={50}
-              onChange={(e) => setName(e.target.value)} />
-            <input className="input grow" placeholder="메모(선택)" value={memo}
-              onChange={(e) => setMemo(e.target.value)} />
-          </div>
-          <div className="tbl-wrap mt">
-            <table className="tbl perm-grid">
-              <thead><tr>
-                <th>화면</th>
-                {OPS.map((op) => <th key={op} className="center">{OP_LABELS[op]}</th>)}
-              </tr></thead>
-              <tbody>
-                {PAGE_KEYS.map((k) => (
-                  <tr key={k}>
-                    <td>{PAGE_LABELS[k]}</td>
-                    {OPS.map((op) => (
-                      <td key={op} className="center">
-                        <input type="checkbox" checked={grants[k][op]}
-                          aria-label={`${PAGE_LABELS[k]} ${OP_LABELS[op]}`}
-                          onChange={() => setGrants((g) => toggleOp(g, k, op))} />
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="toolbar mt">
-            <button className="btn btn-primary" onClick={save} disabled={busy}>{busy ? "저장 중…" : "저장"}</button>
-            <button className="btn" onClick={() => setEditId(null)} disabled={busy}>취소</button>
-          </div>
-        </section>
-      )}
+      <Modal open={editId !== null} size="lg" onClose={() => !busy && setEditId(null)}
+        title={editId === "new" ? "새 권한셋" : "권한셋 편집"}
+        footer={<>
+          <button className="btn" onClick={() => setEditId(null)} disabled={busy}>취소</button>
+          <button className="btn btn-primary" onClick={save} disabled={busy || !name.trim()}>{busy ? "저장 중…" : "저장"}</button>
+        </>}>
+        {err && <p className="error-box">{err}</p>}
+        <p className="panel-desc">보기를 끄면 생성·수정·삭제도 함께 꺼집니다.</p>
+        <div className="form-row">
+          <input className="input" placeholder="이름" value={name} maxLength={50} onChange={(e) => setName(e.target.value)} />
+          <input className="input grow" placeholder="메모(선택)" value={memo} onChange={(e) => setMemo(e.target.value)} />
+        </div>
+        <div className="tbl-wrap mt">
+          <table className="tbl">
+            <thead><tr><th>화면</th>{OPS.map((op) => <th key={op} className="center">{OP_LABELS[op]}</th>)}</tr></thead>
+            <tbody>
+              {PAGE_KEYS.map((k) => (
+                <tr key={k}>
+                  <td>{PAGE_LABELS[k]}</td>
+                  {OPS.map((op) => (
+                    <td key={op} className="center">
+                      <input type="checkbox" checked={grants[k][op]} aria-label={`${PAGE_LABELS[k]} ${OP_LABELS[op]}`}
+                        onChange={() => setGrants((g) => toggleOp(g, k, op))} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Modal>
     </>
   );
 }

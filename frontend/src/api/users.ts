@@ -27,12 +27,34 @@ export const statusLabel = (u: UserRow) =>
     none: "초대 전",
   })[u.status];
 
-export const STATUS_COLORS: Record<UserStatus, string> = {
-  invited: "#2563eb", expired: "#999", active: "#16a34a",
-  inactive: "#c0392b", revoked: "#999", none: "#999",
+// styles.css 칩 클래스 (색 의미: ok=완료, warn=예상/대기, caution=주의, danger=오류)
+export const STATUS_CHIP: Record<UserStatus, string> = {
+  invited: "chip-warn", expired: "chip-caution", active: "chip-ok",
+  inactive: "chip-danger", revoked: "chip-neutral", none: "chip-neutral",
 };
 
 export const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleString("ko-KR") : "-");
+
+/** Gmail 작성 창 URL (받는 사람·제목·본문 미리 채움) */
+export function gmailInviteUrl(email: string, setName: string | null, days: number) {
+  const site = window.location.origin;
+  const su = "[LunchLab 대시보드] 접속 초대";
+  const body = [
+    "안녕하세요.",
+    "",
+    `LunchLab 배송 대시보드에 초대되었습니다.${setName ? ` (권한: ${setName})` : ""}`,
+    "",
+    `1. 아래 주소에 접속합니다: ${site}`,
+    `2. "Google로 로그인"을 누르고 이 메일을 받은 계정(${email})으로 로그인합니다.`,
+    "",
+    `초대는 ${days}일 동안 유효합니다. 기간이 지나면 관리자에게 재초대를 요청해 주세요.`,
+  ].join("\n");
+  const q = new URLSearchParams({ view: "cm", fs: "1", to: email, su, body });
+  return `https://mail.google.com/mail/?${q.toString()}`;
+}
+
+export const openGmailInvite = (email: string, setName: string | null, days: number) =>
+  window.open(gmailInviteUrl(email, setName, days), "_blank", "noopener");
 
 const enc = (e: string) => encodeURIComponent(e);
 
