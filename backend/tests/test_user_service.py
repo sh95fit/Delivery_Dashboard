@@ -94,3 +94,10 @@ def test_router_is_super_only():
 ])
 def test_user_paths_pass_middleware(path, method):
     assert resolve(path, method) != (None, None)
+
+def test_can_delete_only_inactive_normal_user():
+    from app.services.user_service import can_delete
+    assert can_delete("a@x.com", False, False, "me@x.com") is True
+    assert can_delete("a@x.com", False, True, "me@x.com") is False   # 활성 계정
+    assert can_delete("a@x.com", True, False, "me@x.com") is False   # 마스터
+    assert can_delete("me@x.com", False, False, "me@x.com") is False # 본인

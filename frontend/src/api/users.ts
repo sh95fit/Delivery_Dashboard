@@ -70,3 +70,4 @@ export const setUserActive = (email: string, active: boolean) =>
   put<{ email: string }>(`/api/users/${enc(email)}/active`, { active });
 export const revokeUserInvite = (email: string) =>
   del<{ email: string }>(`/api/users/${enc(email)}/invitation`);
+export const deleteUser = (email: string) => del<{ email: string }>(`/api/users/${enc(email)}`);

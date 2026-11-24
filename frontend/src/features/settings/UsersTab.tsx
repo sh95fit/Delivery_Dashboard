@@ -3,7 +3,7 @@ import Panel from "@/components/ui/Panel";
 import Chip, { type ChipTone } from "@/components/ui/Chip";
 import {
   type UserRow, type PermSetLite, type UserStatus, type InviteResult, listUsers, listPermSets, createUser,
-  revokeUserInvite, resendInvite, statusLabel, fmtDate,
+  revokeUserInvite, resendInvite, deleteUser, statusLabel, fmtDate,
 } from "@/api/users";
 import UserEditModal from "./UserEditModal";
 
@@ -40,6 +40,11 @@ export default function UsersTab() {
   };
 
   const [note, setNote] = useState("");
+  useEffect(() => { if (!note) return; const t = setTimeout(() => setNote(""), 3000); return () => clearTimeout(t); }, [note]);
+  const remove = (u: UserRow) => {
+    if (!confirm(`${u.email} 계정을 완전히 삭제할까요? 목록과 권한에서 사라집니다.`)) return;
+    run(() => deleteUser(u.email)).then((ok) => ok && setNote(`${u.email} 계정을 삭제했습니다`));
+  };
   const mailNote = (to: string, r: InviteResult) =>
     r.mail_sent ? setNote(`${to} 주소로 초대 메일을 보냈습니다`)
       : setErr(`초대는 저장됐지만 메일을 보내지 못했습니다: ${r.mail_error ?? ""} (메일 다시 보내기를 눌러 주세요)`);
@@ -80,8 +85,7 @@ export default function UsersTab() {
 
   return (
     <>
-      {err && <p className="error-box mt">{err}</p>}
-      {note && <p className="notice mt">{note}</p>}      
+      {err && <p className="error-box mt">{err}</p>}  
 
       <Panel title="사용자 추가" desc="초대 메일이 자동으로 발송됩니다. 받은 사람이 구글 로그인하면 사용자 목록으로 옮겨집니다.">
         <div className="form-row">
@@ -145,7 +149,13 @@ export default function UsersTab() {
                   <td><Chip tone={TONE[u.status]}>{statusLabel(u)}</Chip></td>
                   <td className="small">{fmtDate(u.last_login_at)}</td>
                   <td className="small muted">{u.memo ?? "-"}</td>
-                  <td><button className="btn btn-sm" onClick={() => setEditing(u)}>편집</button></td>
+                  <td>
+                    <div className="toolbar">
+                      <button className="btn btn-sm" onClick={() => setEditing(u)}>편집</button>
+                      {u.status === "inactive" && u.can_deactivate && (
+                        <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => remove(u)}>삭제</button>)}
+                    </div>
+                  </td>
                 </tr>
               ))}
               {shown.length === 0 && <tr><td colSpan={6} className="muted">해당하는 사용자가 없습니다</td></tr>}
@@ -154,6 +164,7 @@ export default function UsersTab() {
         </div>
       </Panel>
 
+      {note && <div className="toast" role="status">{note}</div>}
       <UserEditModal user={editing} sets={sets} onClose={() => setEditing(null)} onSaved={load} />
     </>
   );

@@ -57,3 +57,8 @@ def set_active(email: str, b: ActiveBody, me: str = Depends(require_super)):
 @router.delete("/users/{email}/invitation")
 def revoke_invite(email: str, me: str = Depends(require_super)):
     return guard(svc.revoke_invite, email, me, fail="초대 취소 실패")
+
+
+@router.delete("/users/{email}")
+def delete_user(email: str, me: str = Depends(require_super)):
+    return guard(svc.delete_user, email, me, fail="삭제 실패")

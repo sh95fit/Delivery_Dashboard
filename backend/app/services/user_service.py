@@ -37,6 +37,10 @@ def can_deactivate(email: str, is_super: bool, me: str | None) -> bool:
     return not is_super and email.lower() != (me or "").strip().lower()
 
 
+def can_delete(email: str, is_super: bool, active: bool, me: str | None) -> bool:
+    return not active and can_deactivate(email, is_super, me)
+
+
 def build_rows(rules: list[dict], accounts: list[dict], invites: list[dict],
                now: datetime, me: str | None) -> list[dict]:
     me_n = (me or "").strip().lower()
@@ -142,4 +146,21 @@ def revoke_invite(email: str, by: str) -> dict:
                               "RETURNING id"), {"e": e, "b": by}).fetchall()
     if not rows:
         raise ValueError("대기 중인 초대가 없습니다")
+    return {"email": e}
+
+
+def delete_user(email: str, by: str) -> dict:
+    e = normalize_email(email)
+    found = _rows("SELECT is_super, active FROM accounts WHERE email = :e AND deleted_at IS NULL", e=e)
+    if not found:
+        raise ValueError("계정을 찾을 수 없습니다")
+    if not can_delete(e, bool(found[0]["is_super"]), bool(found[0]["active"]), by):
+        raise ValueError("비활성 상태인 일반 계정만 삭제할 수 있습니다")
+    with get_dash_engine().begin() as c:
+        c.execute(text("UPDATE accounts SET deleted_at = now() WHERE email = :e AND deleted_at IS NULL"), {"e": e})
+        c.execute(text("UPDATE auth_access_rules SET deleted_at = now(), active = FALSE "
+                       "WHERE kind = 'email' AND lower(value) = :e AND deleted_at IS NULL"), {"e": e})
+        c.execute(text("UPDATE auth_invitations SET status = 'revoked', revoked_by = :b, revoked_at = now() "
+                       "WHERE lower(email) = :e AND status = 'pending'"), {"e": e, "b": by})
+    permission_service.invalidate(e)
     return {"email": e}
