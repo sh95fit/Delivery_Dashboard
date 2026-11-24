@@ -8,7 +8,7 @@ from app.permissions import PermissionMiddleware
 from app.routers import (
     auth_routes, control_exclude_routes, delivery_routes, health_routes,
     fuel_routes, incentive_routes, internal_target_routes, logistics_routes, manager_routes, me_routes, revenue_routes,
-    routes_routes, status_routes, vehicle_routes, worker_routes, worklog_routes,
+    routes_routes, status_routes, vehicle_routes, worker_routes, worklog_routes, permission_admin_routes,
 )
 
 app = FastAPI(title="Delivery Dashboard API", version="0.4.0")
@@ -19,6 +19,7 @@ app.add_middleware(
 )
 
 app.add_middleware(PermissionMiddleware)
+app.include_router(permission_admin_routes.router)
 app.include_router(health_routes.router)
 app.include_router(auth_routes.router)
 app.include_router(me_routes.router)

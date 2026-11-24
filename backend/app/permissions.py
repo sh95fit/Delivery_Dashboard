@@ -32,7 +32,7 @@ RULES: list[tuple[str, re.Pattern, str | None, str | None]] = [
     ("GET",  re.compile(r"^/managers/?$"), None, "R"),
     ("GET",  re.compile(r"^/vehicles/?$"), None, "R"),
     # 계정·권한셋·규칙·초대 — 미들웨어는 로그인만, 실제 권한은 deps.require_super
-    ("ANY",  re.compile(r"^/(accounts|permission-sets|invitations)"), None, "R"),
+    ("ANY",  re.compile(r"^/(accounts|permission-sets|access-rules|invitations)"), None, "R"),
     # 근무 기록 — 마감/재오픈 = U, 내보내기 = R (일반 근무 규칙보다 앞서야 함)
     ("GET",  re.compile(r"^/worklogs/export"), "worklogs", "R"),
     ("POST", re.compile(r"^/worklogs/(close|reopen)$"), "worklogs", "U"),
