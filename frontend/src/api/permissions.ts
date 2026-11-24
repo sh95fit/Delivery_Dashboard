@@ -26,15 +26,7 @@ export type CleanGrants = Record<PageKey, OpMap>;
 export type PermissionSet = {
   id: number; name: string; grants: Grants; builtin: boolean; memo: string | null; rule_count: number;
 };
-export type RuleKind = "email" | "domain";
-export type AccessRule = {
-  id: number; kind: RuleKind; value: string; permission_set_id: number;
-  permission_set_name: string | null; active: boolean; memo: string | null;
-};
 export type SetInput = { name: string; grants: CleanGrants; memo: string | null };
-export type RuleInput = {
-  kind: RuleKind; value: string; permission_set_id: number; active: boolean; memo: string | null;
-};
 
 /** PAGE_KEYS 12개만 남기고(옛 키 settings 등 제거) R 없으면 C/U/D 해제 */
 export function cleanGrants(g: Grants | null | undefined): CleanGrants {
@@ -61,8 +53,3 @@ export const listSets = () => http<PermissionSet[]>("/api/permission-sets");
 export const createSet = (b: SetInput) => post<{ id: number }>("/api/permission-sets", b);
 export const updateSet = (id: number, b: SetInput) => put<{ id: number }>(`/api/permission-sets/${id}`, b);
 export const deleteSet = (id: number) => del<{ id: number }>(`/api/permission-sets/${id}`);
-
-export const listRules = () => http<AccessRule[]>("/api/access-rules");
-export const createRule = (b: RuleInput) => post<{ id: number }>("/api/access-rules", b);
-export const updateRule = (id: number, b: RuleInput) => put<{ id: number }>(`/api/access-rules/${id}`, b);
-export const deleteRule = (id: number) => del<{ id: number }>(`/api/access-rules/${id}`);

@@ -15,14 +15,6 @@ class SetBody(BaseModel):
     memo: str | None = None
 
 
-class RuleBody(BaseModel):
-    kind: str
-    value: str
-    permission_set_id: int
-    active: bool = True
-    memo: str | None = None
-
-
 @router.get("/permission-sets")
 def list_sets():
     return guard(svc.list_sets, fail="권한셋 조회 실패")
@@ -41,25 +33,3 @@ def update_set(set_id: int, b: SetBody, email: str = Depends(require_super)):
 @router.delete("/permission-sets/{set_id}")
 def delete_set(set_id: int, email: str = Depends(require_super)):
     return guard(svc.delete_set, set_id, email, fail="권한셋 삭제 실패")
-
-
-@router.get("/access-rules")
-def list_rules():
-    return guard(svc.list_rules, fail="접근 규칙 조회 실패")
-
-
-@router.post("/access-rules")
-def create_rule(b: RuleBody, email: str = Depends(require_super)):
-    return guard(svc.create_rule, b.kind, b.value, b.permission_set_id, b.active, b.memo, email,
-                 fail="접근 규칙 생성 실패")
-
-
-@router.put("/access-rules/{rule_id}")
-def update_rule(rule_id: int, b: RuleBody, email: str = Depends(require_super)):
-    return guard(svc.update_rule, rule_id, b.kind, b.value, b.permission_set_id, b.active,
-                 b.memo, email, fail="접근 규칙 수정 실패")
-
-
-@router.delete("/access-rules/{rule_id}")
-def delete_rule(rule_id: int, email: str = Depends(require_super)):
-    return guard(svc.delete_rule, rule_id, email, fail="접근 규칙 삭제 실패")
