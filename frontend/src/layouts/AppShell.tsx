@@ -5,6 +5,7 @@ import type { MeResp } from "@/api/types";
 import Spinner from "@/components/ui/Spinner";
 import Icon from "./Icon";
 import { NAV } from "./nav";
+import { can } from "./perm";
 import { MeContext, ShellContext } from "./shell";
 
 const KEY = "ll.sidebar.collapsed";
@@ -62,6 +63,12 @@ export default function AppShell() {
   if (auth === "checking") return <Spinner label="로그인 상태 확인 중…" />;
   if (auth === "no") return <Navigate to="/login" replace />;
 
+  const visibleNav = NAV.map((sec) => ({
+    ...sec,
+    items: sec.items.filter((it) =>
+      it.superOnly ? Boolean(me?.is_super) : it.page ? can(me, it.page, "R") : true,
+    ),
+  })).filter((sec) => sec.items.length > 0);
   const isCollapsed = collapsed && !isMobile;
   const cls = ["shell", isCollapsed ? "collapsed" : "", mobileOpen ? "mobile-open" : ""].join(" ").trim();
 
@@ -83,7 +90,7 @@ export default function AppShell() {
             </div>
 
             <nav className="sb-nav">
-              {NAV.map((sec) => (
+              {visibleNav.map((sec) => (
                 <div key={sec.section}>
                   <div className="sb-sec">{sec.section}</div>
                   {sec.items.map((it) =>
@@ -118,7 +125,10 @@ export default function AppShell() {
 
             <div className="sb-foot" title={me?.email}>
               {me?.email}
-              {me?.is_admin ? " · 관리자" : ""}
+              {me?.is_super ? " · 마스터" : ""}
+              <div style={{ marginTop: 6 }}>
+                <a href="/api/auth/logout" className="sb-logout">로그아웃</a>
+              </div>
             </div>
           </aside>
 

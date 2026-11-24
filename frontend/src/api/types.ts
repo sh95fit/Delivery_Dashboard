@@ -214,9 +214,14 @@ export interface AllRoutesResp {
   routes: RouteSummary[];
 }
 
+export type CrudOp = "R" | "C" | "U" | "D";
+export type Grants = Record<string, Partial<Record<CrudOp, boolean>>>;
+
 export interface MeResp {
   email: string;
   is_admin?: boolean;
+  is_super?: boolean;        // 시스템 마스터
+  grants?: Grants | null;    // 화면키별 C/R/U/D (백엔드 PAGE_KEYS 기준)
 }
 
 /* S3-P2d-2b-2 실제 경로(route_legs, 실선) · 남은 경로 미리보기(점선) — 좌표는 NAVER 형식 [경도, 위도] */
