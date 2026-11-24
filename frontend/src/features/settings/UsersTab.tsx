@@ -3,7 +3,7 @@ import Panel from "@/components/ui/Panel";
 import Chip, { type ChipTone } from "@/components/ui/Chip";
 import {
   type UserRow, type PermSetLite, type UserStatus, type InviteResult, listUsers, listPermSets, createUser,
-  revokeUserInvite, setUserActive, resendInvite, deleteUser, statusLabel, fmtDate,
+  revokeUserInvite, resendInvite, deleteUser, statusLabel, fmtDate,
 } from "@/api/users";
 import UserEditModal from "./UserEditModal";
 
