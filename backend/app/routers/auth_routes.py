@@ -10,9 +10,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.get("/login")
-async def login(request: Request):
+async def login(request: Request, switch: int = 0):
     redirect_uri = "https://dashboard.lunchlab.me/api/auth/callback"
-    return await oauth.google.authorize_redirect(request, redirect_uri)
+    extra = {"prompt": "select_account"} if switch else {}
+    return await oauth.google.authorize_redirect(request, redirect_uri, **extra)
 
 
 @router.get("/callback")

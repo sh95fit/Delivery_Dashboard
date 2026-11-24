@@ -20,7 +20,7 @@ export default function LoginPage() {
         ) : (
           <p className="login-desc">세션이 없거나 만료되었습니다. 초대받은 구글 계정으로 로그인하세요.</p>
         )}
-        <a href="/api/auth/login" className="btn btn-primary login-btn">
+        <a href={msg ? "/api/auth/login?switch=1" : "/api/auth/login"} className="btn btn-primary login-btn">
           {msg ? "다른 구글 계정으로 로그인" : "구글 계정으로 로그인"}
         </a>
       </div>
