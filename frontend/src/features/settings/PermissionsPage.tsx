@@ -6,15 +6,18 @@ import {
   listRules, createRule, updateRule, deleteRule,
   type PermissionSet, type AccessRule, type CleanGrants, type RuleKind,
 } from "@/api/permissions";
+import AccountsTab from "./AccountsTab";
 
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e));
 const cell: CSSProperties = { border: "1px solid #ddd", padding: "6px 8px", textAlign: "left" };
 const box: CSSProperties = { border: "1px solid #ddd", borderRadius: 8, padding: 12, marginBottom: 16 };
 const errStyle: CSSProperties = { color: "#c0392b", margin: "8px 0" };
 
+type Tab = "sets" | "rules" | "accounts";
+
 export default function PermissionsPage() {
-  const [tab, setTab] = useState<"sets" | "rules">("sets");
-  const tabBtn = (k: "sets" | "rules", label: string) => (
+  const [tab, setTab] = useState<Tab>("sets");
+  const tabBtn = (k: Tab, label: string) => (
     <button
       onClick={() => setTab(k)}
       style={{ padding: "6px 14px", marginRight: 6, fontWeight: tab === k ? 700 : 400,
@@ -24,8 +27,12 @@ export default function PermissionsPage() {
   return (
     <div style={{ padding: 16 }}>
       <h2>권한 관리</h2>
-      <div style={{ marginBottom: 16 }}>{tabBtn("sets", "권한셋")}{tabBtn("rules", "접근 규칙")}</div>
-      {tab === "sets" ? <SetsTab /> : <RulesTab />}
+      <div style={{ marginBottom: 16 }}>
+        {tabBtn("sets", "권한셋")}{tabBtn("rules", "접근 규칙")}{tabBtn("accounts", "계정")}
+      </div>
+      {tab === "sets" && <SetsTab />}
+      {tab === "rules" && <RulesTab />}
+      {tab === "accounts" && <AccountsTab />}
     </div>
   );
 }
