@@ -16,15 +16,16 @@ from app.services.account_service import _now, _rows, normalize_days, normalize_
 
 
 # ── 순수 로직 ──
-def user_status(account: dict | None, invite: dict | None, now: datetime) -> tuple[str, int | None]:
+def user_status(account: dict | None, invite: dict | None, now: datetime,
+                rule_active: bool = True) -> tuple[str, int | None]:
     if account and not account.get("active"):
         return "inactive", None
     if account and account.get("activated_at"):
         return "active", None
+    if invite and invite["status"] == "accepted":
+        return ("active" if rule_active else "inactive"), None
     if not invite:
         return "none", None
-    if invite["status"] == "accepted":
-        return "active", None
     if invite["status"] == "revoked":
         return "revoked", None
     if invite["expires_at"] <= now:
@@ -41,10 +42,6 @@ def can_delete(email: str, is_super: bool, active: bool, me: str | None) -> bool
     return not active and can_deactivate(email, is_super, me)
 
 
-def can_clear_invite(status: str) -> bool:
-    return status in ("expired", "revoked", "none")
-
-
 def build_rows(rules: list[dict], accounts: list[dict], invites: list[dict],
                now: datetime, me: str | None) -> list[dict]:
     me_n = (me or "").strip().lower()
@@ -57,7 +54,9 @@ def build_rows(rules: list[dict], accounts: list[dict], invites: list[dict],
     for e in set(acc) | set(rule) | set(inv):
         a, r, i = acc.get(e), rule.get(e), inv.get(e)
         is_super = bool(a and a.get("is_super"))
-        status, days_left = user_status(a, i, now)
+        status, days_left = user_status(a, i, now, bool(r.get("active", True)) if r else True)
+        if status in ("revoked", "none") and not a:
+            continue                        # 취소된 초대는 목록에서 숨김
         out.append({
             "email": e,
             "permission_set_id": r["permission_set_id"] if r else None,
@@ -76,10 +75,10 @@ def build_rows(rules: list[dict], accounts: list[dict], invites: list[dict],
 # ── DB ──
 def list_users(me: str) -> list[dict]:
     rules = _rows("""
-        SELECT r.value, r.permission_set_id, ps.name AS permission_set_name
+        SELECT r.value, r.active, r.permission_set_id, ps.name AS permission_set_name
         FROM auth_access_rules r
-        JOIN auth_permission_sets ps ON ps.id = r.permission_set_id AND ps.deleted_at IS NULL
-        WHERE r.kind = 'email' AND r.active AND r.deleted_at IS NULL""")
+        LEFT JOIN auth_permission_sets ps ON ps.id = r.permission_set_id AND ps.deleted_at IS NULL
+        WHERE r.kind = 'email' AND r.deleted_at IS NULL""")
     accounts = _rows("SELECT email, active, is_super, activated_at, last_login_at "
                      "FROM accounts WHERE deleted_at IS NULL")
     invites = _rows("SELECT email, status, expires_at, memo, created_at "
@@ -129,68 +128,57 @@ def set_permission_set(email: str, ps_id) -> dict:
     return {"email": e, "permission_set_id": ps_id}
 
 
-def _block_pending(e: str, by: str) -> None:
-    """로그인 전 사용자 차단: 대기·수락 초대 취소 + 이메일 규칙 끄기."""
-    with get_dash_engine().begin() as c:
-        c.execute(text("UPDATE auth_invitations SET status = 'revoked', revoked_by = :b, revoked_at = now() "
-                       "WHERE lower(email) = :e AND status IN ('pending', 'accepted')"), {"e": e, "b": by})
-        c.execute(text("UPDATE auth_access_rules SET active = FALSE "
-                       "WHERE kind = 'email' AND lower(value) = :e AND deleted_at IS NULL"), {"e": e})
-    permission_service.invalidate(e)
+def _acct(e: str) -> dict | None:
+    r = _rows("SELECT email, is_super, active FROM accounts "
+              "WHERE lower(email) = :e AND deleted_at IS NULL", e=e)
+    return r[0] if r else None
 
 
 def set_active(email: str, active: bool, by: str) -> dict:
     e = normalize_email(email)
-    found = _rows("SELECT is_super FROM accounts WHERE email = :e AND deleted_at IS NULL", e=e)
-    if not found:
-        if active:
-            raise ValueError("아직 로그인 전인 사용자입니다 — 재초대로 다시 초대하세요")
-        _block_pending(e, by)
-        return {"email": e, "active": False}
-    if not active and not can_deactivate(e, bool(found[0]["is_super"]), by):
+    a = _acct(e)
+    if a and not active and not can_deactivate(e, bool(a["is_super"]), by):
         raise ValueError("마스터 계정과 본인 계정은 비활성화할 수 없습니다")
     with get_dash_engine().begin() as c:
-        c.execute(text("UPDATE accounts SET active = :a WHERE email = :e"), {"a": active, "e": e})
+        if a:
+            c.execute(text("UPDATE accounts SET active = :a WHERE lower(email) = :e AND deleted_at IS NULL"),
+                      {"a": active, "e": e})
+        n = c.execute(text("UPDATE auth_access_rules SET active = :a WHERE kind = 'email' "
+                           "AND lower(value) = :e AND deleted_at IS NULL RETURNING id"),
+                      {"a": active, "e": e}).fetchall()
+        if not a and not n:
+            raise ValueError("권한셋이 없는 로그인 전 사용자입니다 — 편집에서 권한셋을 먼저 지정하세요")
     permission_service.invalidate(e)
     return {"email": e, "active": active}
 
 
+def _close(c, e: str, by: str) -> None:
+    c.execute(text("UPDATE auth_invitations SET status = 'revoked', revoked_by = :b, revoked_at = now() "
+                   "WHERE lower(email) = :e AND status = 'pending'"), {"e": e, "b": by})
+    c.execute(text("UPDATE auth_access_rules SET deleted_at = now(), active = FALSE "
+                   "WHERE kind = 'email' AND lower(value) = :e AND deleted_at IS NULL"), {"e": e})
+
+
 def revoke_invite(email: str, by: str) -> dict:
+    """초대취소 = 대기 초대 취소 + 규칙 삭제 → 목록에서 사라짐 (가입 계정은 대상 아님)."""
     e = normalize_email(email)
+    if _acct(e):
+        raise ValueError("이미 로그인한 사용자입니다 — 사용자 목록에서 비활성화하세요")
     with get_dash_engine().begin() as c:
-        rows = c.execute(text("UPDATE auth_invitations SET status = 'revoked', revoked_by = :b, "
-                              "revoked_at = now() WHERE lower(email) = :e AND status = 'pending' "
-                              "RETURNING id"), {"e": e, "b": by}).fetchall()
-    if not rows:
-        raise ValueError("대기 중인 초대가 없습니다")
-    return {"email": e}
-
-
-def delete_user(email: str, by: str) -> dict:
-    e = normalize_email(email)
-    found = _rows("SELECT is_super, active FROM accounts WHERE email = :e AND deleted_at IS NULL", e=e)
-    if not found:
-        raise ValueError("계정을 찾을 수 없습니다")
-    if not can_delete(e, bool(found[0]["is_super"]), bool(found[0]["active"]), by):
-        raise ValueError("비활성 상태인 일반 계정만 삭제할 수 있습니다")
-    with get_dash_engine().begin() as c:
-        c.execute(text("UPDATE accounts SET deleted_at = now() WHERE email = :e AND deleted_at IS NULL"), {"e": e})
-        c.execute(text("UPDATE auth_access_rules SET deleted_at = now(), active = FALSE "
-                       "WHERE kind = 'email' AND lower(value) = :e AND deleted_at IS NULL"), {"e": e})
-        c.execute(text("UPDATE auth_invitations SET status = 'revoked', revoked_by = :b, revoked_at = now() "
-                       "WHERE lower(email) = :e AND status = 'pending'"), {"e": e, "b": by})
+        _close(c, e, by)
     permission_service.invalidate(e)
     return {"email": e}
 
 
-def clear_invite(email: str) -> dict:
+def delete_user(email: str, by: str) -> dict:
+    """비활성 사용자 완전 삭제 (소프트 삭제, 기록은 남김)."""
     e = normalize_email(email)
-    row = next((u for u in list_users("") if u["email"] == e), None)
-    if not row or not can_clear_invite(row["status"]):
-        raise ValueError("만료·취소된 초대만 목록에서 삭제할 수 있습니다")
+    row = next((u for u in list_users(by) if u["email"] == e), None)
+    if not row or row["status"] != "inactive" or not row["can_deactivate"]:
+        raise ValueError("비활성 상태인 일반 사용자만 삭제할 수 있습니다")
     with get_dash_engine().begin() as c:
-        c.execute(text("DELETE FROM auth_invitations WHERE lower(email) = :e AND status <> 'accepted'"), {"e": e})
-        c.execute(text("UPDATE auth_access_rules SET deleted_at = now(), active = FALSE "
-                       "WHERE kind = 'email' AND lower(value) = :e AND deleted_at IS NULL"), {"e": e})
+        c.execute(text("UPDATE accounts SET deleted_at = now() WHERE lower(email) = :e AND deleted_at IS NULL"),
+                  {"e": e})
+        _close(c, e, by)
     permission_service.invalidate(e)
     return {"email": e}

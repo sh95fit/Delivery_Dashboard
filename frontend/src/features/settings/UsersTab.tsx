@@ -3,7 +3,7 @@ import Panel from "@/components/ui/Panel";
 import Chip, { type ChipTone } from "@/components/ui/Chip";
 import {
   type UserRow, type PermSetLite, type UserStatus, type InviteResult, listUsers, listPermSets, createUser,
-  revokeUserInvite, setUserActive, resendInvite, deleteUser, clearInvite, statusLabel, fmtDate,
+  revokeUserInvite, setUserActive, resendInvite, deleteUser, statusLabel, fmtDate,
 } from "@/api/users";
 import UserEditModal from "./UserEditModal";
 
@@ -75,7 +75,7 @@ export default function UsersTab() {
     finally { setBusy(false); }
   };
 
-  const invites = rows.filter((u) => !u.is_super && ["invited", "expired", "revoked", "none"].includes(u.status));
+  const invites = rows.filter((u) => u.status === "invited" || u.status === "expired");
   const members = rows.filter((u) => u.status === "active" || u.status === "inactive");
   const cnt = (s: UserStatus) => members.filter((u) => u.status === s).length;
   const shown = filter === "all" ? members : members.filter((u) => u.status === filter);
@@ -115,21 +115,12 @@ export default function UsersTab() {
                     <td className="small muted">{u.memo ?? ""}</td>
                     <td>
                       <div className="toolbar">
-                        {u.status === "invited" ? (<>
-                          <button className="btn btn-sm" disabled={busy} onClick={() => resend(u)}>메일 다시 보내기</button>
-                          <button className="btn btn-sm btn-danger" disabled={busy}
-                            onClick={() => confirm(`${u.email} 초대를 막을까요?`) &&
-                              run(() => setUserActive(u.email, false)).then((ok) => ok && setNote("비활성화했습니다"))}>비활성화</button>
-                          <button className="btn btn-sm btn-danger" disabled={busy}
-                            onClick={() => confirm("초대를 취소할까요?") && run(() => revokeUserInvite(u.email))}>초대취소</button>
-                        </>) : (
-                          <>
-                            <button className="btn btn-sm" disabled={busy} onClick={() => reinvite(u)}>재초대(7일)</button>
-                            <button className="btn btn-sm btn-danger" disabled={busy}
-                              onClick={() => confirm(`${u.email}을(를) 초대 목록에서 삭제할까요?`) &&
-                                run(() => clearInvite(u.email)).then((ok) => ok && setNote("초대 목록에서 삭제했습니다"))}>목록에서 삭제</button>
-                          </>
-                        )}
+                        {u.status === "invited"
+                          ? <button className="btn btn-sm" disabled={busy} onClick={() => resend(u)}>메일 다시 보내기</button>
+                          : <button className="btn btn-sm" disabled={busy} onClick={() => reinvite(u)}>재초대(7일)</button>}
+                        <button className="btn btn-sm btn-danger" disabled={busy}
+                          onClick={() => confirm(`${u.email} 초대를 취소할까요? 목록에서 사라집니다.`) &&
+                            run(() => revokeUserInvite(u.email)).then((ok) => ok && setNote("초대를 취소했습니다"))}>초대취소</button>
                       </div>
                     </td>
                   </tr>
