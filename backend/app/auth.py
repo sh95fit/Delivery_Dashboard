@@ -21,45 +21,10 @@ oauth.register(
 )
 
 
-def _ensure_allowlist_table():
-    engine = get_dash_engine()
-    with engine.connect() as conn:
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS auth_allowlist (
-                id SERIAL PRIMARY KEY,
-                kind VARCHAR(10) NOT NULL,       -- 'email' | 'domain'
-                value VARCHAR(255) NOT NULL,
-                added_by VARCHAR(255),
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                UNIQUE(kind, value)
-            )
-        """))
-        conn.commit()
-
-
-def is_allowed_email(email: str) -> bool:
-    if not email:
-        return False
-    email = email.strip().lower()
-    domain = email.split("@")[-1]
-    _ensure_allowlist_table()
-    engine = get_dash_engine()
-    with engine.connect() as conn:
-        rows = conn.execute(
-            text("SELECT kind, value FROM auth_allowlist")
-        ).fetchall()
-    for kind, value in rows:
-        value = value.strip().lower()
-        if kind == "email" and value == email:
-            return True
-        if kind == "domain" and value == domain:
-            return True
-    return False
-
-
 def is_admin_email(email: str) -> bool:
-    admins = [e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()]
-    return email in admins
+    """호환용 — 관리자 = 시스템 마스터 (P11-c)."""
+    from app.services import permission_service
+    return permission_service.is_super(email)
 
 
 def get_current_email(request: Request) -> str:

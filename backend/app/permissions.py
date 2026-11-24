@@ -20,8 +20,6 @@ from app.auth import deserialize_session
 RULES: list[tuple[str, re.Pattern, str | None, str | None]] = [
     # 공용 — 모든 로그인 사용자 (화면 진입점·기초데이터)
     ("GET",  re.compile(r"^/me$"), None, "R"),
-    ("GET",  re.compile(r"^/admin$"), "settings", "R"),     # 허용목록 관리 페이지(자체 관리자 검사 유지)
-    ("ANY",  re.compile(r"^/allowlist"), "settings", "U"),  # 허용목록 API — 현재 관리자 전용 유지
     ("GET",  re.compile(r"^/managers/?$"), None, "R"),
     ("GET",  re.compile(r"^/vehicles/?$"), None, "R"),
     # P11-b 계정·권한셋·초대 — require_super 전용 (미들웨어는 로그인만, 실제 권한은 deps.require_super)
@@ -75,17 +73,16 @@ def resolve(path: str, method: str) -> tuple[str | None, str | None]:
 
 
 def allowed(email: str, page: str | None, op: str | None) -> bool:
+    """P11-c 판정: 마스터 전체 허용 → 규칙 권한셋 → 없으면 차단(폴백 없음)."""
     from app.services import permission_service as ps
-    if page is None:                        # 공용 경로 (로그인만 필요)
+    if ps.is_super(email):
         return True
-    if ps.is_super(email):                  # 시스템 어드민 = 전체 허용
+    grants = ps.perm_of(email)
+    if grants is None:
+        return False
+    if page is None:          # 공용 경로 — 권한셋이 있는 로그인 사용자면 허용
         return True
-    g = ps.perm_of(email)
-    if g is None:
-        # [P11-a 폴백] 계정 미생성(이관 전) 사용자: 기존 동작 유지 — 읽기 허용·쓰기 차단.
-        # P11-b에서 계정·권한셋 배정으로 정리되면 이 분기는 사실상 사라진다.
-        return (op or "R") == "R"
-    return bool((g.get(page) or {}).get(op or "R"))
+    return bool((grants.get(page) or {}).get(op or "R"))
 
 
 class PermissionMiddleware(BaseHTTPMiddleware):
