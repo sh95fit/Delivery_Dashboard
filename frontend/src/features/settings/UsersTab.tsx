@@ -3,7 +3,7 @@ import Panel from "@/components/ui/Panel";
 import Chip, { type ChipTone } from "@/components/ui/Chip";
 import {
   type UserRow, type PermSetLite, type UserStatus, type InviteResult, listUsers, listPermSets, createUser,
-  revokeUserInvite, resendInvite, deleteUser, clearInvite, statusLabel, fmtDate,
+  revokeUserInvite, setUserActive, resendInvite, deleteUser, clearInvite, statusLabel, fmtDate,
 } from "@/api/users";
 import UserEditModal from "./UserEditModal";
 
@@ -117,6 +117,9 @@ export default function UsersTab() {
                       <div className="toolbar">
                         {u.status === "invited" ? (<>
                           <button className="btn btn-sm" disabled={busy} onClick={() => resend(u)}>메일 다시 보내기</button>
+                          <button className="btn btn-sm btn-danger" disabled={busy}
+                            onClick={() => confirm(`${u.email} 초대를 막을까요?`) &&
+                              run(() => setUserActive(u.email, false)).then((ok) => ok && setNote("비활성화했습니다"))}>비활성화</button>
                           <button className="btn btn-sm btn-danger" disabled={busy}
                             onClick={() => confirm("초대를 취소할까요?") && run(() => revokeUserInvite(u.email))}>초대취소</button>
                         </>) : (

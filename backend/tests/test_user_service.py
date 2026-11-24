@@ -95,6 +95,7 @@ def test_router_is_super_only():
 def test_user_paths_pass_middleware(path, method):
     assert resolve(path, method) != (None, None)
 
+
 def test_can_delete_only_inactive_normal_user():
     from app.services.user_service import can_delete
     assert can_delete("a@x.com", False, False, "me@x.com") is True
@@ -102,7 +103,25 @@ def test_can_delete_only_inactive_normal_user():
     assert can_delete("a@x.com", True, False, "me@x.com") is False   # 마스터
     assert can_delete("me@x.com", False, False, "me@x.com") is False # 본인
     
+    
 def test_can_clear_invite_only_closed():
     from app.services.user_service import can_clear_invite
     assert can_clear_invite("expired") and can_clear_invite("revoked") and can_clear_invite("none")
     assert not can_clear_invite("invited") and not can_clear_invite("active") and not can_clear_invite("inactive")
+    
+    
+def test_set_active_without_account_blocks_invite(monkeypatch):
+    from app.services import user_service as s
+    calls = []
+    monkeypatch.setattr(s, "_rows", lambda *a, **k: [])
+    monkeypatch.setattr(s, "_block_pending", lambda e, by: calls.append(e))
+    assert s.set_active("new@x.com", False, "me@x.com")["active"] is False
+    assert calls == ["new@x.com"]
+
+
+def test_set_active_without_account_cannot_activate(monkeypatch):
+    import pytest
+    from app.services import user_service as s
+    monkeypatch.setattr(s, "_rows", lambda *a, **k: [])
+    with pytest.raises(ValueError):
+        s.set_active("new@x.com", True, "me@x.com")

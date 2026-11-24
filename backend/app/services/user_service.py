@@ -129,11 +129,24 @@ def set_permission_set(email: str, ps_id) -> dict:
     return {"email": e, "permission_set_id": ps_id}
 
 
+def _block_pending(e: str, by: str) -> None:
+    """로그인 전 사용자 차단: 대기·수락 초대 취소 + 이메일 규칙 끄기."""
+    with get_dash_engine().begin() as c:
+        c.execute(text("UPDATE auth_invitations SET status = 'revoked', revoked_by = :b, revoked_at = now() "
+                       "WHERE lower(email) = :e AND status IN ('pending', 'accepted')"), {"e": e, "b": by})
+        c.execute(text("UPDATE auth_access_rules SET active = FALSE "
+                       "WHERE kind = 'email' AND lower(value) = :e AND deleted_at IS NULL"), {"e": e})
+    permission_service.invalidate(e)
+
+
 def set_active(email: str, active: bool, by: str) -> dict:
     e = normalize_email(email)
     found = _rows("SELECT is_super FROM accounts WHERE email = :e AND deleted_at IS NULL", e=e)
     if not found:
-        raise ValueError("계정을 찾을 수 없습니다 (아직 로그인 전인 사용자)")
+        if active:
+            raise ValueError("아직 로그인 전인 사용자입니다 — 재초대로 다시 초대하세요")
+        _block_pending(e, by)
+        return {"email": e, "active": False}
     if not active and not can_deactivate(e, bool(found[0]["is_super"]), by):
         raise ValueError("마스터 계정과 본인 계정은 비활성화할 수 없습니다")
     with get_dash_engine().begin() as c:
