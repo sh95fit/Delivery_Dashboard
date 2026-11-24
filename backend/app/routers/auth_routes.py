@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from sqlalchemy import text
 
 from app.auth import oauth, set_session_cookie
@@ -25,10 +25,7 @@ async def auth_callback(request: Request):
         account_service.accept_on_login(email)
     # P11-c: 초대 수락 계정 + 접근 규칙(또는 시스템 마스터)만 로그인 허용
     if not email or not permission_service.can_login(email):
-        return JSONResponse(
-            status_code=403,
-            content={"detail": "초대받은 사용자만 이용할 수 있습니다 — 관리자에게 문의하세요"},
-        )
+        return RedirectResponse(url="/login?error=not_invited", status_code=302)
     with get_dash_engine().connect() as conn:
         conn.execute(text("UPDATE accounts SET last_login_at = NOW() WHERE email = :e"), {"e": email})
         conn.commit()
