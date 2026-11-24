@@ -41,6 +41,10 @@ def can_delete(email: str, is_super: bool, active: bool, me: str | None) -> bool
     return not active and can_deactivate(email, is_super, me)
 
 
+def can_clear_invite(status: str) -> bool:
+    return status in ("expired", "revoked", "none")
+
+
 def build_rows(rules: list[dict], accounts: list[dict], invites: list[dict],
                now: datetime, me: str | None) -> list[dict]:
     me_n = (me or "").strip().lower()
@@ -162,5 +166,18 @@ def delete_user(email: str, by: str) -> dict:
                        "WHERE kind = 'email' AND lower(value) = :e AND deleted_at IS NULL"), {"e": e})
         c.execute(text("UPDATE auth_invitations SET status = 'revoked', revoked_by = :b, revoked_at = now() "
                        "WHERE lower(email) = :e AND status = 'pending'"), {"e": e, "b": by})
+    permission_service.invalidate(e)
+    return {"email": e}
+
+
+def clear_invite(email: str) -> dict:
+    e = normalize_email(email)
+    row = next((u for u in list_users("") if u["email"] == e), None)
+    if not row or not can_clear_invite(row["status"]):
+        raise ValueError("만료·취소된 초대만 목록에서 삭제할 수 있습니다")
+    with get_dash_engine().begin() as c:
+        c.execute(text("DELETE FROM auth_invitations WHERE lower(email) = :e AND status <> 'accepted'"), {"e": e})
+        c.execute(text("UPDATE auth_access_rules SET deleted_at = now(), active = FALSE "
+                       "WHERE kind = 'email' AND lower(value) = :e AND deleted_at IS NULL"), {"e": e})
     permission_service.invalidate(e)
     return {"email": e}

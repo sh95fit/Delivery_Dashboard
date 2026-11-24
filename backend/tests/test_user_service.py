@@ -101,3 +101,8 @@ def test_can_delete_only_inactive_normal_user():
     assert can_delete("a@x.com", False, True, "me@x.com") is False   # 활성 계정
     assert can_delete("a@x.com", True, False, "me@x.com") is False   # 마스터
     assert can_delete("me@x.com", False, False, "me@x.com") is False # 본인
+    
+def test_can_clear_invite_only_closed():
+    from app.services.user_service import can_clear_invite
+    assert can_clear_invite("expired") and can_clear_invite("revoked") and can_clear_invite("none")
+    assert not can_clear_invite("invited") and not can_clear_invite("active") and not can_clear_invite("inactive")

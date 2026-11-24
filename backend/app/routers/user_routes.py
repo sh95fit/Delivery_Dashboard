@@ -62,3 +62,8 @@ def revoke_invite(email: str, me: str = Depends(require_super)):
 @router.delete("/users/{email}")
 def delete_user(email: str, me: str = Depends(require_super)):
     return guard(svc.delete_user, email, me, fail="삭제 실패")
+
+
+@router.delete("/users/{email}/invite-record")
+def clear_invite(email: str):
+    return guard(svc.clear_invite, email, fail="목록 삭제 실패")

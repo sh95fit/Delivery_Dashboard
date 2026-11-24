@@ -3,7 +3,7 @@ import Panel from "@/components/ui/Panel";
 import Chip, { type ChipTone } from "@/components/ui/Chip";
 import {
   type UserRow, type PermSetLite, type UserStatus, type InviteResult, listUsers, listPermSets, createUser,
-  revokeUserInvite, resendInvite, deleteUser, statusLabel, fmtDate,
+  revokeUserInvite, resendInvite, deleteUser, clearInvite, statusLabel, fmtDate,
 } from "@/api/users";
 import UserEditModal from "./UserEditModal";
 
@@ -120,7 +120,12 @@ export default function UsersTab() {
                           <button className="btn btn-sm btn-danger" disabled={busy}
                             onClick={() => confirm("초대를 취소할까요?") && run(() => revokeUserInvite(u.email))}>초대취소</button>
                         </>) : (
-                          <button className="btn btn-sm" disabled={busy} onClick={() => reinvite(u)}>재초대(7일)</button>
+                          <>
+                            <button className="btn btn-sm" disabled={busy} onClick={() => reinvite(u)}>재초대(7일)</button>
+                            <button className="btn btn-sm btn-danger" disabled={busy}
+                              onClick={() => confirm(`${u.email}을(를) 초대 목록에서 삭제할까요?`) &&
+                                run(() => clearInvite(u.email)).then((ok) => ok && setNote("초대 목록에서 삭제했습니다"))}>목록에서 삭제</button>
+                          </>
                         )}
                       </div>
                     </td>

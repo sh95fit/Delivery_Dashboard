@@ -71,3 +71,4 @@ export const setUserActive = (email: string, active: boolean) =>
 export const revokeUserInvite = (email: string) =>
   del<{ email: string }>(`/api/users/${enc(email)}/invitation`);
 export const deleteUser = (email: string) => del<{ email: string }>(`/api/users/${enc(email)}`);
+export const clearInvite = (email: string) => del<{ email: string }>(`/api/users/${enc(email)}/invite-record`);
