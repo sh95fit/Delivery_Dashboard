@@ -6,7 +6,7 @@ import {
   listRules, createRule, updateRule, deleteRule,
   type PermissionSet, type AccessRule, type CleanGrants, type RuleKind,
 } from "@/api/permissions";
-import AccountsTab from "./AccountsTab";
+import UsersTab from "./UsersTab";
 
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e));
 const cell: CSSProperties = { border: "1px solid #ddd", padding: "6px 8px", textAlign: "left" };
@@ -32,7 +32,7 @@ export default function PermissionsPage() {
       </div>
       {tab === "sets" && <SetsTab />}
       {tab === "rules" && <RulesTab />}
-      {tab === "accounts" && <AccountsTab />}
+      {tab === "accounts" && <UsersTab />}
     </div>
   );
 }
