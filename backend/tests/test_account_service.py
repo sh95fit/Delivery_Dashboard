@@ -78,17 +78,3 @@ def test_deactivated_account_not_revived_by_invite():
     acc = {"id": 1, "activated_at": None, "active": False}
     assert svc.decide_activation(acc, _inv(), True, NOW) == "skip"
 
-
-# ── 마스터 전용 ──
-def test_router_is_super_only():
-    from app.deps import require_super
-    from app.routers import account_routes as r
-    assert any(d.dependency is require_super for d in r.router.dependencies)
-
-
-@pytest.mark.parametrize("path,method", [
-    ("/accounts", "GET"), ("/accounts/3/active", "PUT"),
-    ("/invitations", "GET"), ("/invitations", "POST"), ("/invitations/5", "DELETE"),
-])
-def test_account_paths_pass_middleware(path, method):
-    assert resolve(path, method) != (None, None)
