@@ -78,9 +78,21 @@ def test_router_is_super_only():
 
 
 @pytest.mark.parametrize("path,method", [
-    ("/permission-sets", "POST"), ("/access-rules", "GET"),
-    ("/access-rules/3", "DELETE"), ("/api/access-rules", "PUT"),
+    ("/permission-sets", "POST"), ("/api/permission-sets/3", "PUT"),
+    ("/users", "GET"), ("/api/users", "POST"),
+    ("/api/users/kim@lunchlab.me/permission-set", "PUT"),
+    ("/api/users/kim@lunchlab.me/active", "PUT"),
+    ("/api/users/kim@lunchlab.me/invitation", "DELETE"),
 ])
 def test_admin_paths_pass_middleware(path, method):
     # 매칭 없음 = (None, None) = 기본 차단 → 마스터도 막힘. 규칙이 있어야 함
     assert resolve(path, method) != (None, None)
+
+
+@pytest.mark.parametrize("path,method", [
+    ("/access-rules", "GET"), ("/api/access-rules/3", "DELETE"),
+    ("/accounts", "GET"),
+])
+def test_removed_admin_paths_blocked(path, method):
+    # 3-4c/3-4d에서 제거한 주소는 규칙이 없어 기본 차단되어야 함
+    assert resolve(path, method) == (None, None)
