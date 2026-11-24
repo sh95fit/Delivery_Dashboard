@@ -2,47 +2,65 @@ from app import permissions
 from app.permissions import resolve
 from app.services import permission_service as ps
 
+OLD_KEYS = {"routes", "fuel", "worklog_close", "worklog_export", "incentive_rates"}
+
 
 def test_write_ops_map_to_page():
     assert resolve("/worklogs/day/2026-10-01", "PUT") == ("worklogs", "U")
-    assert resolve("/fuel/logs", "POST") == ("fuel", "C")
+    assert resolve("/fuel/logs", "POST") == ("vehicles", "C")          # 유류비 → 차량
     assert resolve("/workers/rates/5", "DELETE") == ("workers", "D")
 
 
-def test_special_pages():
-    assert resolve("/worklogs/close", "POST") == ("worklog_close", "C")
-    assert resolve("/worklogs/reopen", "POST") == ("worklog_close", "U")
-    assert resolve("/worklogs/export", "GET") == ("worklog_export", "C")
-    assert resolve("/incentive/rates", "POST") == ("incentive_rates", "C")
+def test_merged_pages():
+    # 근무 마감/재오픈 → 근무 U, 내보내기 → 근무 R
+    assert resolve("/worklogs/close", "POST") == ("worklogs", "U")
+    assert resolve("/worklogs/reopen", "POST") == ("worklogs", "U")
+    assert resolve("/worklogs/export", "GET") == ("worklogs", "R")
+    assert resolve("/worklogs/export/plan", "GET") == ("worklogs", "R")
+    # 인센티브 단가·품목·특수수당 → 인센티브 R/U
+    assert resolve("/incentive/rates", "GET") == ("incentive", "R")
+    assert resolve("/incentive/rates", "POST") == ("incentive", "U")
+    assert resolve("/incentive/extra-items/3", "DELETE") == ("incentive", "U")
+    assert resolve("/incentive/extras", "PUT") == ("incentive", "U")
+    # 경로 → 대시보드
+    assert resolve("/routes/2026-11-19/refresh", "POST") == ("dashboard", "C")
+    assert resolve("/routes/2026-11-19/7/preview", "POST") == ("dashboard", "R")
+    assert resolve("/routes/2026-11-19/preview-all", "POST") == ("dashboard", "R")
+    assert resolve("/routes/2026-11-19", "GET") == ("dashboard", "R")
+    # 유류비 → 차량
+    assert resolve("/fuel/export", "GET") == ("vehicles", "R")
+    assert resolve("/fuel/logs", "GET") == ("vehicles", "R")
 
 
 def test_login_only_and_unmapped():
-    assert resolve("/me", "GET") == (None, "R")              # 공용 진입점
-    assert resolve("/managers", "GET")[0] is None            # 공용 기초데이터
+    assert resolve("/me", "GET") == (None, "R")
+    assert resolve("/managers", "GET")[0] is None
     assert resolve("/vehicles", "GET")[0] is None
-    assert resolve("/admin", "GET") == (None, None)          # P11-c 허용목록 페이지 제거 → 기본 차단
-    assert resolve("/allowlist", "GET") == (None, None)      # P11-c 허용목록 API 제거 → 기본 차단
-    assert resolve("/internal-targets", "POST") == ("internal", "C")   # 직원식 = 별도 페이지
+    assert resolve("/admin", "GET") == (None, None)
+    assert resolve("/allowlist", "GET") == (None, None)
+    assert resolve("/internal-targets", "POST") == ("internal", "C")
     assert resolve("/internal-targets/search", "GET") == ("internal", "C")
-    assert resolve("/routes/2026-11-19/7/preview", "POST") == ("routes", "R")    # 미리보기 현행 유지
-    assert resolve("/routes/2026-11-19/preview-all", "POST") == ("routes", "R")
-    assert resolve("/logistics/export", "GET") == ("logistics", "C")  # 내보내기 현행(관리자) 유지
-    assert resolve("/fuel/export", "GET") == ("fuel", "R")            # 유류비 내보내기 현행(열람) 유지
+    assert resolve("/logistics/export", "GET") == ("logistics", "C")
     assert resolve("/workers/import/accounts", "GET") == ("workers", "C")
-    assert resolve("/worklogs/export/plan", "GET") == ("worklogs", "R")
-    assert resolve("/worklogs/export", "GET") == ("worklog_export", "C")
-    assert resolve("/nonsense", "GET") == (None, None)       # 기본 차단
+    assert resolve("/nonsense", "GET") == (None, None)
 
 
 def test_api_prefix_and_order():
-    assert resolve("/api/fuel/logs", "POST") == ("fuel", "C")
-    assert resolve("/worklogs/close/check", "GET") == ("worklogs", "R")   # 마감 조회는 근무 열람
+    assert resolve("/api/fuel/logs", "POST") == ("vehicles", "C")
+    assert resolve("/worklogs/close/check", "GET") == ("worklogs", "R")
+
+
+def test_rules_use_only_official_keys():
+    """RULES의 페이지키는 공식 키 목록 안에만 있어야 하고, 옛 키는 없어야 한다."""
+    pages = {page for _, _, page, _ in permissions.RULES if page}
+    assert pages <= set(permissions.PAGE_KEYS)
+    assert not (pages & OLD_KEYS)
+    assert not (set(permissions.PAGE_KEYS) & OLD_KEYS)
 
 
 # --- P11-c 판정 규칙 (DB 없이 판정 함수만 검증) ---
 
 def test_no_account_no_access(monkeypatch):
-    """규칙·계정이 없으면 공용 경로(/me)조차 차단 — '열람' 폴백 금지."""
     monkeypatch.setattr(ps, "is_super", lambda e: False)
     monkeypatch.setattr(ps, "perm_of", lambda e: None)
     assert permissions.allowed("x@a.com", None, "R") is False
@@ -59,8 +77,8 @@ def test_grants_crud(monkeypatch):
     grants = {"worklogs": {"R": True, "C": True, "U": False, "D": False}}
     monkeypatch.setattr(ps, "is_super", lambda e: False)
     monkeypatch.setattr(ps, "perm_of", lambda e: grants)
-    assert permissions.allowed("u@a.com", None, "R") is True           # 공용 경로
+    assert permissions.allowed("u@a.com", None, "R") is True
     assert permissions.allowed("u@a.com", "worklogs", "R") is True
     assert permissions.allowed("u@a.com", "worklogs", "C") is True
-    assert permissions.allowed("u@a.com", "worklogs", "U") is False
-    assert permissions.allowed("u@a.com", "fuel", "R") is False        # 권한셋에 없는 화면 = 차단
+    assert permissions.allowed("u@a.com", "worklogs", "U") is False   # 마감 불가
+    assert permissions.allowed("u@a.com", "vehicles", "R") is False

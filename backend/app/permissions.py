@@ -15,6 +15,15 @@ from starlette.responses import JSONResponse
 
 from app.auth import deserialize_session
 
+
+# 공식 페이지키 — 권한셋 grants·프론트 nav.ts·관리 API 검증이 모두 이 목록을 따른다
+PAGE_KEYS: tuple[str, ...] = (
+    "dashboard", "worklogs", "incentive", "logistics", "vehicles",
+    "workers", "managers", "internal",
+    "packing", "sales", "analysis", "simulation",   # 준비중 화면 (040)
+)
+
+
 # (메서드, 경로 정규식, 페이지키, 연산) — 위에서부터 첫 matching rule이 이긴다.
 # op None = 메서드에서 자동(POST=C PUT=U DELETE=D GET=R). page None = 로그인만 필요(공용).
 RULES: list[tuple[str, re.Pattern, str | None, str | None]] = [
@@ -22,41 +31,39 @@ RULES: list[tuple[str, re.Pattern, str | None, str | None]] = [
     ("GET",  re.compile(r"^/me$"), None, "R"),
     ("GET",  re.compile(r"^/managers/?$"), None, "R"),
     ("GET",  re.compile(r"^/vehicles/?$"), None, "R"),
-    # P11-b 계정·권한셋·초대 — require_super 전용 (미들웨어는 로그인만, 실제 권한은 deps.require_super)
-    ("ANY",  re.compile(r"^/(accounts|permission-sets|invitations)"), None, "R"),    
-    # 근무 기록 (내보내기·마감이 일반 근무 규칙보다 앞서야 함)
-    ("GET",  re.compile(r"^/worklogs/export/plan"), "worklogs", "R"),   # 내보내기 옵션 조회 — 현재 열람 유지
-    ("GET",  re.compile(r"^/worklogs/export$"), "worklog_export", "C"), # 실제 파일 생성 — 현재 관리자 전용 유지
-    ("POST", re.compile(r"^/worklogs/close$"), "worklog_close", "C"),
-    ("POST", re.compile(r"^/worklogs/reopen$"), "worklog_close", "U"),
+    # 계정·권한셋·규칙·초대 — 미들웨어는 로그인만, 실제 권한은 deps.require_super
+    ("ANY",  re.compile(r"^/(accounts|permission-sets|invitations)"), None, "R"),
+    # 근무 기록 — 마감/재오픈 = U, 내보내기 = R (일반 근무 규칙보다 앞서야 함)
+    ("GET",  re.compile(r"^/worklogs/export"), "worklogs", "R"),
+    ("POST", re.compile(r"^/worklogs/(close|reopen)$"), "worklogs", "U"),
     ("GET",  re.compile(r"^/worklogs"), "worklogs", "R"),
     ("ANY",  re.compile(r"^/worklogs"), "worklogs", None),
-    # 인센티브 (단가·품목·특수수당 관리는 별도 페이지)
-    ("GET",  re.compile(r"^/incentive/(rates|extra-items)"), "incentive_rates", "R"),
-    ("POST|PUT|DELETE", re.compile(r"^/incentive/(rates|extra-items|extras)"), "incentive_rates", None),
+    # 인센티브 — 단가·품목·특수수당 조회 = R, 변경 = U
+    ("GET",  re.compile(r"^/incentive/(rates|extra-items)"), "incentive", "R"),
+    ("POST|PUT|DELETE", re.compile(r"^/incentive/(rates|extra-items|extras)"), "incentive", "U"),
     ("GET",  re.compile(r"^/incentive"), "incentive", "R"),
     ("ANY",  re.compile(r"^/incentive"), "incentive", None),
-    # 물류비 (엑셀 내보내기는 현행대로 관리자 계열 — C)
+    # 물류비 (엑셀 내보내기는 관리자 계열 — C)
     ("GET",  re.compile(r"^/logistics/export"), "logistics", "C"),
     ("ANY",  re.compile(r"^/logistics"), "logistics", None),
-    # 차량·유류비 (유류비 엑셀 내보내기는 현재 열람 가능이라 R 유지)
-    ("GET",  re.compile(r"^/fuel/export"), "fuel", "R"),
+    # 차량·유류비 — 유류비는 차량 권한으로 통합 (내보내기 = R)
+    ("GET",  re.compile(r"^/fuel/export"), "vehicles", "R"),
     ("ANY",  re.compile(r"^/vehicles"), "vehicles", None),
-    ("ANY",  re.compile(r"^/fuel"), "fuel", None),
-    # 인력·담당자 (엑셀 가져오기 계열은 현재 관리자 전용 유지)
+    ("ANY",  re.compile(r"^/fuel"), "vehicles", None),
+    # 인력·담당자 (엑셀 가져오기는 C)
     ("ANY",  re.compile(r"^/workers/import"), "workers", "C"),
     ("ANY",  re.compile(r"^/workers"), "workers", None),
     ("ANY",  re.compile(r"^/managers"), "managers", None),
     # 대시보드 부속 (관제 제외·현황·매출)
     ("ANY",  re.compile(r"^/control-excludes"), "dashboard", None),
     ("GET",  re.compile(r"^/(status|deliveries|revenue)"), "dashboard", "R"),
-    # 직원식 — 별도 페이지키 (사용자 확정). 검색은 현재 관리자 전용 유지
+    # 직원식 — 검색은 C
     ("GET",  re.compile(r"^/internal-targets/search"), "internal", "C"),
     ("ANY",  re.compile(r"^/internal-targets"), "internal", None),
-    # 경로 — 조회·미리보기는 현행대로 열람(대시보드 계산 버튼이 비관리자에게도 열려 있었음), 강제 갱신만 C
-    ("POST", re.compile(r"^/routes/[^/]+/refresh"), "routes", "C"),
-    ("POST", re.compile(r"^/routes/.*preview"), "routes", "R"),   # {일}/preview-all · {일}/{매니저}/preview 전부
-    ("ANY",  re.compile(r"^/routes"), "routes", None),
+    # 경로 → 대시보드 권한으로 통합 — 미리보기 = R, 강제 갱신 = C
+    ("POST", re.compile(r"^/routes/[^/]+/refresh"), "dashboard", "C"),
+    ("POST", re.compile(r"^/routes/.*preview"), "dashboard", "R"),
+    ("ANY",  re.compile(r"^/routes"), "dashboard", None),
 ]
 EXEMPT = re.compile(r"^/(health|health/db|auth/login|auth/callback|auth/logout|docs|openapi.json|redoc)(/|$)")
 OP_OF = {"POST": "C", "PUT": "U", "DELETE": "D", "PATCH": "U", "GET": "R"}
