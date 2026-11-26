@@ -2,7 +2,7 @@
 
 판정 순서
 1) is_super: accounts.is_super (DB) — ADMIN_EMAILS(환경변수)는 비상용 폴백
-2) perm_of: 활성 계정 + 초대 수락(activated_at) + 접근 규칙(이메일 > 도메인) → 권한셋 grants
+2) perm_of: 활성 계정 + 초대 수락(activated_at) + 이메일 접근 규칙 → 권한셋 grants (도메인 규칙 없음)
 3) can_login: 마스터이거나 perm_of가 있는 사용자만 로그인 허용
 - 60초 캐시 (권한 변경 시 invalidate 호출로 즉시 반영)
 - 테이블 오류 시 예외를 삼키고 '차단'(안전한 기본값)

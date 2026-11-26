@@ -1,4 +1,5 @@
-"""P11 Step3-4 사용자 API (규칙+계정+초대 통합) — 마스터 전용."""
+"""P11 Step3-4 사용자 API (규칙+계정+초대 통합) — 마스터 전용.
+Step3-5: 초대 메일 발송(최초·재발송)은 서비스에서 검증·제한(429) 후 발송 결과를 기록한다."""
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
@@ -7,6 +8,8 @@ from app.services import mail_service
 from app.services import user_service as svc
 
 router = APIRouter(tags=["users"], dependencies=[Depends(require_super)])
+
+_NO_MAIL = "메일 설정(GMAIL_USER/GMAIL_APP_PASSWORD)이 없습니다"
 
 
 class UserBody(BaseModel):
@@ -24,6 +27,12 @@ class ActiveBody(BaseModel):
     active: bool
 
 
+def _send(r: dict) -> dict:
+    mail = mail_service.send_invite(r["email"], r["days"])
+    svc.finish_send(r["send_id"], mail)
+    return {"email": r["email"], **mail, "counted": True}
+
+
 @router.get("/users")
 def list_users(me: str = Depends(require_super)):
     return guard(svc.list_users, me, fail="사용자 조회 실패")
@@ -31,17 +40,17 @@ def list_users(me: str = Depends(require_super)):
 
 @router.post("/users")
 def create_user(b: UserBody, me: str = Depends(require_super)):
-    r = guard(svc.create_user, b.email, b.permission_set_id, b.days, b.memo, me, fail="초대 실패")
-    return {**r, **mail_service.send_invite(r["email"], b.days or 7)}
-
-
-class ResendBody(BaseModel):
-    days: int = 7
+    ready = svc.mail_ready()      # 메일 설정이 없으면 초대만 저장하고 발송 횟수는 세지 않음
+    r = guard(svc.create_user, b.email, b.permission_set_id, b.days, b.memo, me, ready, fail="초대 실패")
+    if not ready:
+        return {"email": r["email"], "mail_sent": False, "mail_error": _NO_MAIL, "counted": False}
+    return _send(r)
 
 
 @router.post("/users/{email}/invitation/resend")
-def resend_invite(email: str, b: ResendBody):
-    return mail_service.send_invite(email.strip().lower(), b.days)
+def resend_invite(email: str, me: str = Depends(require_super)):
+    # 유효기간은 클라이언트 값 대신 서버의 expires_at으로 계산 (만료일은 바꾸지 않음)
+    return _send(guard(svc.prepare_resend, email, me, fail="재발송 실패"))
 
 
 @router.put("/users/{email}/permission-set")

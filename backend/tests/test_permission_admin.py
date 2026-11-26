@@ -1,4 +1,4 @@
-"""P11 Step3-2 권한셋·접근규칙 관리 — 순수 로직 + 마스터 전용 검증."""
+"""P11 Step3-2 권한셋 관리 — 순수 로직 + 마스터 전용 검증. (접근 규칙은 이메일 전용, user_service에서 관리)"""
 import pytest
 from fastapi import HTTPException
 
@@ -34,31 +34,11 @@ def test_set_name_required():
         svc.normalize_name("   ")
 
 
-# ── 접근규칙 정규화 ──
-def test_rule_email_lowercased():
-    assert svc.normalize_rule("email", " Kim@LunchLab.me ") == ("email", "kim@lunchlab.me")
-
-
-def test_rule_domain_strips_at():
-    assert svc.normalize_rule("domain", "@LunchLab.me") == ("domain", "lunchlab.me")
-
-
-@pytest.mark.parametrize("kind,value", [
-    ("email", "no-at-sign"), ("email", "a@b"), ("domain", "a@b.com"),
-    ("domain", "nodot"), ("phone", "010"), ("email", ""),
-])
-def test_rule_invalid(kind, value):
-    with pytest.raises(ValueError):
-        svc.normalize_rule(kind, value)
-
-
-# ── 이메일 > 도메인 우선 (permission_service SQL과 같은 규칙) ──
-def test_pick_rule_email_beats_domain():
-    rules = [{"kind": "domain", "value": "lunchlab.me", "permission_set_id": 1},
-             {"kind": "email", "value": "kim@lunchlab.me", "permission_set_id": 2}]
-    assert svc.pick_rule(rules, "Kim@lunchlab.me")["permission_set_id"] == 2
-    assert svc.pick_rule(rules, "lee@lunchlab.me")["permission_set_id"] == 1
-    assert svc.pick_rule(rules, "x@other.com") is None
+# ── 규칙 CRUD·도메인 지원 제거 확인 ──
+def test_rule_crud_removed():
+    for name in ("normalize_rule", "pick_rule", "list_rules", "create_rule",
+                 "update_rule", "delete_rule", "_DOMAIN"):
+        assert not hasattr(svc, name)
 
 
 # ── 마스터 전용 ──

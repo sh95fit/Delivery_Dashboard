@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Panel from "@/components/ui/Panel";
 import Chip, { type ChipTone } from "@/components/ui/Chip";
+import { ApiError } from "@/api/client";
 import {
   type UserRow, type PermSetLite, type UserStatus, type InviteResult, listUsers, listPermSets, createUser,
   revokeUserInvite, resendInvite, deleteUser, statusLabel, fmtDate,
@@ -24,6 +25,27 @@ export default function UsersTab() {
   const [filter, setFilter] = useState<Filter>("active");
   const [editing, setEditing] = useState<UserRow | null>(null);
 
+  // [Step3-5] 이메일별 다음 발송 가능 시각(ms). 최종 판단은 서버(429), 화면은 안내·중복 클릭 방지용
+  const [until, setUntil] = useState<Record<string, number>>({});
+  const [now, setNow] = useState(() => Date.now());
+  const inflight = useRef<Set<string>>(new Set());
+  const cooling = Object.values(until).some((t) => t > now);
+  useEffect(() => {
+    if (!cooling) return;
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [cooling]);
+  const left = (e: string) => Math.max(0, Math.ceil(((until[e.toLowerCase()] ?? 0) - now) / 1000));
+  const leftText = (s: number) => (s >= 60 ? `${Math.ceil(s / 60)}분` : `${s}초`);
+  const cool = (e: string, sec: number) => {
+    const t = Date.now();
+    setNow(t);
+    setUntil((m) => ({ ...m, [e.toLowerCase()]: t + sec * 1000 }));
+  };
+  const onLimit = (e: string, x: unknown) => {
+    if (x instanceof ApiError && x.status === 429 && x.retryAfter) cool(e, x.retryAfter);
+  };
+
   const load = async () => {
     try {
       const [u, s] = await Promise.all([listUsers(), listPermSets()]);
@@ -32,10 +54,10 @@ export default function UsersTab() {
   };
   useEffect(() => { load(); }, []);
 
-  const run = async (fn: () => Promise<unknown>) => {
+  const run = async (fn: () => Promise<unknown>, key?: string) => {
     setBusy(true); setErr("");
     try { await fn(); await load(); return true; }
-    catch (e) { setErr((e as Error).message); return false; }
+    catch (e) { if (key) onLimit(key, e); setErr((e as Error).message); return false; }
     finally { setBusy(false); }
   };
 
@@ -47,32 +69,42 @@ export default function UsersTab() {
   };
   const mailNote = (to: string, r: InviteResult) =>
     r.mail_sent ? setNote(`${to} 주소로 초대 메일을 보냈습니다`)
-      : setErr(`초대는 저장됐지만 메일을 보내지 못했습니다: ${r.mail_error ?? ""} (메일 다시 보내기를 눌러 주세요)`);
+      : setErr(`초대는 저장됐지만 메일을 보내지 못했습니다: ${r.mail_error ?? ""} (1분 뒤 '메일 다시 보내기'를 눌러 주세요)`);
 
   const invite = async () => {
     const to = email.trim();
+    const key = to.toLowerCase();
     setNote("");
     if (!to) return setErr("이메일을 입력하세요");
     if (psId === "") return setErr("권한셋을 선택하세요");
     if (days < 1 || days > 30) return setErr("유효기간은 1~30일입니다");
+    if (inflight.current.has(key)) return;
+    if (left(key) > 0) return setErr(`${leftText(left(key))} 후에 다시 보낼 수 있습니다`);
+    inflight.current.add(key);
     const h: { r?: InviteResult } = {};
-    const ok = await run(async () => { h.r = await createUser({ email: to, permission_set_id: psId, days, memo: memo.trim() || null }); });
-    if (ok && h.r) { mailNote(to, h.r); setEmail(""); setMemo(""); setDays(7); }
+    const ok = await run(async () => { h.r = await createUser({ email: to, permission_set_id: psId, days, memo: memo.trim() || null }); }, key)
+      .finally(() => inflight.current.delete(key));
+    if (ok && h.r) { mailNote(to, h.r); if (h.r.counted) cool(key, 60); setEmail(""); setMemo(""); setDays(7); }
   };
 
   const reinvite = async (u: UserRow) => {
     setNote("");
     if (!u.permission_set_id) return setErr("권한셋 정보가 없어 재초대할 수 없습니다");
+    if (inflight.current.has(u.email) || left(u.email) > 0) return;
+    inflight.current.add(u.email);
     const h: { r?: InviteResult } = {};
-    const ok = await run(async () => { h.r = await createUser({ email: u.email, permission_set_id: u.permission_set_id!, days: 7, memo: u.memo }); });
-    if (ok && h.r) mailNote(u.email, h.r);
+    const ok = await run(async () => { h.r = await createUser({ email: u.email, permission_set_id: u.permission_set_id!, days: 7, memo: u.memo }); }, u.email)
+      .finally(() => inflight.current.delete(u.email));
+    if (ok && h.r) { mailNote(u.email, h.r); if (h.r.counted) cool(u.email, 60); }
   };
 
   const resend = async (u: UserRow) => {
+    if (inflight.current.has(u.email) || left(u.email) > 0) return;   // 같은 순간의 더블클릭 방지
+    inflight.current.add(u.email);
     setBusy(true); setErr(""); setNote("");
-    try { mailNote(u.email, await resendInvite(u.email, u.days_left ?? 7)); }
-    catch (e) { setErr((e as Error).message); }
-    finally { setBusy(false); }
+    try { const r = await resendInvite(u.email); mailNote(u.email, r); if (r.counted ?? true) cool(u.email, 60); }
+    catch (e) { onLimit(u.email, e); setErr((e as Error).message); }
+    finally { inflight.current.delete(u.email); setBusy(false); }
   };
 
   const invites = rows.filter((u) => u.status === "invited" || u.status === "expired");
@@ -81,11 +113,11 @@ export default function UsersTab() {
   const shown = filter === "all" ? members : members.filter((u) => u.status === filter);
   const fBtn = (k: Filter, label: string) => (
     <button className={`tab${filter === k ? " active" : ""}`} onClick={() => setFilter(k)}>{label}</button>
-  );  
+  );
 
   return (
     <>
-      {err && <p className="error-box mt">{err}</p>}  
+      {err && <p className="error-box mt">{err}</p>}
 
       <Panel title="사용자 추가" desc="초대 메일이 자동으로 발송됩니다. 받은 사람이 구글 로그인하면 사용자 목록으로 옮겨집니다.">
         <div className="form-row">
@@ -116,8 +148,10 @@ export default function UsersTab() {
                     <td>
                       <div className="toolbar">
                         {u.status === "invited"
-                          ? <button className="btn btn-sm" disabled={busy} onClick={() => resend(u)}>메일 다시 보내기</button>
-                          : <button className="btn btn-sm" disabled={busy} onClick={() => reinvite(u)}>재초대(7일)</button>}
+                          ? <button className="btn btn-sm" disabled={busy || left(u.email) > 0} onClick={() => resend(u)}>
+                              {left(u.email) > 0 ? `다시 보내기 (${leftText(left(u.email))} 후)` : "메일 다시 보내기"}</button>
+                          : <button className="btn btn-sm" disabled={busy || left(u.email) > 0} onClick={() => reinvite(u)}>
+                              {left(u.email) > 0 ? `재초대 (${leftText(left(u.email))} 후)` : "재초대(7일)"}</button>}
                         <button className="btn btn-sm btn-danger" disabled={busy}
                           onClick={() => confirm(`${u.email} 초대를 취소할까요? 목록에서 사라집니다.`) &&
                             run(() => revokeUserInvite(u.email)).then((ok) => ok && setNote("초대를 취소했습니다"))}>초대취소</button>

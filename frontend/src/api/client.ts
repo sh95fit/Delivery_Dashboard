@@ -3,6 +3,7 @@ export class ApiError extends Error {
     public status: number,
     public code: string,
     message: string,
+    public retryAfter?: number,
   ) {
     super(message);
   }
@@ -26,152 +27,71 @@ async function readErrorBody(res: Response): Promise<string> {
   }
 }
 
-export async function http<T>(path: string): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(path, { credentials: "same-origin" });
-  } catch {
-    throw new ApiError(
-      0,
-      "network_error",
-      "네트워크 연결에 실패했습니다. 잠시 후 다시 시도하세요.",
-    );
-  }
+const NET_MSG = "네트워크 연결에 실패했습니다. 잠시 후 다시 시도하세요.";
 
+async function send(path: string, init: RequestInit = {}): Promise<Response> {
+  try {
+    return await fetch(path, { credentials: "same-origin", ...init });
+  } catch {
+    throw new ApiError(0, "network_error", NET_MSG);
+  }
+}
+
+/** 공통 오류 처리: 401 → 로그인 이동, 403·429 → 서버 메시지, 404 → 고정 문구(선택) */
+async function ensureOk(res: Response, fallback: string, notFound = false): Promise<void> {
   if (res.status === 401) {
     window.location.href = "/login";
     throw new ApiError(401, "unauthorized", "로그인이 필요합니다.");
   }
-
   if (res.status === 403) {
-    throw new ApiError(403, "forbidden", "이 기능에 접근할 권한이 없습니다.");
+    const m = await readErrorBody(res);
+    throw new ApiError(403, "forbidden", m && m !== res.statusText ? m : "이 기능에 접근할 권한이 없습니다.");
   }
-
-  if (res.status === 404) {
+  if (res.status === 429) {
+    const ra = Number(res.headers.get("Retry-After"));
+    const m = await readErrorBody(res);
+    throw new ApiError(429, "rate_limited", m || "요청이 너무 잦습니다. 잠시 후 다시 시도하세요.",
+      Number.isFinite(ra) && ra > 0 ? ra : undefined);
+  }
+  if (notFound && res.status === 404) {
     throw new ApiError(404, "not_found", "요청한 데이터가 없습니다.");
   }
-
   if (!res.ok) {
-    const body = await readErrorBody(res);
-    throw new ApiError(
-      res.status,
-      "server_error",
-      body || "서버 오류가 발생했습니다.",
-    );
+    const b = await readErrorBody(res);
+    throw new ApiError(res.status, "server_error", b || fallback);
   }
+}
 
+const JSON_HEADERS = { "Content-Type": "application/json" };
+
+export async function http<T>(path: string): Promise<T> {
+  const res = await send(path);
+  await ensureOk(res, "서버 오류가 발생했습니다.", true);
   return res.json() as Promise<T>;
 }
 
 export async function post<T>(path: string, body: unknown): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(path, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  } catch {
-    throw new ApiError(
-      0,
-      "network_error",
-      "네트워크 연결에 실패했습니다. 잠시 후 다시 시도하세요.",
-    );
-  }
-
-  if (res.status === 401) {
-    window.location.href = "/login";
-    throw new ApiError(401, "unauthorized", "로그인이 필요합니다.");
-  }
-
-  if (res.status === 403) {
-    throw new ApiError(403, "forbidden", "이 기능에 접근할 권한이 없습니다.");
-  }
-
-  if (res.status === 404) {
-    throw new ApiError(404, "not_found", "요청한 데이터가 없습니다.");
-  }
-
-  if (!res.ok) {
-    const body = await readErrorBody(res);
-    throw new ApiError(
-      res.status,
-      "server_error",
-      body || "요청 처리 중 오류가 발생했습니다.",
-    );
-  }
-
+  const res = await send(path, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body) });
+  await ensureOk(res, "요청 처리 중 오류가 발생했습니다.", true);
   return res.json() as Promise<T>;
 }
 
 export async function del<T>(path: string): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(path, { method: "DELETE", credentials: "same-origin" });
-  } catch {
-    throw new ApiError(0, "network_error", "네트워크 연결에 실패했습니다. 잠시 후 다시 시도하세요.");
-  }
-
-  if (res.status === 401) {
-    window.location.href = "/login";
-    throw new ApiError(401, "unauthorized", "로그인이 필요합니다.");
-  }
-  if (res.status === 403) {
-    throw new ApiError(403, "forbidden", "이 기능에 접근할 권한이 없습니다.");
-  }
-  if (res.status === 404) {
-    throw new ApiError(404, "not_found", "요청한 데이터가 없습니다.");
-  }
-  if (!res.ok) {
-    const body = await readErrorBody(res);
-    throw new ApiError(res.status, "server_error", body || "요청 처리 중 오류가 발생했습니다.");
-  }
+  const res = await send(path, { method: "DELETE" });
+  await ensureOk(res, "요청 처리 중 오류가 발생했습니다.", true);
   return res.json() as Promise<T>;
 }
 
 export async function put<T>(path: string, body: unknown): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(path, {
-      method: "PUT",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  } catch {
-    throw new ApiError(0, "network_error", "네트워크 연결에 실패했습니다. 잠시 후 다시 시도하세요.");
-  }
-  if (res.status === 401) {
-    window.location.href = "/login";
-    throw new ApiError(401, "unauthorized", "로그인이 필요합니다.");
-  }
-  if (res.status === 403) throw new ApiError(403, "forbidden", "이 기능에 접근할 권한이 없습니다.");
-  if (!res.ok) {
-    const b = await readErrorBody(res);
-    throw new ApiError(res.status, "server_error", b || "요청 처리 중 오류가 발생했습니다.");
-  }
+  const res = await send(path, { method: "PUT", headers: JSON_HEADERS, body: JSON.stringify(body) });
+  await ensureOk(res, "요청 처리 중 오류가 발생했습니다.");
   return res.json() as Promise<T>;
 }
 
-
 /** 파일 내려받기 (모든 엑셀 내보내기 공통) → 저장된 파일명 */
 export async function download(path: string, fallback: string): Promise<string> {
-  let res: Response;
-  try {
-    res = await fetch(path, { credentials: "same-origin" });
-  } catch {
-    throw new ApiError(0, "network_error", "네트워크 연결에 실패했습니다. 잠시 후 다시 시도하세요.");
-  }
-  if (res.status === 401) {
-    window.location.href = "/login";
-    throw new ApiError(401, "unauthorized", "로그인이 필요합니다.");
-  }
-  if (res.status === 403) throw new ApiError(403, "forbidden", "이 기능에 접근할 권한이 없습니다.");
-  if (!res.ok) {
-    const b = await readErrorBody(res);
-    throw new ApiError(res.status, "server_error", b || "파일을 만들지 못했습니다.");
-  }
+  const res = await send(path);
+  await ensureOk(res, "파일을 만들지 못했습니다.");
   const blob = await res.blob();
   const m = /filename\*=UTF-8''([^;]+)/i.exec(res.headers.get("Content-Disposition") ?? "");
   const name = m ? decodeURIComponent(m[1]) : fallback;

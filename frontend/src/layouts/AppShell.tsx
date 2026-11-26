@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
 import { getMe } from "@/api/auth";
+import { ApiError } from "@/api/client";
 import type { MeResp } from "@/api/types";
 import Spinner from "@/components/ui/Spinner";
 import Icon from "./Icon";
@@ -32,7 +33,7 @@ function useIsMobile() {
 
 export default function AppShell() {
   const [me, setMe] = useState<MeResp | null>(null);
-  const [auth, setAuth] = useState<"checking" | "ok" | "no">("checking");
+  const [auth, setAuth] = useState<"checking" | "ok" | "no" | "forbidden">("checking");
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [mobileOpen, setMobileOpen] = useState(false);
   const isMobile = useIsMobile();
@@ -44,7 +45,7 @@ export default function AppShell() {
         setMe(m);
         setAuth("ok");
       })
-      .catch(() => setAuth("no"));
+      .catch((e) => setAuth(e instanceof ApiError && e.status === 403 ? "forbidden" : "no"));
   }, []);
 
   useEffect(() => setMobileOpen(false), [pathname]);
@@ -62,6 +63,7 @@ export default function AppShell() {
 
   if (auth === "checking") return <Spinner label="로그인 상태 확인 중…" />;
   if (auth === "no") return <Navigate to="/login" replace />;
+  if (auth === "forbidden") return <Navigate to="/login?error=not_invited" replace />;
 
   const visibleNav = NAV.map((sec) => ({
     ...sec,
